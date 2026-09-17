@@ -1,10 +1,13 @@
 import { useId, useLayoutEffect, useRef, useState } from 'react'
 import type { ConversationController } from '../conversation/useConversation'
+import { Icon } from '../../components/ui/Icon'
 
 export function ComposerAttachments({
-  conversation: c
+  conversation: c,
+  previewTriggerRef
 }: {
   conversation: ConversationController
+  previewTriggerRef: React.RefObject<HTMLButtonElement | null>
 }): React.JSX.Element {
   const id = useId()
   const trigger = useRef<HTMLButtonElement>(null)
@@ -13,6 +16,11 @@ export function ComposerAttachments({
   const selection = c.contextSelection
   const count = selection?.files.length ?? 0
   const busy = c.operation === 'selecting'
+  const [practicePath, setPracticePath] = useState('')
+  const [proposedText, setProposedText] = useState('')
+  const activePracticePath = selection?.files.some((file) => file.path === practicePath)
+    ? practicePath
+    : (selection?.files[0]?.path ?? '')
 
   useLayoutEffect(() => {
     if (!open) return
@@ -51,7 +59,10 @@ export function ComposerAttachments({
   return (
     <div className="composer-attachments">
       <button
-        ref={trigger}
+        ref={(element) => {
+          trigger.current = element
+          previewTriggerRef.current = element
+        }}
         type="button"
         className="attachment-add"
         popoverTarget={id}
@@ -148,6 +159,65 @@ export function ComposerAttachments({
             模拟模式固定查询时间或搜索
             greet，不理解任意问题。流式调试不使用附件，切换时会清除当前附件授权。
           </p>
+          <section className="change-preview-practice" aria-labelledby={`${id}-preview-title`}>
+            <div className="change-preview-practice-heading">
+              <Icon name="code" size={15} />
+              <strong id={`${id}-preview-title`}>修改预览练习</strong>
+            </div>
+            {!selection ? (
+              <p className="change-preview-practice-empty">先添加文本或代码文件。</p>
+            ) : (
+              <>
+                <label>
+                  文件别名
+                  <select
+                    value={activePracticePath}
+                    disabled={!c.canEdit || busy || c.changePreview.state.status === 'loading'}
+                    onChange={(event) => setPracticePath(event.target.value)}
+                  >
+                    {selection.files.map((file) => (
+                      <option value={file.path} key={file.path}>
+                        {file.path}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label>
+                  候选内容
+                  <textarea
+                    value={proposedText}
+                    disabled={!c.canEdit || busy || c.changePreview.state.status === 'loading'}
+                    rows={5}
+                    spellCheck={false}
+                    placeholder="输入修改后的完整文件内容"
+                    onChange={(event) => setProposedText(event.currentTarget.value)}
+                  />
+                </label>
+                <button
+                  type="button"
+                  className="change-preview-practice-submit"
+                  disabled={
+                    !c.canEdit ||
+                    busy ||
+                    !activePracticePath ||
+                    c.changePreview.state.status === 'loading'
+                  }
+                  onClick={() => {
+                    void (async () => {
+                      const accepted = await c.changePreview.requestPreview(
+                        activePracticePath,
+                        proposedText
+                      )
+                      if (accepted) close()
+                    })()
+                  }}
+                >
+                  <Icon name="code" size={14} />
+                  预览修改
+                </button>
+              </>
+            )}
+          </section>
         </details>
       </div>
     </div>

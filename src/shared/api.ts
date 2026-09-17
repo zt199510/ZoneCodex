@@ -5,6 +5,7 @@ import type { TerminalSize, TerminalResult, TerminalEvent } from './terminal'
 import type { AgentMode, AgentResult, AgentProgress } from './agent'
 import type { ProtocolItem } from './agent-history'
 import type { AgentContext, ProjectSelectionResult } from './project'
+import type { PreviewChangeRequest, PreviewChangeResult } from './change-preview'
 
 // 模型消息类型
 export type ModelMessage = {
@@ -70,6 +71,8 @@ export interface AppAPI {
     snapshotId: string,
     path: string
   ) => Promise<ProjectSelectionResult>
+  // 从当前已授权快照生成只读修改预览
+  previewChange: (request: PreviewChangeRequest) => Promise<PreviewChangeResult>
   // 撤销当前窗口的指定项目快照授权
   revokeProjectFiles: (snapshotId: string) => Promise<boolean>
   //  取消练习工具任务

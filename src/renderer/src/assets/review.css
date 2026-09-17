@@ -1,0 +1,235 @@
+.change-preview-panel {
+  width: min(100%, var(--content-width));
+  max-height: min(42vh, 360px);
+  min-height: 0;
+  flex: 0 1 min(42vh, 360px);
+  margin: 0 auto;
+  padding: 0 24px 12px;
+}
+
+.change-preview-shell {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  max-height: 100%;
+  overflow: hidden;
+  border: 1px solid #dfe4dc;
+  border-radius: 11px;
+  background: #fbfcfa;
+  box-shadow: 0 3px 14px #232a2408;
+}
+
+.change-preview-header {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 12px;
+  flex-shrink: 0;
+  padding: 10px 12px 9px 14px;
+  border-bottom: 1px solid #e8ebe5;
+}
+
+.change-preview-heading {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-width: 0;
+}
+
+.change-preview-heading > svg {
+  flex-shrink: 0;
+  color: var(--accent);
+}
+
+.change-preview-heading h2 {
+  overflow: hidden;
+  font-size: 12px;
+  font-weight: 550;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.change-preview-heading p {
+  max-width: 330px;
+  overflow: hidden;
+  color: var(--soft-text);
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.change-preview-meta {
+  display: flex;
+  align-items: flex-end;
+  flex-direction: column;
+  gap: 2px;
+  color: var(--soft-text);
+  font-size: 10px;
+  white-space: nowrap;
+}
+
+.change-preview-readonly {
+  color: #66806b;
+}
+
+.change-preview-header .icon-button {
+  width: 27px;
+  height: 27px;
+}
+
+.change-preview-content {
+  min-height: 0;
+  flex: 1 1 auto;
+  overflow: auto;
+  overscroll-behavior: contain;
+  background: #fff;
+}
+
+.diff-table {
+  min-width: 430px;
+  padding: 7px 0;
+  font-family: 'Cascadia Code', 'Consolas', 'Microsoft YaHei UI', monospace;
+  font-size: 12px;
+  line-height: 1.65;
+}
+
+.diff-row {
+  display: grid;
+  grid-template-columns: 42px 42px 38px minmax(0, 1fr);
+  align-items: stretch;
+  min-height: 24px;
+}
+
+.diff-row > span {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  padding: 2px 7px;
+  color: #a1a59d;
+  user-select: none;
+}
+
+.diff-row-header {
+  min-height: 22px;
+  border-bottom: 1px solid #eef0ec;
+  color: var(--soft-text);
+  font-family: 'Segoe UI', 'Microsoft YaHei UI', sans-serif;
+  font-size: 10px;
+}
+
+.diff-row-header > span {
+  justify-content: flex-end;
+  padding-top: 0;
+  padding-bottom: 4px;
+  color: var(--soft-text);
+}
+
+.diff-row-header > span:last-child {
+  justify-content: flex-start;
+  padding-left: 10px;
+}
+
+.diff-row-remove {
+  background: #fff2ef;
+}
+
+.diff-row-add {
+  background: #eff8ef;
+}
+
+.diff-row-remove .diff-marker,
+.diff-row-add .diff-marker {
+  justify-content: center;
+  padding-right: 0;
+  padding-left: 0;
+  font-weight: 700;
+}
+
+.diff-row-remove .diff-marker {
+  color: #b4543d;
+}
+
+.diff-row-add .diff-marker {
+  color: #4d8056;
+}
+
+.diff-source {
+  min-width: 0;
+  margin: 0;
+  padding: 2px 12px 2px 10px;
+  overflow: visible;
+  color: var(--text);
+  font: inherit;
+  white-space: pre;
+}
+
+.change-preview-no-change,
+.change-preview-status {
+  padding: 26px 18px;
+  color: var(--muted);
+  font-size: 12px;
+  text-align: center;
+}
+
+.change-preview-error {
+  color: #9d4b32;
+}
+
+.change-preview-footer {
+  display: flex;
+  justify-content: flex-end;
+  flex-shrink: 0;
+  padding: 8px 12px;
+  border-top: 1px solid #e8ebe5;
+}
+
+.change-preview-footer .quiet-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 9px;
+}
+
+@media (max-width: 760px) {
+  .change-preview-panel {
+    padding-right: 16px;
+    padding-bottom: 8px;
+    padding-left: 16px;
+  }
+
+  .change-preview-header {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .change-preview-meta {
+    grid-column: 1 / 2;
+    grid-row: 2;
+    align-items: flex-start;
+    flex-direction: row;
+    gap: 8px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .change-preview-header .icon-button {
+    grid-column: 2;
+    grid-row: 1 / 3;
+  }
+}
+
+@media (max-height: 640px) {
+  .change-preview-panel {
+    max-height: min(38vh, 250px);
+    flex-basis: min(38vh, 250px);
+  }
+
+  .change-preview-header {
+    padding-top: 7px;
+    padding-bottom: 6px;
+  }
+
+  .change-preview-footer {
+    padding-top: 5px;
+    padding-bottom: 5px;
+  }
+}

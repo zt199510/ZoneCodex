@@ -8,6 +8,7 @@ import { MessageList } from './MessageList'
 import { CloseGuard } from '../conversation/CloseGuard'
 import { ComposerAttachments } from '../project/ComposerAttachments'
 import { AttachmentCards } from '../project/AttachmentCards'
+import { ChangePreviewPanel } from '../review/ChangePreviewPanel'
 
 export function ChatWorkspace({
   conversation
@@ -17,6 +18,7 @@ export function ChatWorkspace({
   const [draft, setDraft] = useState('')
   const [confirmClear, setConfirmClear] = useState(false)
   const scrollArea = useRef<HTMLDivElement>(null)
+  const previewTriggerRef = useRef<HTMLButtonElement>(null)
   const followBottom = useRef(true)
   const { storage, messages, operation } = conversation
   const errors = [storage.error, conversation.chatError].filter(Boolean)
@@ -86,6 +88,12 @@ export function ChatWorkspace({
           <MessageList messages={messages} toolActivity={conversation.toolActivity} />
         )}
       </div>
+      <ChangePreviewPanel
+        state={conversation.changePreview.state}
+        snapshotCreatedAt={conversation.contextSelection?.createdAt ?? null}
+        onDiscard={conversation.changePreview.discard}
+        returnFocusRef={previewTriggerRef}
+      />
       <div className="composer-region">
         <ChatInput
           value={draft}
@@ -97,7 +105,12 @@ export function ChatWorkspace({
           disabled={!conversation.canSend}
           isSending={operation === 'generating'}
           maxLength={conversation.engine === 'stream' ? 4000 : 2000}
-          tools={<ComposerAttachments conversation={conversation} />}
+          tools={
+            <ComposerAttachments
+              conversation={conversation}
+              previewTriggerRef={previewTriggerRef}
+            />
+          }
           attachments={
             <AttachmentCards
               selection={conversation.projectSelection}

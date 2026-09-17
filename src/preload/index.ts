@@ -8,6 +8,7 @@ import { parseTerminalEvent, parseTerminalResult } from '../shared/terminal'
 import { isAgentId, parseAgentProgress, parseAgentResult } from '../shared/agent'
 import { parseToolHistory } from '../shared/agent-history'
 import { parseAgentContext, parseProjectSelectionResult, parseToolScope } from '../shared/project'
+import { parsePreviewChangeRequest, parsePreviewChangeResult } from '../shared/change-preview'
 
 // Custom APIs for renderer
 const api: AppAPI = {
@@ -214,6 +215,24 @@ const api: AppAPI = {
       await ipcRenderer.invoke('project:remove', conversationId, snapshotId, path)
     )
     if (!result) throw new Error('附件移除结果无效')
+    return result
+  },
+  // 从当前已授权快照生成只读修改预览
+  previewChange: async (request) => {
+    const checkedRequest = parsePreviewChangeRequest(request)
+    if (!checkedRequest) throw new Error('修改预览请求格式不正确')
+    const result = parsePreviewChangeResult(
+      await ipcRenderer.invoke('preview:change', checkedRequest)
+    )
+    if (!result) throw new Error('修改预览结果格式不正确')
+    if (
+      result.status === 'ready' &&
+      (result.preview.conversationId !== checkedRequest.conversationId ||
+        result.preview.snapshotId !== checkedRequest.snapshotId ||
+        result.preview.path !== checkedRequest.path)
+    ) {
+      throw new Error('修改预览归属不一致')
+    }
     return result
   },
   // 撤销当前窗口的指定项目快照授权

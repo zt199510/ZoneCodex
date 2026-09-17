@@ -23,6 +23,7 @@ let selection = null
 let cancelSelection = false
 let revocations = 0
 let agentStarts = 0
+let previewRequests = 0
 const agentCalls = []
 const windowActions = []
 const failures = []
@@ -152,6 +153,23 @@ ipcMain.handle('agent:start', (_event, requestId, prompt, mode, history, context
   agentStarts++
   agentCalls.push({ requestId, prompt, mode, history, context })
   return { status: 'cancelled', trace: [] }
+})
+ipcMain.handle('preview:change', (_event, request) => {
+  previewRequests++
+  assert(selection, 'preview uses an authorized snapshot')
+  assert.equal(request.conversationId, 'fixture-conversation')
+  assert.equal(request.snapshotId, selection.snapshotId)
+  return {
+    status: 'ready',
+    preview: {
+      conversationId: request.conversationId,
+      snapshotId: request.snapshotId,
+      path: request.path,
+      createdAt: selection.createdAt,
+      before: 'export function greet(name: string): string {\n  return `你好，${name}`\n}',
+      after: request.proposedText
+    }
+  }
 })
 
 async function openAttachments() {
@@ -474,6 +492,59 @@ app
     await openAttachments()
     await click('.attachment-picker')
     await dom("document.querySelectorAll('.attachment-card').length === 8")
+    await evaluate("document.querySelector('.composer-debug').open = true")
+    await dom("!!document.querySelector('.change-preview-practice-submit')", 'change preview practice')
+    const previewText = [
+      'export function greet(name: string): string {',
+      '  return `欢迎，${name}！`',
+      ...Array.from({ length: 55 }, (_, index) => `  // preview line ${index + 1}`),
+      '}'
+    ].join('\n')
+    await evaluate(`(() => {
+      const element = document.querySelector('.change-preview-practice textarea');
+      Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set.call(element, ${JSON.stringify(previewText)});
+      element.dispatchEvent(new Event('input', { bubbles: true }));
+    })()`)
+    await click('.change-preview-practice-submit')
+    await dom("!!document.querySelector('.change-preview-panel')", 'change preview panel')
+    assert.equal(previewRequests, 1)
+    assert.equal(
+      await evaluate(`(() => {
+        const panel = document.querySelector('.change-preview-panel');
+        const content = document.querySelector('.change-preview-content');
+        const input = document.querySelector('#chat-input').getBoundingClientRect();
+        const send = document.querySelector('.send-button').getBoundingClientRect();
+        const panelRect = panel.getBoundingClientRect();
+        const text = panel.textContent;
+        return panelRect.bottom <= innerHeight &&
+          input.bottom <= innerHeight &&
+          send.bottom <= innerHeight &&
+          content.scrollHeight > content.clientHeight &&
+          getComputedStyle(content).overflowY === 'auto' &&
+          text.includes('module-1.ts') &&
+          text.includes('仅预览，未写入文件') &&
+          text.includes('你好') &&
+          text.includes('欢迎') &&
+          document.querySelectorAll('.diff-row-remove').length === 1 &&
+          document.querySelectorAll('.diff-row-add').length > 1;
+      })()`),
+      true,
+      'preview panel shows a bounded, scrollable diff without hiding the composer'
+    )
+    await click('button[aria-label="关闭修改预览"]')
+    await dom("!document.querySelector('.change-preview-panel')", 'close change preview')
+    assert.equal(
+      await evaluate("document.activeElement === document.querySelector('.attachment-add')"),
+      true,
+      'closing the preview returns focus to the attachment entry'
+    )
+    await openAttachments()
+    await click('.change-preview-practice-submit')
+    await dom("!!document.querySelector('.change-preview-panel')", 'reopen change preview')
+    await click('.change-preview-footer button')
+    await dom("!document.querySelector('.change-preview-panel')", 'discard change preview')
+    assert.equal(previewRequests, 2)
+    assert.equal(selection.files.length, 8, 'discard keeps the authorized snapshot')
     await setMode('mock')
     assert.equal(selection !== null, true)
     await input('模拟附件请求')
@@ -534,6 +605,7 @@ app
             'attachment cancellation preserves selection and removal updates scope',
             'project request mode, ownership and cancelled history',
             'popover layout stability, Escape and narrow terminal layout',
+            'change preview diff panel, focus, scrolling and discard',
             'load failure protection'
           ]
         },

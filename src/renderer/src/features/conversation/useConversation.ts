@@ -9,6 +9,7 @@ import { getCapacityError } from './capacity'
 import type { ProjectSelection } from '../../../../shared/project'
 import { useConversationStorage, ConversationStorage } from './useConversationStorage'
 import { useOperation, Operation } from './useOperation'
+import { useChangePreview, type ChangePreviewController } from '../review/useChangePreview'
 
 export type ConversationController = {
   conversations: Conversation[]
@@ -36,6 +37,7 @@ export type ConversationController = {
   engine: ChatEngine
   setEngine: (engine: ChatEngine) => Promise<boolean>
   removeFile: (path: string) => Promise<boolean>
+  changePreview: ChangePreviewController
 }
 
 export function useConversation(): ConversationController {
@@ -99,6 +101,13 @@ export function useConversation(): ConversationController {
     removeFile
   } = useProjectSelection({
     conversationId: active?.id ?? null,
+    operations,
+    canChange
+  })
+
+  const changePreview = useChangePreview({
+    conversationId: active?.id ?? null,
+    selection: projectSelection,
     operations,
     canChange
   })
@@ -245,6 +254,7 @@ export function useConversation(): ConversationController {
     toolActivity: visibleActivity,
     engine,
     setEngine,
-    removeFile
+    removeFile,
+    changePreview
   }
 }
