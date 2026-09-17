@@ -63,11 +63,15 @@ function isCurrent(windowId: number, state: SelectionState, window: BrowserWindo
 
 export function registerProjectAccess(nextCallbacks: ProjectAccessCallbacks): void {
   callbacks = nextCallbacks
-  ipcMain.handle('project:select', (event, conversationId: unknown) => {
-    const owner = ownerOf(event)
-    if (!isAgentId(conversationId)) return resultError('会话 ID 无效')
-    return selectProjectFiles(owner, conversationId)
-  })
+  ipcMain.handle(
+    'project:select',
+    (event, conversationId: unknown, replaceExisting: unknown = false) => {
+      const owner = ownerOf(event)
+      if (!isAgentId(conversationId)) return resultError('会话 ID 无效')
+      if (typeof replaceExisting !== 'boolean') return resultError('附件选择参数无效')
+      return selectProjectFiles(owner, conversationId, replaceExisting)
+    }
+  )
   ipcMain.handle(
     'project:remove',
     (event, conversationId: unknown, snapshotId: unknown, path: unknown) => {
@@ -108,7 +112,8 @@ export function registerProjectAccess(nextCallbacks: ProjectAccessCallbacks): vo
 
 export async function selectProjectFiles(
   window: BrowserWindow,
-  conversationId: string
+  conversationId: string,
+  replaceExisting = false
 ): Promise<ProjectSelectionResult> {
   const windowId = window.id
   if (!isAgentId(conversationId)) return resultError('会话 ID 无效')
@@ -141,7 +146,7 @@ export async function selectProjectFiles(
     const snapshot = await createAttachmentSnapshot(
       fileResult.filePaths,
       state.controller.signal,
-      previous?.snapshot
+      replaceExisting ? undefined : previous?.snapshot
     )
     if (!isCurrent(windowId, state, window)) return { status: 'cancelled' }
 

@@ -193,10 +193,11 @@ const api: AppAPI = {
     )
   },
   // 选择当前窗口与会话绑定的项目快照
-  selectProjectFiles: async (conversationId) => {
+  selectProjectFiles: async (conversationId, replaceExisting = false) => {
     if (!isAgentId(conversationId)) throw new Error('会话 ID 格式不正确')
+    if (typeof replaceExisting !== 'boolean') throw new Error('附件选择参数无效')
     const parsed = parseProjectSelectionResult(
-      await ipcRenderer.invoke('project:select', conversationId)
+      await ipcRenderer.invoke('project:select', conversationId, replaceExisting)
     )
     if (!parsed) throw new Error('项目选择结果格式不正确')
     return parsed

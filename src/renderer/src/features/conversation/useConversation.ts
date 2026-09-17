@@ -26,6 +26,7 @@ export type ConversationController = {
   selectProjectFiles: () => Promise<boolean>
   revokeProjectFiles: () => Promise<boolean>
   projectSelection: ProjectSelection | null
+  contextSelection: ProjectSelection | null
   send: (content: string) => boolean
   stop: () => Promise<void>
   setClosePending: (value: boolean) => void
@@ -88,6 +89,8 @@ export function useConversation(): ConversationController {
 
   const {
     projectSelection,
+    pendingSelection,
+    markSent,
     projectError,
     clearError: clearProjectError,
     selectProjectFiles: selectFiles,
@@ -158,6 +161,7 @@ export function useConversation(): ConversationController {
 
   async function select(id: string): Promise<boolean> {
     if (!canChange() || !snapshot.conversations.some((item) => item.id === id)) return false
+    if (id === active?.id) return true
     if (!(await revokeSelectionForChange())) return false
     setSnapshot((previous) =>
       previous.activeConversationId === id
@@ -219,7 +223,8 @@ export function useConversation(): ConversationController {
       return selectFiles()
     },
     revokeProjectFiles,
-    projectSelection,
+    projectSelection: pendingSelection,
+    contextSelection: projectSelection,
     setClosePending,
     getOperation: operations.getOperation,
     send: (content) => {
@@ -230,7 +235,10 @@ export function useConversation(): ConversationController {
         return false
       }
       const accepted = request.send(content)
-      if (accepted) setCapacityError(null)
+      if (accepted) {
+        setCapacityError(null)
+        markSent()
+      }
       return accepted
     },
     chatMode,

@@ -11,6 +11,8 @@ type ProjectSelectionOptions = {
 
 type ProjectSelectionController = {
   projectSelection: ProjectSelection | null
+  pendingSelection: ProjectSelection | null
+  markSent: () => void
   projectError: string | null
   clearError: () => void
   selectProjectFiles: () => Promise<boolean>
@@ -27,6 +29,8 @@ export function useProjectSelection({
 }: ProjectSelectionOptions): ProjectSelectionController {
   const [projectError, setProjectError] = useState<string | null>(null)
   const [projectSelection, setProjectSelectionState] = useState<ProjectSelection | null>(null)
+  // 已发送文件仍供当前会话使用，但不再显示为下一条消息的待发送附件。
+  const [sentSnapshotId, setSentSnapshotId] = useState<string | null>(null)
   const projectSelectionRef = useRef<ProjectSelection | null>(null)
   const setProjectSelection = useCallback((selection: ProjectSelection | null): void => {
     projectSelectionRef.current = selection
@@ -71,7 +75,10 @@ export function useProjectSelection({
     if (!operations.begin('selecting')) return false
     setProjectError(null)
     try {
-      const result = await window.api.selectProjectFiles(conversationId)
+      const result = await window.api.selectProjectFiles(
+        conversationId,
+        projectSelectionRef.current?.snapshotId === sentSnapshotId
+      )
       if (result.status === 'selected') {
         setProjectSelection(result.selection)
         return true
@@ -122,6 +129,8 @@ export function useProjectSelection({
 
   return {
     projectSelection,
+    pendingSelection: projectSelection?.snapshotId === sentSnapshotId ? null : projectSelection,
+    markSent: () => setSentSnapshotId(projectSelectionRef.current?.snapshotId ?? null),
     projectError,
     clearError: () => setProjectError(null),
     selectProjectFiles,

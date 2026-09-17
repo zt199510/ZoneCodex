@@ -274,6 +274,13 @@ async function main() {
     )
     assert.equal(change.selection.files.length, 1)
     assert.equal(access.captureProjectAccess(42, 'c', selected.selection.snapshotId), null)
+    pick = async () => ({ canceled: true, filePaths: [] })
+    assert.equal((await access.selectProjectFiles(owner, 'c', true)).status, 'cancelled')
+    assert(access.captureProjectAccess(42, 'c', change.selection.snapshotId))
+    pick = async () => ({ canceled: false, filePaths: [a] })
+    const replaced = await access.selectProjectFiles(owner, 'c', true)
+    assert.equal(replaced.selection.files.length, 1, 'new draft excludes sent attachments')
+    assert.equal(access.captureProjectAccess(42, 'c', change.selection.snapshotId), null)
     pick = () =>
       new Promise((resolve) => {
         release = resolve

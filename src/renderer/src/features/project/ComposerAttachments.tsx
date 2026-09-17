@@ -10,7 +10,7 @@ export function ComposerAttachments({
   const trigger = useRef<HTMLButtonElement>(null)
   const panel = useRef<HTMLDivElement>(null)
   const [open, setOpen] = useState(false)
-  const selection = c.projectSelection
+  const selection = c.contextSelection
   const count = selection?.files.length ?? 0
   const busy = c.operation === 'selecting'
 
@@ -118,8 +118,10 @@ export function ComposerAttachments({
           >
             <span aria-hidden="true">×</span>
             <span>
-              <strong>移除所有附件</strong>
-              <small>{count} 个文件</small>
+              <strong>{c.projectSelection ? '移除所有附件' : '清除会话文件'}</strong>
+              <small>
+                {count} 个文件{c.projectSelection ? '' : '仍可用于追问；清除后停止使用'}
+              </small>
             </span>
           </button>
         )}

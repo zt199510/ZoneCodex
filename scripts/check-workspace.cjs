@@ -390,8 +390,11 @@ app
     await dom("!document.querySelector('.attachment-popover').matches(':popover-open')")
     window.setContentSize(680, 560)
     await delay(100)
-    await click('.terminal-launcher button')
-    await dom("!!document.querySelector('.terminal-host .xterm')")
+    const hasTerminal = await evaluate("!!document.querySelector('.terminal-launcher button')")
+    if (hasTerminal) {
+      await click('.terminal-launcher button')
+      await dom("!!document.querySelector('.terminal-host .xterm')")
+    }
     const narrowBefore = await bounds()
     await openAttachments()
     assert.equal(await bounds(), narrowBefore)
@@ -403,7 +406,9 @@ app
       true,
       'popover stays inside viewport'
     )
-    await screenshot('composer-popover-narrow-terminal.png')
+    await screenshot(
+      hasTerminal ? 'composer-popover-narrow-terminal.png' : 'composer-popover-narrow.png'
+    )
     await closeAttachments()
     assert.equal(await evaluate('document.documentElement.scrollWidth <= innerWidth'), true)
     assert.equal(
@@ -420,10 +425,12 @@ app
       true,
       'attachment cards live above the textarea inside the composer'
     )
-    await screenshot('composer-narrow-terminal.png')
-    await evaluate(
-      "[...document.querySelectorAll('.terminal-toolbar button')].find(b => b.textContent.includes('关闭')).click()"
-    )
+    await screenshot(hasTerminal ? 'composer-narrow-terminal.png' : 'composer-narrow.png')
+    if (hasTerminal) {
+      await evaluate(
+        "[...document.querySelectorAll('.terminal-toolbar button')].find(b => b.textContent.includes('关闭')).click()"
+      )
+    }
     await dom("!document.querySelector('.terminal-panel')")
     await click('button[aria-label="发送消息"]')
     await until(() => agentStarts === 1, 'authorized attachment request')
@@ -432,6 +439,24 @@ app
     assert.equal(agentCalls[0].context.snapshotId, selection.snapshotId)
     assert.equal(agentCalls[0].context.allowUpload, true)
     assert.equal(agentCalls[0].context.conversationId, 'fixture-conversation')
+    await dom("document.querySelectorAll('.attachment-card').length === 0")
+    assert(selection, 'sending clears the composer without revoking the request snapshot')
+    cancelSelection = true
+    await openAttachments()
+    assert.equal(
+      await evaluate(
+        "document.querySelector('.attachment-popover').textContent.includes('清除会话文件')"
+      ),
+      true,
+      'sent files remain visible and revocable through the menu'
+    )
+    await click('.attachment-picker')
+    await idle()
+    await dom("document.querySelectorAll('.attachment-card').length === 0")
+    cancelSelection = false
+    await openAttachments()
+    await click('.attachment-picker')
+    await dom("document.querySelectorAll('.attachment-card').length === 8")
     cancelSelection = true
     await openAttachments()
     await click('.attachment-picker')
@@ -457,6 +482,7 @@ app
     await idle()
     assert.equal(agentCalls[1].mode, 'mock')
     assert.equal(agentCalls[1].context.allowUpload, false)
+    await dom("document.querySelectorAll('.attachment-card').length === 0")
     assert.deepEqual(agentCalls[1].history, [], 'cancelled turn is not reused')
     await setMode('stream')
     assert.equal(selection, null, 'stream debug revokes attachment grants')

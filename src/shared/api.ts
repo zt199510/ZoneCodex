@@ -61,7 +61,10 @@ export interface AppAPI {
     context?: AgentContext
   ) => Promise<AgentResult>
   // 选择当前窗口与会话绑定的项目文件快照
-  selectProjectFiles: (conversationId: string) => Promise<ProjectSelectionResult>
+  selectProjectFiles: (
+    conversationId: string,
+    replaceExisting?: boolean
+  ) => Promise<ProjectSelectionResult>
   removeProjectFile: (
     conversationId: string,
     snapshotId: string,

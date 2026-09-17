@@ -19,7 +19,8 @@ export function MessageList({
   return (
     <ol className="message-list" aria-label="聊天记录">
       {messages.map((message) => {
-        const activity = message.role === 'assistant' ? toolActivity[message.id] : undefined
+        const entries = message.role === 'assistant' ? toolActivity[message.id] : undefined
+        const activity = entries?.length ? entries : undefined
         return (
           <li className={`message message-${message.role}`} key={message.id}>
             <div className="message-author">
