@@ -1,0 +1,220 @@
+.composer-attachments {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.attachment-add {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  flex-shrink: 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  font-size: 22px;
+  color: var(--text);
+}
+.attachment-add:hover:not(:disabled),
+.attachment-add[aria-expanded='true'] {
+  background: #f0f1ef;
+}
+
+.debug-badge {
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.attachment-popover {
+  position: fixed;
+  inset: auto;
+  margin: 0;
+  padding: 5px;
+  max-height: 320px;
+  overflow: auto;
+  overscroll-behavior: contain;
+  border: 1px solid #e8e9e5;
+  border-radius: 17px;
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: 0 3px 12px #1e2d2508;
+  font-size: 12px;
+}
+.attachment-popover::backdrop {
+  background: transparent;
+}
+.attachment-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 25px;
+  padding: 0 7px;
+}
+.attachment-heading strong {
+  font-weight: 400;
+  color: var(--soft-text);
+  font-size: 11px;
+}
+.attachment-heading .icon-button {
+  width: 23px;
+  height: 23px;
+  color: var(--soft-text);
+}
+
+.attachment-picker {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  border: 0;
+  border-radius: 15px;
+  background: transparent;
+  padding: 7px 10px;
+  text-align: left;
+  color: var(--text);
+}
+.attachment-picker > svg {
+  flex-shrink: 0;
+  color: var(--muted);
+}
+.attachment-picker > span {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px;
+}
+.attachment-picker strong {
+  font-size: 12px;
+  font-weight: 400;
+}
+.attachment-picker small {
+  font-size: 11px;
+  color: var(--soft-text);
+}
+.attachment-picker:hover:not(:disabled),
+.attachment-picker:focus-visible {
+  background: #f1f2f0;
+}
+.composer-debug {
+  padding: 8px 10px;
+}
+.composer-debug summary {
+  cursor: pointer;
+  color: var(--soft-text);
+  font-size: 11px;
+}
+.composer-debug label {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 10px;
+  font-size: 11px;
+}
+.composer-debug select {
+  max-width: 70%;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 5px;
+  background: var(--surface);
+  color: var(--text);
+}
+.composer-debug p {
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.7;
+  margin-top: 8px;
+}
+
+.attachment-cards {
+  display: flex;
+  gap: 10px;
+  list-style: none;
+  margin: -3px -3px 12px;
+  padding: 5px 3px 6px;
+  overflow-x: auto;
+  overscroll-behavior: contain;
+}
+.attachment-card {
+  position: relative;
+  flex: 0 0 144px;
+  min-width: 0;
+  border: 1px solid #e8e9e5;
+  border-radius: 11px;
+  background: #fff;
+}
+.attachment-card-preview {
+  height: 82px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  border-radius: 10px 10px 0 0;
+  background: #f7f7f6;
+  color: #818680;
+}
+.attachment-card-preview span {
+  font-size: 9px;
+  letter-spacing: 0.5px;
+}
+.attachment-card-name {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 7px 9px;
+  min-width: 0;
+  font-size: 11px;
+}
+.attachment-card-name > span {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.attachment-card-name small {
+  color: var(--muted);
+  font-size: 9px;
+}
+.attachment-remove {
+  position: absolute;
+  top: -4px;
+  right: -4px;
+  width: 19px;
+  height: 19px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 2px solid white;
+  border-radius: 50%;
+  background: #303632;
+  color: white;
+  font-size: 13px;
+  line-height: 1;
+}
+.attachment-remove:hover:not(:disabled) {
+  background: #111;
+}
+.attachment-remove:disabled {
+  opacity: 0.45;
+}
+
+@media (max-width: 760px) {
+  .composer-attachments {
+    gap: 6px;
+  }
+  .composer-toolbar .keyboard-hint {
+    display: none;
+  }
+}
+@media (max-height: 640px) {
+  .attachment-card {
+    flex-basis: 128px;
+  }
+  .attachment-card-preview {
+    height: 55px;
+  }
+  .attachment-cards {
+    margin-bottom: 8px;
+  }
+}

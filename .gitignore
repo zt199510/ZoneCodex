@@ -1,0 +1,12 @@
+node_modules
+dist
+out
+.DS_Store
+.eslintcache
+*.log*
+.local-backups/
+.ui-check/
+.env
+.env.*
+!.env.example
+*.tsbuildinfo
