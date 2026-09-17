@@ -61,7 +61,6 @@ export function ComposerAttachments({
       <button
         ref={(element) => {
           trigger.current = element
-          previewTriggerRef.current = element
         }}
         type="button"
         className="attachment-add"
@@ -204,6 +203,7 @@ export function ComposerAttachments({
                   }
                   onClick={() => {
                     void (async () => {
+                      previewTriggerRef.current = trigger.current
                       const accepted = await c.changePreview.requestPreview(
                         activePracticePath,
                         proposedText

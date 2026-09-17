@@ -6,7 +6,7 @@
   "author": "example.com",
   "homepage": "https://electron-vite.org",
   "scripts": {
-    "check:workspace": "npm run build && node scripts/check-window-controls.cjs && node scripts/run-workspace-check.cjs",
+    "check:workspace": "npm run build && node scripts/check-window-controls.cjs && node scripts/check-attachments.cjs && node scripts/run-workspace-check.cjs",
     "format": "prettier --write .",
     "lint": "eslint --cache .",
     "typecheck:node": "tsc --noEmit -p tsconfig.node.json --composite false",

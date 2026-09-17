@@ -214,9 +214,11 @@ async function main() {
       })
     )
 
-    agent.registerAgentPractice()
+    const preparation = require('../src/main/agent/change-preparation-ipc.ts')
+    agent.registerAgentPractice(preparation.hasChangePreparation)
     access.registerProjectAccess({
-      isAgentJobActive: agent.hasAgentJob,
+      isAgentJobActive: (id) => agent.hasAgentJob(id) || preparation.hasChangePreparation(id),
+      onAccessChanged: preparation.cleanupChangePreparation,
       abortProjectJob: agent.abortProjectJob
     })
     pick = async () => ({ canceled: false, filePaths: [a] })
@@ -290,6 +292,180 @@ async function main() {
     release({ canceled: false, filePaths: [a] })
     assert.equal((await late).status, 'cancelled')
     assert.equal(access.captureProjectAccess(42, 'c', change.selection.snapshotId), null)
+    // Lesson 24: real bytes, production services, ownership and cancellation.
+    const { prepareChange } = require('../src/main/tools/change-preparation.ts')
+    const { parsePreparationRequest } = require('../src/shared/change-preparation.ts')
+    const { createChangeProposalExecutor } = require('../src/main/tools/change-proposal.ts')
+    const { createProjectMock } = require('../src/main/model/project-response.ts')
+    const greet = path.join(directory, 'greet.ts')
+    const original =
+      'export function greet(name: string): string {\n  return \x60你好，' + '$' + '{name}\x60\n}\n'
+    const candidate = original.replace('你好，', '欢迎，')
+    await fs.writeFile(greet, original)
+    const fixture = await createAttachmentSnapshot([greet], signal)
+    const file = fixture.selection.files[0].path
+    const before = await fs.readFile(greet)
+    const mock = await runToolLoop(
+      '模拟修改 greet',
+      createProjectMock(fixture.selection),
+      signal,
+      [],
+      () => {},
+      [],
+      createChangeProposalExecutor(fixture, 'c'),
+      { kind: 'project', snapshotId: fixture.selection.snapshotId }
+    )
+    assert.equal(mock.answer, '已生成建议，未写入文件')
+    assert.equal((await prepareChange(fixture, file, candidate, signal)).status, 'prepared')
+    assert.deepEqual(await fs.readFile(greet), before)
+    assert.equal((await prepareChange(fixture, file, original, signal)).status, 'no_change')
+    assert.equal(
+      (await prepareChange({ ...fixture, baselines: undefined }, file, candidate, signal)).status,
+      'error'
+    )
+    assert.equal((await prepareChange(fixture, file, 'x'.repeat(2001), signal)).status, 'error')
+    assert.equal((await prepareChange(fixture, file, '\uFEFFx', signal)).status, 'unsupported')
+    for (const changed of [
+      original.replace('你好', '您好'),
+      original.replace(/\n/g, '\r\n'),
+      '\uFEFF' + original
+    ]) {
+      await fs.writeFile(greet, changed)
+      assert.equal((await prepareChange(fixture, file, candidate, signal)).status, 'conflict')
+      assert.equal(await fs.readFile(greet, 'utf8'), changed)
+    }
+    for (const baseline of ['a\n', 'a\r\n', 'a', '\uFEFFa\r\n', 'a\nB\r\n', 'a\r']) {
+      await fs.writeFile(greet, baseline)
+      const snap = await createAttachmentSnapshot([greet], signal)
+      const alias = snap.selection.files[0].path
+      const result = await prepareChange(snap, alias, 'b\n', signal)
+      if (baseline === 'a\nB\r\n' || baseline === 'a\r') assert.equal(result.status, 'unsupported')
+      else {
+        assert.equal(result.status, 'prepared')
+        const expected =
+          (baseline.startsWith('\uFEFF') ? '\uFEFF' : '') +
+          (baseline.includes('\r\n') ? 'b\r\n' : 'b\n')
+        assert.deepEqual(Buffer.from(result.candidateBytes), Buffer.from(expected))
+        const empty = await prepareChange(snap, alias, '', signal)
+        assert.equal(empty.candidateBytes.length, baseline.startsWith('\uFEFF') ? 3 : 0)
+      }
+      assert.equal(await fs.readFile(greet, 'utf8'), baseline)
+    }
+    await fs.unlink(greet)
+    assert.equal((await prepareChange(fixture, file, candidate, signal)).status, 'conflict')
+    await fs.writeFile(greet, original)
+    const cancelled = new AbortController()
+    const pendingRead = prepareChange(fixture, file, candidate, cancelled.signal)
+    cancelled.abort()
+    await assert.rejects(pendingRead)
+    access.cleanupProjectAccess(42)
+    pick = async () => ({ canceled: false, filePaths: [greet] })
+    const granted = await access.selectProjectFiles(owner, 'c')
+    preparation.registerChangePreparation(
+      (id) => agent.hasAgentJob(id) || access.hasProjectSelection(id)
+    )
+    const req = {
+      conversationId: 'c',
+      snapshotId: granted.selection.snapshotId,
+      path: granted.selection.files[0].path,
+      proposedText: candidate,
+      requestId: 'q',
+      callId: 'call_project_mock_123',
+      checkId: 'check-1'
+    }
+    assert(parsePreparationRequest(req))
+    for (const invalid of [
+      { ...req, extra: true },
+      { ...req, path: greet },
+      { ...req, proposedText: 'x'.repeat(2001) },
+      Object.defineProperty({ ...req }, 'path', {
+        get() {
+          throw new Error('accessor must not run')
+        }
+      })
+    ])
+      assert.equal(parsePreparationRequest(invalid), null)
+    const check = (value) => handlers.get('preparation:check')(event, value)
+    const cancel = (id) => handlers.get('preparation:cancel')(event, id)
+    assert.equal((await check({ ...req, conversationId: 'forged' })).status, 'error')
+    await assert.rejects(handlers.get('preparation:check')({ ...event, senderFrame: {} }, req))
+    const preparing = check(req)
+    assert(preparation.hasChangePreparation(42))
+    assert.equal((await access.selectProjectFiles(owner, 'c')).status, 'error')
+    assert.equal(handlers.get('project:revoke')(event, req.snapshotId), false)
+    assert.equal(
+      (await handlers.get('agent:start')(event, 'blocked', '你好', 'mock')).status,
+      'error'
+    )
+    assert.equal(cancel('wrong-check'), false)
+    assert.equal(cancel(req.checkId), true)
+    assert.equal((await preparing).status, 'error')
+    assert(!preparation.hasChangePreparation(42))
+    const ready = await check({ ...req, checkId: 'check-2' })
+    assert.equal(ready.status, 'ready')
+    assert(!JSON.stringify(ready).includes(directory))
+    assert.equal(cancel('check-2'), true)
+    assert.equal(cancel('check-2'), false)
+    const invalidated = check({ ...req, checkId: 'check-3' })
+    access.cleanupProjectAccess(42)
+    assert.equal((await invalidated).status, 'error')
+    assert.equal(cancel('check-3'), false)
+    assert.deepEqual(await fs.readFile(greet), before)
+    if (process.env.LESSON24_LIVE_CHECK === '1') {
+      process.loadEnvFile(path.resolve(__dirname, '../.env.local'))
+      pick = async () => ({ canceled: false, filePaths: [greet] })
+      const liveGrant = await access.selectProjectFiles(owner, 'c')
+      const result = await handlers.get('agent:start')(
+        event,
+        'lesson24-live',
+        '请完整读取 greet.ts，把问候语你好改成欢迎，保留其他内容，通过 propose_file_change 提交修改建议。不要实际写入文件。',
+        'live',
+        [],
+        {
+          kind: 'project',
+          snapshotId: liveGrant.selection.snapshotId,
+          conversationId: 'c',
+          allowUpload: true
+        }
+      )
+      const proposalCall = result.items?.find(
+        (item) => item.type === 'function_call' && item.name === 'propose_file_change'
+      )
+      const success =
+        result.status === 'done' &&
+        !!proposalCall &&
+        result.items.some(
+          (item) =>
+            item.type === 'function_call_output' &&
+            item.call_id === proposalCall.call_id &&
+            JSON.parse(item.output).status === 'proposal_ready'
+        )
+      assert(
+        success,
+        'Live model did not return a successful proposal: ' +
+          result.status +
+          ' ' +
+          (result.error || '')
+      )
+      const args = JSON.parse(proposalCall.arguments)
+      const prepared = await check({
+        ...req,
+        snapshotId: liveGrant.selection.snapshotId,
+        path: args.path,
+        proposedText: args.proposedText,
+        checkId: 'live-check'
+      })
+      assert.equal(prepared.status, 'ready')
+      assert.deepEqual(await fs.readFile(greet), before)
+      preparation.cleanupChangePreparation(42)
+      access.cleanupProjectAccess(42)
+      console.log(
+        'Live model passed: complete read → successful proposal → ready; source bytes unchanged.'
+      )
+    }
+    console.log(
+      'Lesson 24 passed: mock proposal chain, byte baselines, BOM/LF/CRLF/empty, conflicts, bounds, cancellation, ownership, mutual exclusion and invalidation; source bytes unchanged.'
+    )
     console.log(
       'Attachments passed: direct picker, aliases, snapshots, bounds, links, mixed tools, history, ownership, consent, cancellation and cleanup.'
     )

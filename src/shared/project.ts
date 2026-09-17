@@ -254,6 +254,9 @@ export function parseProjectSelectionResult(value: unknown): ProjectSelectionRes
 export function isToolAllowed(name: unknown, scope: ToolScope): name is string {
   return (
     name === 'get_current_time' ||
-    (scope.kind === 'project' && (name === 'search_project_text' || name === 'read_project_file'))
+    (scope.kind === 'project' &&
+      (name === 'search_project_text' ||
+        name === 'read_project_file' ||
+        name === 'propose_file_change'))
   )
 }

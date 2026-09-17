@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import type { PreparationController } from './useChangePreparation'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { RefObject } from 'react'
 import type { ChangePreview } from '../../../../shared/change-preview'
 import { Icon } from '../../components/ui/Icon'
@@ -6,8 +7,10 @@ import { buildDiff } from './diff'
 import type { ChangePreviewState } from './useChangePreview'
 
 type ChangePreviewPanelProps = {
+  preparation: PreparationController
   state: ChangePreviewState
   snapshotCreatedAt: string | null
+  onClose: () => boolean
   onDiscard: () => boolean
   returnFocusRef: RefObject<HTMLButtonElement | null>
 }
@@ -79,6 +82,8 @@ function DiffRows({ preview }: { preview: ChangePreview }): React.JSX.Element {
 export function ChangePreviewPanel({
   state,
   snapshotCreatedAt,
+  preparation,
+  onClose,
   onDiscard,
   returnFocusRef
 }: ChangePreviewPanelProps): React.JSX.Element | null {
@@ -87,6 +92,20 @@ export function ChangePreviewPanel({
   const visible = state.status !== 'idle' && closedGeneration !== state.generation
   const generation = state.status === 'idle' ? null : state.generation
   const canDiscard = state.status !== 'loading'
+
+  const focusReturnTarget = useCallback((): void => {
+    requestAnimationFrame(() => {
+      const trigger = returnFocusRef.current
+      if (trigger && document.contains(trigger)) trigger.focus()
+      else document.getElementById('chat-input')?.focus()
+    })
+  }, [returnFocusRef])
+
+  const close = useCallback((): void => {
+    if (generation === null || !onClose()) return
+    setClosedGeneration(generation)
+    focusReturnTarget()
+  }, [focusReturnTarget, generation, onClose])
 
   useEffect(() => {
     if (!visible) return
@@ -100,28 +119,17 @@ export function ChangePreviewPanel({
       if (event.key !== 'Escape') return
       event.preventDefault()
       event.stopImmediatePropagation()
-      setClosedGeneration(generation)
-      requestAnimationFrame(() => returnFocusRef.current?.focus())
+      close()
     }
     window.addEventListener('keydown', onWindowKeyDown, true)
     return () => window.removeEventListener('keydown', onWindowKeyDown, true)
-  }, [generation, returnFocusRef, visible])
+  }, [close, generation, returnFocusRef, visible])
 
   if (!visible) return null
 
   const preview = state.status === 'ready' ? state.preview : null
   const path =
     preview?.path ?? (state.status === 'loading' || state.status === 'error' ? state.path : '')
-
-  function focusReturnTarget(): void {
-    requestAnimationFrame(() => returnFocusRef.current?.focus())
-  }
-
-  function close(): void {
-    if (generation === null) return
-    setClosedGeneration(generation)
-    focusReturnTarget()
-  }
 
   function discard(): void {
     if (!canDiscard || !onDiscard()) return
@@ -172,14 +180,49 @@ export function ChangePreviewPanel({
               {state.error}
             </p>
           )}
+          {preparation.state.status === 'ready' && (
+            <div className="change-preview-status preparation-summary" role="status">
+              <strong>检查通过，尚未写入；实际提交前仍需再次检查</strong>
+              <p>
+                {preparation.state.encoding} · {preparation.state.newline} · 预计{' '}
+                {preparation.state.bytes} 字节
+              </p>
+              <p>本次检查两分钟后失效。差异内容如下：</p>
+            </div>
+          )}
+          {preparation.state.status === 'loading' && <p role="status">正在检查磁盘版本…</p>}
+          {'error' in preparation.state && (
+            <p className="change-preview-status change-preview-error" role="alert">
+              {preparation.state.error}
+            </p>
+          )}
           {preview && <DiffRows preview={preview} />}
         </div>
 
         <footer className="change-preview-footer">
-          <button type="button" className="quiet-button" disabled={!canDiscard} onClick={discard}>
-            <Icon name="trash" size={14} />
-            丢弃建议
-          </button>
+          {preparation.available && preparation.state.status !== 'ready' && (
+            <button
+              type="button"
+              className="quiet-button"
+              disabled={
+                preparation.state.status === 'loading' || preparation.state.status === 'conflict'
+              }
+              onClick={() => void preparation.check()}
+            >
+              检查写入条件
+            </button>
+          )}
+          {preparation.state.status === 'ready' && (
+            <button type="button" className="quiet-button" onClick={preparation.cancel}>
+              返回审查
+            </button>
+          )}
+          {preparation.state.status !== 'ready' && (
+            <button type="button" className="quiet-button" disabled={!canDiscard} onClick={discard}>
+              <Icon name="trash" size={14} />
+              丢弃建议
+            </button>
+          )}
         </footer>
       </div>
     </section>

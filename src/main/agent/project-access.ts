@@ -10,6 +10,7 @@ import type { ProjectSnapshot } from '../tools/project-snapshot'
 export type ProjectAccessCallbacks = {
   isAgentJobActive: (windowId: number) => boolean
   abortProjectJob: (windowId: number, snapshotId: string) => void
+  onAccessChanged?: (windowId: number) => void
 }
 
 type Grant = {
@@ -91,6 +92,7 @@ export function registerProjectAccess(nextCallbacks: ProjectAccessCallbacks): vo
         return resultError('附件授权已失效')
       try {
         const snapshot = removeAttachment(grant.snapshot, path)
+        callbacks.onAccessChanged?.(owner.id)
         if (!snapshot) {
           grants.delete(owner.id)
           return { status: 'cleared' }
@@ -150,6 +152,7 @@ export async function selectProjectFiles(
     )
     if (!isCurrent(windowId, state, window)) return { status: 'cancelled' }
 
+    callbacks.onAccessChanged?.(windowId)
     grants.set(windowId, {
       windowId,
       conversationId,
@@ -192,11 +195,13 @@ export function revokeProjectFiles(windowId: number, snapshotId: string): boolea
   const grant = grants.get(windowId)
   if (!grant || grant.snapshotId !== snapshotId) return false
   grants.delete(windowId)
+  callbacks.onAccessChanged?.(windowId)
   callbacks.abortProjectJob(windowId, snapshotId)
   return true
 }
 
 export function cleanupProjectAccess(windowId: number): void {
+  callbacks.onAccessChanged?.(windowId)
   const selection = selections.get(windowId)
   if (selection) {
     selection.controller.abort()

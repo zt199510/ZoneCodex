@@ -493,7 +493,10 @@ app
     await click('.attachment-picker')
     await dom("document.querySelectorAll('.attachment-card').length === 8")
     await evaluate("document.querySelector('.composer-debug').open = true")
-    await dom("!!document.querySelector('.change-preview-practice-submit')", 'change preview practice')
+    await dom(
+      "!!document.querySelector('.change-preview-practice-submit')",
+      'change preview practice'
+    )
     const previewText = [
       'export function greet(name: string): string {',
       '  return `欢迎，${name}！`',
@@ -533,9 +536,8 @@ app
     )
     await click('button[aria-label="关闭修改预览"]')
     await dom("!document.querySelector('.change-preview-panel')", 'close change preview')
-    assert.equal(
-      await evaluate("document.activeElement === document.querySelector('.attachment-add')"),
-      true,
+    await dom(
+      "document.activeElement === document.querySelector('.attachment-add')",
       'closing the preview returns focus to the attachment entry'
     )
     await openAttachments()
@@ -566,6 +568,18 @@ app
     await idle()
     assert.deepEqual(agentCalls[2].context, { kind: 'time' })
     assert.equal(agentCalls[2].mode, 'live')
+
+    await require('./check-preparation-ui.cjs')({
+      window,
+      evaluate,
+      dom,
+      click,
+      input,
+      idle,
+      setMode,
+      openAttachments,
+      screenshot
+    })
 
     // 刷新后只从内存替身恢复已保存记录；损坏加载时禁止任何写入。
     failLoad = true

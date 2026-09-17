@@ -1,3 +1,4 @@
+import type { PreparationRequest, PreparationResult } from './change-preparation'
 import type { SaveConversationResult } from './conversation'
 import type { WindowAction, WindowState } from './window'
 import type { ConversationLibrary, LoadLibraryResult } from './conversation-library'
@@ -24,6 +25,8 @@ export type ModelStreamResult =
 
 // 应用 API 接口类型
 export interface AppAPI {
+  prepareChange: (request: PreparationRequest) => Promise<PreparationResult>
+  cancelPreparation: (checkId: string) => Promise<boolean>
   controlWindow: (action: WindowAction) => Promise<void>
   getWindowState: () => Promise<WindowState>
   onWindowStateChanged: (listener: (state: WindowState) => void) => () => void

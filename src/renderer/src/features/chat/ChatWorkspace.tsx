@@ -85,13 +85,28 @@ export function ChatWorkspace({
         ) : messages.length === 0 ? (
           <EmptyState disabled={!conversation.canSend} onSuggestion={suggest} />
         ) : (
-          <MessageList messages={messages} toolActivity={conversation.toolActivity} />
+          <MessageList
+            messages={messages}
+            toolActivity={conversation.toolActivity}
+            changeProposals={conversation.changeProposals}
+            changeProposalStatus={conversation.changeProposalStatus}
+            proposalOpenDisabled={
+              conversation.operation !== 'idle' ||
+              conversation.changePreview.state.status === 'loading'
+            }
+            onOpenProposal={(proposal, trigger) => {
+              previewTriggerRef.current = trigger
+              void conversation.openProposal(proposal)
+            }}
+          />
         )}
       </div>
       <ChangePreviewPanel
+        preparation={conversation.preparation}
         state={conversation.changePreview.state}
         snapshotCreatedAt={conversation.contextSelection?.createdAt ?? null}
-        onDiscard={conversation.changePreview.discard}
+        onClose={conversation.closePreview}
+        onDiscard={conversation.discardProposal}
         returnFocusRef={previewTriggerRef}
       />
       <div className="composer-region">

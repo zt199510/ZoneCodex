@@ -152,12 +152,11 @@ export function useChangePreview({
   )
 
   const discard = useCallback((): boolean => {
-    if (activeRequest.current) return false
+    invalidate()
     if (state.status === 'idle') return true
-    generation.current += 1
     setState({ status: 'idle' })
     return true
-  }, [state.status])
+  }, [invalidate, state.status])
 
   return { state, requestPreview, discard }
 }

@@ -1,3 +1,10 @@
+import { registerChangePreview } from './agent/change-preview-ipc'
+import {
+  registerChangePreparation,
+  hasChangePreparation,
+  cleanupChangePreparation
+} from './agent/change-preparation-ipc'
+import { hasProjectSelection } from './agent/project-access'
 import { app, shell, BrowserWindow, ipcMain } from 'electron'
 import { join } from 'path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
@@ -92,9 +99,15 @@ app.whenReady().then(() => {
   // 注册本地终端接口
   registerLocalTerminal()
   // 注册练习工具接口
-  registerAgentPractice()
+  registerAgentPractice(hasChangePreparation)
   // 注册项目文件选择与撤销接口
-  registerProjectAccess({ isAgentJobActive: hasAgentJob, abortProjectJob })
+  registerProjectAccess({
+    isAgentJobActive: (id) => hasAgentJob(id) || hasChangePreparation(id),
+    abortProjectJob,
+    onAccessChanged: cleanupChangePreparation
+  })
+  registerChangePreview()
+  registerChangePreparation((id) => hasAgentJob(id) || hasProjectSelection(id))
 
   // 创建会话存储器
   const conversationStore = createConversationStore(app.getPath('userData'))

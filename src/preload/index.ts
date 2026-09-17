@@ -1,3 +1,4 @@
+import { parsePreparationRequest, parsePreparationResult } from '../shared/change-preparation'
 // preload 通过 contextBridge 暴露业务接口；页面不直接使用 Node API。
 import { contextBridge, ipcRenderer, IpcRendererEvent } from 'electron'
 import { electronAPI } from '@electron-toolkit/preload'
@@ -218,6 +219,27 @@ const api: AppAPI = {
     return result
   },
   // 从当前已授权快照生成只读修改预览
+  prepareChange: async (request) => {
+    const checked = parsePreparationRequest(request)
+    if (!checked) throw new Error('准备请求无效')
+    const result = parsePreparationResult(await ipcRenderer.invoke('preparation:check', checked))
+    if (
+      !result ||
+      (result.status === 'ready' &&
+        (result.checkId !== checked.checkId ||
+          result.conversationId !== checked.conversationId ||
+          result.snapshotId !== checked.snapshotId ||
+          result.path !== checked.path))
+    )
+      throw new Error('准备结果无效')
+    return result
+  },
+  cancelPreparation: async (checkId) => {
+    if (!isAgentId(checkId)) return false
+    const result: unknown = await ipcRenderer.invoke('preparation:cancel', checkId)
+    if (typeof result !== 'boolean') throw new Error('取消结果无效')
+    return result
+  },
   previewChange: async (request) => {
     const checkedRequest = parsePreviewChangeRequest(request)
     if (!checkedRequest) throw new Error('修改预览请求格式不正确')

@@ -4,7 +4,20 @@ import { basename, extname, isAbsolute, join, parse, relative, resolve, sep } fr
 import { AgentError } from '../agent/tool-loop'
 import type { ProjectSelection } from '../../shared/project'
 
+export type SourceBaseline = {
+  absolutePath: string
+  originalBytes: Uint8Array
+  hasUtf8Bom: boolean
+  newline: 'lf' | 'crlf' | 'none' | 'unsupported'
+  dev: number
+  ino: number
+  size: number
+  mtimeMs: number
+  ctimeMs: number
+}
+
 export type ProjectSnapshot = {
+  baselines?: ReadonlyMap<string, SourceBaseline>
   selection: ProjectSelection
   files: ReadonlyMap<string, readonly string[]>
   // Main-process-only canonical identities. Never sent to the renderer or model.
@@ -83,11 +96,11 @@ function normalizeText(text: string): string[] {
   return text.replace(/\r\n/g, '\n').replace(/\r/g, '\n').split('\n')
 }
 
-async function readSelectedFile(
+export async function readSelectedFile(
   root: string,
   relativePath: string,
   signal: AbortSignal
-): Promise<{ bytes: number; lines: readonly string[] }> {
+): Promise<{ bytes: number; lines: readonly string[]; baseline: SourceBaseline }> {
   let candidate = root
   for (const part of relativePath.split(sep)) {
     candidate = join(candidate, part)
@@ -127,6 +140,24 @@ async function readSelectedFile(
     if (length > maxFileBytes) throw new AgentError('单文件最多 32 KiB')
 
     const after = await handle.stat()
+    // Recheck every path component after reading, including directory junctions.
+    let checkedPath = root
+    for (const part of relativePath.split(sep)) {
+      checkedPath = join(checkedPath, part)
+      if ((await lstat(checkedPath)).isSymbolicLink()) throw new AgentError('文件路径已变化')
+    }
+    const pathAfter = await lstat(candidate)
+    if (
+      pathAfter.dev !== after.dev ||
+      pathAfter.ino !== after.ino ||
+      pathAfter.nlink !== 1 ||
+      !pathAfter.isFile() ||
+      pathAfter.size !== after.size ||
+      pathAfter.mtimeMs !== after.mtimeMs ||
+      pathAfter.ctimeMs !== after.ctimeMs ||
+      after.nlink !== 1
+    )
+      throw new AgentError('文件已变化')
     if (
       opened.size !== after.size ||
       opened.mtimeMs !== after.mtimeMs ||
@@ -137,12 +168,40 @@ async function readSelectedFile(
     }
 
     let text: string
+    const originalBytes = Uint8Array.from(buffer.subarray(0, length))
+    const hasUtf8Bom = length >= 3 && buffer[0] === 239 && buffer[1] === 187 && buffer[2] === 191
     try {
-      text = new TextDecoder('utf-8', { fatal: true }).decode(buffer.subarray(0, length))
+      text = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(
+        buffer.subarray(hasUtf8Bom ? 3 : 0, length)
+      )
     } catch {
       throw new AgentError('本课只读取 UTF-8 文本')
     }
-    return { bytes: length, lines: Object.freeze(normalizeText(text)) }
+    const withoutPairs = text.replace(/\r\n/g, '')
+    const newline =
+      withoutPairs.includes('\r') || (text.includes('\r\n') && withoutPairs.includes('\n'))
+        ? 'unsupported'
+        : text.includes('\r\n')
+          ? 'crlf'
+          : text.includes('\n')
+            ? 'lf'
+            : 'none'
+    signal.throwIfAborted()
+    return {
+      bytes: length,
+      lines: Object.freeze(normalizeText(text)),
+      baseline: {
+        absolutePath: candidate,
+        originalBytes,
+        hasUtf8Bom,
+        newline,
+        dev: after.dev,
+        ino: after.ino,
+        size: after.size,
+        mtimeMs: after.mtimeMs,
+        ctimeMs: after.ctimeMs
+      }
+    }
   } finally {
     await handle.close()
   }
@@ -342,6 +401,7 @@ export async function createProjectSnapshot(
   if (!(await stat(root)).isDirectory()) throw new AgentError('请选择有效目录')
 
   const files = new Map<string, readonly string[]>()
+  const baselines = new Map<string, SourceBaseline>()
   const identities = new Set<string>()
   const metadata: ProjectSelection['files'] = []
   let totalBytes = 0
@@ -362,6 +422,7 @@ export async function createProjectSnapshot(
     totalBytes += file.bytes
     if (totalBytes > maxTotalBytes) throw new AgentError('选中文件合计最多 128 KiB')
     files.set(relativePath, file.lines)
+    baselines.set(relativePath, file.baseline)
     metadata.push({ path: relativePath, bytes: file.bytes, lines: file.lines.length })
   }
 
@@ -373,7 +434,8 @@ export async function createProjectSnapshot(
       createdAt: new Date().toISOString(),
       files: metadata
     },
-    files
+    files,
+    baselines
   }
 }
 
@@ -390,6 +452,7 @@ export async function createAttachmentSnapshot(
   }
   const files = new Map(previous?.files)
   const sources = new Map(previous?.sources)
+  const baselines = new Map(previous?.baselines)
   const metadata = previous?.selection.files.map((file) => ({ ...file })) ?? []
   for (const selectedPath of selected) {
     signal.throwIfAborted()
@@ -418,6 +481,7 @@ export async function createAttachmentSnapshot(
     }
     files.set(path, file.lines)
     sources.set(path, identity)
+    baselines.set(path, file.baseline)
   }
   return {
     selection: {
@@ -427,7 +491,8 @@ export async function createAttachmentSnapshot(
       files: metadata
     },
     files,
-    sources
+    sources,
+    baselines
   }
 }
 
@@ -437,8 +502,10 @@ export function removeAttachment(snapshot: ProjectSnapshot, path: string): Proje
   if (metadata.length === 0) return null
   const files = new Map(snapshot.files)
   const sources = new Map(snapshot.sources)
+  const baselines = new Map(snapshot.baselines)
   files.delete(path)
   sources.delete(path)
+  baselines.delete(path)
   return {
     selection: {
       ...snapshot.selection,
@@ -447,6 +514,7 @@ export function removeAttachment(snapshot: ProjectSnapshot, path: string): Proje
       files: metadata
     },
     files,
-    sources
+    sources,
+    baselines
   }
 }
