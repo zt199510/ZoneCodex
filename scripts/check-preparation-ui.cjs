@@ -34,6 +34,11 @@ module.exports = async function ({
   const access = require('../src/main/agent/project-access.ts')
   const agent = require('../src/main/agent/agent-ipc.ts')
   const prep = require('../src/main/agent/change-preparation-ipc.ts')
+  const commit = require('../src/main/agent/change-commit-ipc.ts')
+  let dropReply = false
+  let rejectBeforeClaim = false
+  let rejectedRequest
+  const realHandle = ipcMain.handle.bind(ipcMain)
   try {
     await fs.writeFile(greet, original)
     for (const channel of [
@@ -45,20 +50,61 @@ module.exports = async function ({
       'preview:change'
     ])
       ipcMain.removeHandler(channel)
-    agent.registerAgentPractice(prep.hasChangePreparation)
+    agent.registerAgentPractice((id) => prep.hasChangePreparation(id) || commit.hasChangeCommit(id))
     access.registerProjectAccess({
-      isAgentJobActive: (id) => agent.hasAgentJob(id) || prep.hasChangePreparation(id),
+      isAgentJobActive: (id) =>
+        agent.hasAgentJob(id) || prep.hasChangePreparation(id) || commit.hasChangeCommit(id),
       abortProjectJob: agent.abortProjectJob,
-      onAccessChanged: prep.cleanupChangePreparation
+      onAccessChanged: (id) => {
+        prep.cleanupChangePreparation(id)
+        commit.cancelChangeCommit(id)
+      }
     })
     access.attachProjectAccessCleanup(window)
-    require('../src/main/agent/change-preview-ipc.ts').registerChangePreview()
-    prep.registerChangePreparation((id) => agent.hasAgentJob(id) || access.hasProjectSelection(id))
+    commit.attachCommitCleanup(window)
+    require('../src/main/agent/change-preview-ipc.ts').registerChangePreview(commit.hasChangeCommit)
+    prep.registerChangePreparation(
+      (id) => agent.hasAgentJob(id) || access.hasProjectSelection(id) || commit.hasChangeCommit(id)
+    )
+    ipcMain.handle = (channel, handler) =>
+      realHandle(
+        channel,
+        channel === 'commit:apply'
+          ? async (...args) => {
+              if (rejectBeforeClaim) {
+                rejectedRequest = args[1]
+                throw new Error('Injected pre-claim transport failure')
+              }
+              const response = await handler(...args)
+              if (dropReply) throw new Error('Injected lost acknowledgement')
+              return response
+            }
+          : handler
+      )
+    try {
+      commit.registerChangeCommit(
+        (id) =>
+          agent.hasAgentJob(id) || access.hasProjectSelection(id) || prep.hasChangePreparation(id)
+      )
+    } finally {
+      ipcMain.handle = realHandle
+    }
     dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [greet] })
     await setMode('mock')
     await openAttachments()
     await click('.attachment-picker')
     await idle()
+    await require('./check-command-ui.cjs')({
+      window,
+      evaluate,
+      dom,
+      click,
+      input,
+      idle,
+      openAttachments,
+      screenshot
+    })
+    assert.equal(await fs.readFile(greet, 'utf8'), original)
     await input('模拟修改 greet')
     await click('button[aria-label="发送消息"]')
     await dom(
@@ -125,6 +171,100 @@ module.exports = async function ({
     await idle()
     await dom('!document.querySelector(".change-preview-panel")')
     assert.equal(await fs.readFile(greet, 'utf8'), original)
+    await click('.message-change-proposal-action')
+    await dom('!!document.querySelector(".diff-row-add")')
+    await check()
+    await dom('!!document.querySelector(".commit-confirm")')
+    assert.equal(await fs.readFile(greet, 'utf8'), original, 'ready does not write')
+    await screenshot('commit-confirm-680.png')
+    await evaluate(
+      'document.querySelector(".commit-confirm").click(); document.querySelector(".commit-confirm")?.click()'
+    )
+    await dom(
+      'document.querySelector(".commit-receipt")?.textContent.includes("已提交")',
+      'commit receipt survives snapshot cleanup'
+    )
+    await idle()
+    assert.equal(
+      await fs.readFile(greet, 'utf8'),
+      original.replace('你好，' + '$' + '{name}', '欢迎，' + '$' + '{name}！')
+    )
+    const backups = (await fs.readdir(directory)).filter((name) => name.endsWith('.bak'))
+    assert.equal(backups.length, 1, 'double click produces one backup and one commit')
+    assert.equal(await fs.readFile(path.join(directory, backups[0]), 'utf8'), original)
+    assert(
+      !(await evaluate('!!document.querySelector("button.message-change-proposal-action")')),
+      'historical suggestion no longer authorized'
+    )
+    assert(!(await evaluate('!!document.querySelector(".change-preview-panel")')))
+    assert(
+      await evaluate(
+        'document.querySelector(".commit-receipt").getBoundingClientRect().bottom <= innerHeight && document.querySelector("#chat-input").getBoundingClientRect().bottom <= innerHeight'
+      )
+    )
+    await screenshot('commit-applied-680.png')
+    await evaluate(
+      '[...document.querySelectorAll(".commit-receipt button")].find(b => b.textContent.includes("关闭结果")).click()'
+    )
+    await dom('!document.querySelector(".commit-receipt")')
+    // A lost acknowledgement after an actual commit must never look like a no-op failure.
+    await fs.writeFile(greet, original)
+    await openAttachments()
+    await click('.attachment-picker')
+    await idle()
+    await input('模拟修改 greet')
+    await click('button[aria-label="发送消息"]')
+    await dom('!!document.querySelector("button.message-change-proposal-action")')
+    await idle()
+    await click('button.message-change-proposal-action')
+    await dom('!!document.querySelector(".diff-row-add")')
+    await check()
+    await dom('!!document.querySelector(".commit-confirm")')
+    dropReply = true
+    await click('.commit-confirm')
+    await dom('document.querySelector(".commit-receipt")?.textContent.includes("未收到提交结果")')
+    await idle()
+    assert.equal(
+      await fs.readFile(greet, 'utf8'),
+      original.replace('你好，' + '$' + '{name}', '欢迎，' + '$' + '{name}！')
+    )
+    assert.equal((await fs.readdir(directory)).filter((name) => name.endsWith('.bak')).length, 2)
+    assert(!(await evaluate('!!document.querySelector("button.message-change-proposal-action")')))
+    await screenshot('commit-uncertain-680.png')
+    await evaluate(
+      '[...document.querySelectorAll(".commit-receipt button")].find(b => b.textContent.includes("关闭结果")).click()'
+    )
+    await dom('!document.querySelector(".commit-receipt")')
+    await fs.writeFile(greet, original)
+    await openAttachments()
+    await click('.attachment-picker')
+    await idle()
+    await input('模拟修改 greet')
+    await click('button[aria-label="发送消息"]')
+    await dom('!!document.querySelector("button.message-change-proposal-action")')
+    await idle()
+    await click('button.message-change-proposal-action')
+    await dom('!!document.querySelector(".diff-row-add")')
+    await check()
+    await dom('!!document.querySelector(".commit-confirm")')
+    rejectBeforeClaim = true
+    await click('.commit-confirm')
+    await dom('document.querySelector(".commit-receipt")?.textContent.includes("未收到提交结果")')
+    await idle()
+    assert.equal(await fs.readFile(greet, 'utf8'), original)
+    assert.equal((await fs.readdir(directory)).filter((name) => name.endsWith('.bak')).length, 2)
+    assert.equal(
+      access.captureProjectAccess(
+        window.id,
+        rejectedRequest.conversationId,
+        rejectedRequest.snapshotId
+      ),
+      null,
+      'transport failure before claim must not orphan the grant'
+    )
+    console.log(
+      'Lesson 25 UI passed: explicit confirmation, one actual commit, exact backup, persistent receipt after authorization cleanup, stale card, lost acknowledgement and 680×560 layout.'
+    )
     console.log(
       'Preparation UI passed: production mock → proposal → preview IPC → ready/conflict, manual source reset, close/cancel, 680×560 and unchanged source.'
     )

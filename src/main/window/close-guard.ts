@@ -5,8 +5,10 @@ import { randomUUID } from 'node:crypto'
 type Guard = { requestId: string | null; allowOnce: boolean }
 // 关闭确认处理器映射
 const guards = new WeakMap<BrowserWindow, Guard>()
+let isCommitting: (windowId: number) => boolean = () => false
 // 注册关闭确认处理器
-export function registerCloseGuard(): void {
+export function registerCloseGuard(isBusy: (windowId: number) => boolean = () => false): void {
+  isCommitting = isBusy
   ipcMain.handle('window:finish-close', (event, requestId: unknown, allow: unknown): boolean => {
     const owner = BrowserWindow.fromWebContents(event.sender)
     if (!owner || owner.isDestroyed() || event.senderFrame !== event.sender.mainFrame) {
@@ -22,6 +24,7 @@ export function registerCloseGuard(): void {
     const guard = guards.get(owner)
     if (!guard || guard.requestId !== requestId) return false
 
+    if (allow && isCommitting(owner.id)) return false
     guard.requestId = null
     if (allow) {
       guard.allowOnce = true
@@ -39,7 +42,7 @@ export function attachCloseGuard(window: BrowserWindow): void {
   const sender = window.webContents
 
   function onClose(event: Event): void {
-    if (guard.allowOnce) {
+    if (guard.allowOnce && !isCommitting(window.id)) {
       guard.allowOnce = false
       return
     }

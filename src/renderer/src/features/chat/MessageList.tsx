@@ -1,4 +1,5 @@
 import type { ChatMessage } from '../../../../shared/conversation'
+import type { MessageCommandProposal } from '../../../../shared/command-proposal'
 import type { MessageChangeProposal } from '../../../../shared/change-proposal'
 import type { ChangeProposalStatus } from '../conversation/useConversation'
 import type { ToolActivity } from './useChatRequest'
@@ -13,6 +14,9 @@ const roleLabels: Record<ChatMessage['role'], string> = {
 
 export function MessageList({
   messages,
+  commandProposals = {},
+  commandSnapshotId = null,
+  onOpenCommand,
   toolActivity = {},
   changeProposals = {},
   changeProposalStatus = {},
@@ -20,6 +24,9 @@ export function MessageList({
   onOpenProposal
 }: {
   messages: readonly ChatMessage[]
+  commandProposals?: Readonly<Record<string, MessageCommandProposal>>
+  commandSnapshotId?: string | null
+  onOpenCommand?: (proposal: MessageCommandProposal, trigger: HTMLButtonElement) => void
   toolActivity?: ToolActivity
   changeProposals?: Readonly<Record<string, MessageChangeProposal>>
   changeProposalStatus?: Readonly<Record<string, ChangeProposalStatus>>
@@ -30,6 +37,7 @@ export function MessageList({
     <ol className="message-list" aria-label="聊天记录">
       {messages.map((message) => {
         const entries = message.role === 'assistant' ? toolActivity[message.id] : undefined
+        const command = message.role === 'assistant' ? commandProposals[message.id] : undefined
         const activity = entries?.length ? entries : undefined
         const proposal = message.role === 'assistant' ? changeProposals[message.id] : undefined
         const proposalStatus =
@@ -110,6 +118,23 @@ export function MessageList({
                     onClick={(event) => onOpenProposal?.(proposal, event.currentTarget)}
                   >
                     查看差异
+                  </button>
+                )}
+              </aside>
+            )}
+            {command && (
+              <aside className="message-command-proposal" aria-label="命令提案">
+                <strong>命令提案：npm run typecheck</strong>
+                <span>尚未执行</span>
+                {command.snapshotId !== commandSnapshotId ? (
+                  <span>历史提案，需重新生成</span>
+                ) : (
+                  <button
+                    type="button"
+                    disabled={proposalOpenDisabled || !onOpenCommand}
+                    onClick={(event) => onOpenCommand?.(command, event.currentTarget)}
+                  >
+                    查看命令提案
                   </button>
                 )}
               </aside>

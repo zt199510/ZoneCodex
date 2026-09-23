@@ -581,6 +581,25 @@ app
       screenshot
     })
 
+    await until(
+      () =>
+        saved?.conversations?.some((c) =>
+          c.toolRuns?.some((r) => r.items.some((i) => i.name === 'propose_command'))
+        ),
+      'saved command history'
+    )
+    await window.loadFile(join(root, 'out/renderer/index.html'))
+    await idle()
+    await dom('!!document.querySelector(".message-command-proposal")')
+    assert(
+      await evaluate(
+        '!document.querySelector(".message-command-proposal button") && !document.querySelector(".command-review-panel")'
+      )
+    )
+    console.log(
+      'Lesson 26 reload passed: saved descriptions restored, review authorization not restored.'
+    )
+
     // 刷新后只从内存替身恢复已保存记录；损坏加载时禁止任何写入。
     failLoad = true
     const beforeLoadFailure = saves

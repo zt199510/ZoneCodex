@@ -12,6 +12,7 @@ type ProjectSelectionOptions = {
 type ProjectSelectionController = {
   projectSelection: ProjectSelection | null
   pendingSelection: ProjectSelection | null
+  forgetSnapshot: (snapshotId: string) => void
   markSent: () => void
   projectError: string | null
   clearError: () => void
@@ -129,6 +130,12 @@ export function useProjectSelection({
 
   return {
     projectSelection,
+    forgetSnapshot: (snapshotId) => {
+      if (projectSelectionRef.current?.snapshotId === snapshotId) {
+        setProjectSelection(null)
+        setSentSnapshotId(null)
+      }
+    },
     pendingSelection: projectSelection?.snapshotId === sentSnapshotId ? null : projectSelection,
     markSent: () => setSentSnapshotId(projectSelectionRef.current?.snapshotId ?? null),
     projectError,

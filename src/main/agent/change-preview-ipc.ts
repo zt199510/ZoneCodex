@@ -17,14 +17,16 @@ function resultError(error: string): PreviewChangeResult {
   return { status: 'error', error: error.slice(0, 500) }
 }
 
-export function registerChangePreview(): void {
+export function registerChangePreview(
+  isCommitActive: (windowId: number) => boolean = () => false
+): void {
   ipcMain.handle('preview:change', (event, value: unknown): PreviewChangeResult => {
     const owner = ownerOf(event)
     const request = parsePreviewChangeRequest(value)
     if (!request) return resultError('修改预览请求格式不正确')
 
     const windowId = owner.id
-    if (hasAgentJob(windowId) || hasProjectSelection(windowId)) {
+    if (hasAgentJob(windowId) || hasProjectSelection(windowId) || isCommitActive(windowId)) {
       return resultError('请先完成当前操作')
     }
 

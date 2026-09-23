@@ -56,11 +56,13 @@ export function useCloseGuard(conversation: ConversationController): {
       const operation = current.getOperation()
       if (operation !== 'idle') {
         setMessage(
-          operation === 'generating'
-            ? '正在生成，请先停止或等待回复结束，再关闭窗口。'
-            : operation === 'selecting'
-              ? '正在选择项目文件，请完成或取消选择后再关闭。'
-              : '正在读取或保存，请等待完成后再次关闭。'
+          operation === 'committing'
+            ? '正在提交文件，请等待结果后再关闭。'
+            : operation === 'generating'
+              ? '正在生成，请先停止或等待回复结束，再关闭窗口。'
+              : operation === 'selecting'
+                ? '正在选择项目文件，请完成或取消选择后再关闭。'
+                : '正在读取或保存，请等待完成后再次关闭。'
         )
         busyRef.current = true
         void finish(id, false)

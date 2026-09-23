@@ -1,3 +1,4 @@
+import { parseCommitRequest, parseCommitResult } from '../shared/change-commit'
 import { parsePreparationRequest, parsePreparationResult } from '../shared/change-preparation'
 // preload 通过 contextBridge 暴露业务接口；页面不直接使用 Node API。
 import { contextBridge, ipcRenderer, IpcRendererEvent } from 'electron'
@@ -10,9 +11,20 @@ import { isAgentId, parseAgentProgress, parseAgentResult } from '../shared/agent
 import { parseToolHistory } from '../shared/agent-history'
 import { parseAgentContext, parseProjectSelectionResult, parseToolScope } from '../shared/project'
 import { parsePreviewChangeRequest, parsePreviewChangeResult } from '../shared/change-preview'
+import { parseCommandPreparationResult, parseCommandSource } from '../shared/command-preparation'
 
 // Custom APIs for renderer
 const api: AppAPI = {
+  selectCommandDirectory: async (source, operationId) => {
+    const checked = parseCommandSource(source); if (!checked) throw new Error('目录来源无效')
+    const result = parseCommandPreparationResult(await ipcRenderer.invoke('command-directory:select', { source: checked, operationId })); if (!result) throw new Error('目录选择结果无效'); return result
+  },
+  prepareCommand: async (source, grantId, checkId) => {
+    const checked = parseCommandSource(source); if (!checked) throw new Error('目录来源无效')
+    const result = parseCommandPreparationResult(await ipcRenderer.invoke('command-directory:prepare', { source: checked, grantId, checkId })); if (!result) throw new Error('准备结果无效'); return result
+  },
+  releaseCommandDirectory: async (grantId) => Boolean(await ipcRenderer.invoke('command-directory:release', grantId)),
+  cancelCommandPreparation: async (operationId) => Boolean(await ipcRenderer.invoke('command-directory:cancel', operationId)),
   // 窗口控制
   controlWindow: async (action) => {
     await ipcRenderer.invoke('window:command', action)
@@ -219,6 +231,26 @@ const api: AppAPI = {
     return result
   },
   // 从当前已授权快照生成只读修改预览
+  commitChange: async (request) => {
+    const checked = parseCommitRequest(request)
+    if (!checked) throw new Error('提交请求无效')
+    const result = parseCommitResult(await ipcRenderer.invoke('commit:apply', checked))
+    if (!result || Object.keys(checked).some((key) => result[key] !== checked[key]))
+      throw new Error('提交回执无效，请检查文件')
+    return result
+  },
+  cancelCommit: async (id) => {
+    if (!isAgentId(id)) return false
+    const result: unknown = await ipcRenderer.invoke('commit:cancel', id)
+    if (typeof result !== 'boolean') throw new Error('取消回执无效')
+    return result
+  },
+  revealBackup: async (id) => {
+    if (!isAgentId(id)) return false
+    const result: unknown = await ipcRenderer.invoke('commit:reveal-backup', id)
+    if (typeof result !== 'boolean') throw new Error('备份定位回执无效')
+    return result
+  },
   prepareChange: async (request) => {
     const checked = parsePreparationRequest(request)
     if (!checked) throw new Error('准备请求无效')

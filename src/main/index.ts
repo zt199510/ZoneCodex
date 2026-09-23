@@ -1,3 +1,9 @@
+import {
+  registerChangeCommit,
+  hasChangeCommit,
+  cancelChangeCommit,
+  attachCommitCleanup
+} from './agent/change-commit-ipc'
 import { registerChangePreview } from './agent/change-preview-ipc'
 import {
   registerChangePreparation,
@@ -17,6 +23,7 @@ import { registerCloseGuard, attachCloseGuard } from './window/close-guard'
 import { registerLocalTerminal, attachTerminalCleanup } from './terminal/local-terminal'
 import { abortProjectJob, hasAgentJob, registerAgentPractice } from './agent/agent-ipc'
 import { attachProjectAccessCleanup, registerProjectAccess } from './agent/project-access'
+import { cleanupCommandPreparation, registerCommandPreparation } from './agent/command-preparation-ipc'
 
 // Handle creating/removing shortcuts on Windows when installing/uninstalling.
 // 创建/删除 Windows 快捷方式
@@ -47,6 +54,8 @@ function createWindow(): void {
   attachTerminalCleanup(mainWindow)
   // 注册项目快照授权清理处理器
   attachProjectAccessCleanup(mainWindow)
+  mainWindow.on('closed', () => cleanupCommandPreparation(mainWindow.id))
+  attachCommitCleanup(mainWindow)
   // 注册窗口控件
   mainWindow.on('ready-to-show', () => {
     mainWindow.show()
@@ -93,21 +102,31 @@ app.whenReady().then(() => {
   // 注册窗口控件
   registerWindowControls()
   // 注册关闭确认处理器
-  registerCloseGuard()
+  registerCloseGuard(hasChangeCommit)
   // 注册真实流处理函数
   registerModelStream()
   // 注册本地终端接口
   registerLocalTerminal()
   // 注册练习工具接口
-  registerAgentPractice(hasChangePreparation)
+  registerAgentPractice((id) => hasChangePreparation(id) || hasChangeCommit(id))
+  registerCommandPreparation((windowId, source) => hasProjectSelection(windowId) && source.template === 'npm_typecheck')
   // 注册项目文件选择与撤销接口
   registerProjectAccess({
-    isAgentJobActive: (id) => hasAgentJob(id) || hasChangePreparation(id),
+    isAgentJobActive: (id) => hasAgentJob(id) || hasChangePreparation(id) || hasChangeCommit(id),
     abortProjectJob,
-    onAccessChanged: cleanupChangePreparation
+    onAccessChanged: (id) => {
+      cleanupChangePreparation(id)
+      cleanupCommandPreparation(id)
+      cancelChangeCommit(id)
+    }
   })
-  registerChangePreview()
-  registerChangePreparation((id) => hasAgentJob(id) || hasProjectSelection(id))
+  registerChangePreview(hasChangeCommit)
+  registerChangePreparation(
+    (id) => hasAgentJob(id) || hasProjectSelection(id) || hasChangeCommit(id)
+  )
+  registerChangeCommit(
+    (id) => hasAgentJob(id) || hasProjectSelection(id) || hasChangePreparation(id)
+  )
 
   // 创建会话存储器
   const conversationStore = createConversationStore(app.getPath('userData'))

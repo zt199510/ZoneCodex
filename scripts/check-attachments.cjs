@@ -466,6 +466,19 @@ async function main() {
     console.log(
       'Lesson 24 passed: mock proposal chain, byte baselines, BOM/LF/CRLF/empty, conflicts, bounds, cancellation, ownership, mutual exclusion and invalidation; source bytes unchanged.'
     )
+    await require('./check-commit.cjs')({
+      directory,
+      handlers,
+      owner,
+      event,
+      access,
+      agent,
+      preparation,
+      setPick: (value) => {
+        pick = value
+      },
+      electron
+    })
     console.log(
       'Attachments passed: direct picker, aliases, snapshots, bounds, links, mixed tools, history, ownership, consent, cancellation and cleanup.'
     )

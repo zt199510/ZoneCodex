@@ -9,6 +9,7 @@ import { CloseGuard } from '../conversation/CloseGuard'
 import { ComposerAttachments } from '../project/ComposerAttachments'
 import { AttachmentCards } from '../project/AttachmentCards'
 import { ChangePreviewPanel } from '../review/ChangePreviewPanel'
+import { CommandReviewPanel } from '../review/CommandReviewPanel'
 
 export function ChatWorkspace({
   conversation
@@ -19,6 +20,7 @@ export function ChatWorkspace({
   const [confirmClear, setConfirmClear] = useState(false)
   const scrollArea = useRef<HTMLDivElement>(null)
   const previewTriggerRef = useRef<HTMLButtonElement>(null)
+  const commandTriggerRef = useRef<HTMLButtonElement>(null)
   const followBottom = useRef(true)
   const { storage, messages, operation } = conversation
   const errors = [storage.error, conversation.chatError].filter(Boolean)
@@ -86,6 +88,12 @@ export function ChatWorkspace({
           <EmptyState disabled={!conversation.canSend} onSuggestion={suggest} />
         ) : (
           <MessageList
+            commandProposals={conversation.commandProposals}
+            commandSnapshotId={conversation.contextSelection?.snapshotId ?? null}
+            onOpenCommand={(proposal, trigger) => {
+              commandTriggerRef.current = trigger
+              conversation.commandReview.open(proposal)
+            }}
             messages={messages}
             toolActivity={conversation.toolActivity}
             changeProposals={conversation.changeProposals}
@@ -102,6 +110,7 @@ export function ChatWorkspace({
         )}
       </div>
       <ChangePreviewPanel
+        commit={conversation.commit}
         preparation={conversation.preparation}
         state={conversation.changePreview.state}
         snapshotCreatedAt={conversation.contextSelection?.createdAt ?? null}
@@ -109,6 +118,37 @@ export function ChatWorkspace({
         onDiscard={conversation.discardProposal}
         returnFocusRef={previewTriggerRef}
       />
+      {conversation.commandReview.proposal && (
+        <CommandReviewPanel
+          proposal={conversation.commandReview.proposal}
+          onClose={conversation.commandReview.close}
+          returnFocusRef={commandTriggerRef}
+        />
+      )}
+      {conversation.commit.receipt && (
+        <section className="commit-receipt" role="status">
+          <p>{conversation.commit.receipt.message}</p>
+          {conversation.commit.receipt.recovery && (
+            <p>
+              备份：{conversation.commit.receipt.recovery.name}{' '}
+              <button
+                type="button"
+                className="quiet-button"
+                onClick={() => void conversation.commit.reveal()}
+              >
+                定位备份
+              </button>
+            </p>
+          )}
+          {conversation.commit.receipt.cleanupWarning && (
+            <p>请检查同目录中的备份与临时文件；未执行自动回滚。</p>
+          )}
+          {conversation.commit.notice && <p>{conversation.commit.notice}</p>}
+          <button type="button" className="quiet-button" onClick={conversation.commit.dismiss}>
+            关闭结果
+          </button>
+        </section>
+      )}
       <div className="composer-region">
         <ChatInput
           value={draft}

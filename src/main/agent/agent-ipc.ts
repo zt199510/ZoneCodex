@@ -11,6 +11,7 @@ import { createLiveResponse, createMockResponse, sendLiveResponse } from '../mod
 import { captureProjectAccess, hasProjectSelection } from './project-access'
 import { changeProposalTool, createChangeProposalExecutor } from '../tools/change-proposal'
 import { projectTools } from '../tools/project-snapshot'
+import { commandProposalTool, createCommandProposalExecutor } from '../tools/command-proposal'
 import { timeTool, executeTimeTool } from '../tools/current-time'
 import type { ProjectSnapshot } from '../tools/project-snapshot'
 
@@ -86,6 +87,7 @@ export function registerAgentPractice(
           ? createChangeProposalExecutor(projectSnapshot, checkedContext.conversationId)
           : undefined
       const checkedHistory = parseToolHistory(history, checkedScope)
+      const executeCommandProposal = createCommandProposalExecutor()
       if (!checkedHistory) return { status: 'error', error: '工具历史参数无效', trace }
       if (jobs.has(windowId)) return { status: 'error', error: '请等待上一次工具任务结束', trace }
       const controller = new AbortController()
@@ -122,8 +124,9 @@ export function registerAgentPractice(
           projectSnapshot
             ? mode === 'live'
               ? createLiveResponse(
-                  [timeTool, ...projectTools, changeProposalTool],
-                  projectInstructions
+                  [timeTool, ...projectTools, changeProposalTool, commandProposalTool],
+                  projectInstructions +
+                    '仅在用户请求检查建议时使用 propose_command 提出 npm_typecheck，每任务最多一份；工作目录未绑定，不得传入目录或声称已经运行。若声称附件配置了脚本，必须先读取并说明只是快照信息。提案不代表执行授权。'
                 )
               : createProjectMock(projectSnapshot.selection)
             : mode === 'mock'
@@ -140,6 +143,7 @@ export function registerAgentPractice(
             ? ((executeFile) => {
                 return async (name: string, args: string, signal: AbortSignal): Promise<string> => {
                   signal.throwIfAborted()
+                  if (name === 'propose_command') return executeCommandProposal(name, args, signal)
                   return name === 'get_current_time'
                     ? executeTimeTool(name, args)
                     : executeFile(name, args, signal)

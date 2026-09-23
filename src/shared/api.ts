@@ -1,3 +1,4 @@
+import type { CommitRequest, CommitResult } from './change-commit'
 import type { PreparationRequest, PreparationResult } from './change-preparation'
 import type { SaveConversationResult } from './conversation'
 import type { WindowAction, WindowState } from './window'
@@ -7,6 +8,7 @@ import type { AgentMode, AgentResult, AgentProgress } from './agent'
 import type { ProtocolItem } from './agent-history'
 import type { AgentContext, ProjectSelectionResult } from './project'
 import type { PreviewChangeRequest, PreviewChangeResult } from './change-preview'
+import type { CommandSource, CommandPreparationResult } from './command-preparation'
 
 // 模型消息类型
 export type ModelMessage = {
@@ -25,6 +27,13 @@ export type ModelStreamResult =
 
 // 应用 API 接口类型
 export interface AppAPI {
+  selectCommandDirectory: (source: CommandSource, operationId: string) => Promise<CommandPreparationResult>
+  prepareCommand: (source: CommandSource, grantId: string, checkId: string) => Promise<CommandPreparationResult>
+  releaseCommandDirectory: (grantId: string) => Promise<boolean>
+  cancelCommandPreparation: (operationId: string) => Promise<boolean>
+  commitChange: (request: CommitRequest) => Promise<CommitResult>
+  cancelCommit: (commitId: string) => Promise<boolean>
+  revealBackup: (recoveryId: string) => Promise<boolean>
   prepareChange: (request: PreparationRequest) => Promise<PreparationResult>
   cancelPreparation: (checkId: string) => Promise<boolean>
   controlWindow: (action: WindowAction) => Promise<void>

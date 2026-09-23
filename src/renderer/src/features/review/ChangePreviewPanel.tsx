@@ -1,3 +1,4 @@
+import type { CommitController } from './useChangeCommit'
 import type { PreparationController } from './useChangePreparation'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { RefObject } from 'react'
@@ -7,6 +8,7 @@ import { buildDiff } from './diff'
 import type { ChangePreviewState } from './useChangePreview'
 
 type ChangePreviewPanelProps = {
+  commit: CommitController
   preparation: PreparationController
   state: ChangePreviewState
   snapshotCreatedAt: string | null
@@ -83,6 +85,7 @@ export function ChangePreviewPanel({
   state,
   snapshotCreatedAt,
   preparation,
+  commit,
   onClose,
   onDiscard,
   returnFocusRef
@@ -91,7 +94,7 @@ export function ChangePreviewPanel({
   const [closedGeneration, setClosedGeneration] = useState<number | null>(null)
   const visible = state.status !== 'idle' && closedGeneration !== state.generation
   const generation = state.status === 'idle' ? null : state.generation
-  const canDiscard = state.status !== 'loading'
+  const canDiscard = state.status !== 'loading' && !commit.busy
 
   const focusReturnTarget = useCallback((): void => {
     requestAnimationFrame(() => {
@@ -182,18 +185,31 @@ export function ChangePreviewPanel({
           )}
           {preparation.state.status === 'ready' && (
             <div className="change-preview-status preparation-summary" role="status">
-              <strong>检查通过，尚未写入；实际提交前仍需再次检查</strong>
+              <strong>
+                {commit.busy
+                  ? '正在提交，请等待实际结果'
+                  : '检查通过，尚未写入；实际提交前仍需再次检查'}
+              </strong>
               <p>
                 {preparation.state.encoding} · {preparation.state.newline} · 预计{' '}
                 {preparation.state.bytes} 字节
               </p>
-              <p>本次检查两分钟后失效。差异内容如下：</p>
+              <p>
+                确认后会修改此文件并在同目录保留基线备份；请暂停编辑器自动保存。检查不能排除外部并发覆盖。
+              </p>
+              {preview?.after === '' && <p>候选正文为空，将清空原有正文。</p>}
+              {!commit.busy && <p>本次检查两分钟后失效。差异内容如下：</p>}
             </div>
           )}
           {preparation.state.status === 'loading' && <p role="status">正在检查磁盘版本…</p>}
           {'error' in preparation.state && (
             <p className="change-preview-status change-preview-error" role="alert">
               {preparation.state.error}
+            </p>
+          )}
+          {commit.busy && (
+            <p className="preparation-summary" role="status">
+              {commit.notice ?? '正在提交，请等待结果'}
             </p>
           )}
           {preview && <DiffRows preview={preview} />}
@@ -205,7 +221,9 @@ export function ChangePreviewPanel({
               type="button"
               className="quiet-button"
               disabled={
-                preparation.state.status === 'loading' || preparation.state.status === 'conflict'
+                commit.busy ||
+                preparation.state.status === 'loading' ||
+                preparation.state.status === 'conflict'
               }
               onClick={() => void preparation.check()}
             >
@@ -213,8 +231,22 @@ export function ChangePreviewPanel({
             </button>
           )}
           {preparation.state.status === 'ready' && (
-            <button type="button" className="quiet-button" onClick={preparation.cancel}>
-              返回审查
+            <button
+              type="button"
+              className="quiet-button"
+              onClick={commit.busy ? commit.requestCancel : preparation.cancel}
+            >
+              {commit.busy ? '请求取消' : '返回审查'}
+            </button>
+          )}
+          {preparation.available && preparation.state.status === 'ready' && (
+            <button
+              type="button"
+              className="quiet-button commit-confirm"
+              disabled={commit.busy}
+              onClick={() => void commit.confirm()}
+            >
+              {commit.busy ? '正在提交…' : '确认写入此文件'}
             </button>
           )}
           {preparation.state.status !== 'ready' && (

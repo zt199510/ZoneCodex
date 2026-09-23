@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto'
+import { parseCommandProposalOutput, parseCommandJson } from '../../shared/command-proposal'
 import { setTimeout as delay } from 'node:timers/promises'
 import { AgentError, isRecord } from '../agent/tool-loop'
 import type { SendResponse } from '../agent/tool-loop'
@@ -145,10 +146,43 @@ export function createProjectMock(selection: ProjectSelection): SendResponse {
   const proposalCallId = `call_project_mock_${randomUUID()}`
   let proposalMode: boolean | null = null
   let proposalPath: string | null = null
+  let commandMode = false
 
   return async (input, signal) => {
     await delay(80, undefined, { signal })
     signal.throwIfAborted()
+
+    if (step === 0) commandMode = latestUserPrompt(input) === '模拟命令提案'
+    if (commandMode) {
+      if (step === 0) {
+        step = 1
+        return {
+          status: 'completed',
+          output: [
+            {
+              type: 'function_call',
+              call_id: proposalCallId,
+              name: 'propose_command',
+              arguments: JSON.stringify({
+                template: 'npm_typecheck',
+                reason: '建议在选择并授权工作目录后检查类型；当前仅生成提案。'
+              })
+            }
+          ]
+        }
+      }
+      if (step !== 1) throw new AgentError('命令模拟轮次已结束')
+      const result = parseCommandProposalOutput(
+        parseCommandJson(outputForCall(input, proposalCallId))
+      )
+      if (!result) throw new AgentError('命令模拟结果无效')
+      step = 2
+      return finalResponse(
+        result.status === 'proposal_ready'
+          ? '已提出检查建议，尚未运行。'
+          : `提案失败：${result.error}`
+      )
+    }
 
     if (proposalMode === null) proposalMode = latestUserPrompt(input) === '模拟修改 greet'
 

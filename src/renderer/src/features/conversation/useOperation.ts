@@ -1,6 +1,6 @@
 import { useCallback, useRef, useState } from 'react'
 
-export type Operation = 'loading' | 'idle' | 'generating' | 'saving' | 'selecting'
+export type Operation = 'loading' | 'idle' | 'generating' | 'saving' | 'selecting' | 'committing'
 
 export type OperationControl = {
   operation: Operation

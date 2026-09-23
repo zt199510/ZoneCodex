@@ -257,6 +257,7 @@ export function isToolAllowed(name: unknown, scope: ToolScope): name is string {
     (scope.kind === 'project' &&
       (name === 'search_project_text' ||
         name === 'read_project_file' ||
-        name === 'propose_file_change'))
+        name === 'propose_file_change' ||
+        name === 'propose_command'))
   )
 }

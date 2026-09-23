@@ -9,6 +9,8 @@ import {
 } from '../../shared/change-preparation'
 import { captureProjectAccess } from './project-access'
 import { prepareChange, type PreparedContent } from '../tools/change-preparation'
+import type { CommitRequest } from '../../shared/change-commit'
+import type { ProjectSnapshot } from '../tools/project-snapshot'
 
 type Task = { request: PreparationRequest; controller: AbortController }
 type RecordEntry = {
@@ -21,6 +23,42 @@ type RecordEntry = {
 }
 const tasks = new Map<number, Task>()
 const records = new Map<number, RecordEntry>()
+// Called synchronously by commit IPC before its first await. Ownership moves to that task.
+export function claimPreparation(
+  windowId: number,
+  request: CommitRequest,
+  snapshot: ProjectSnapshot
+): PreparedContent | null {
+  const record = records.get(windowId)
+  if (
+    !record ||
+    record.windowId !== windowId ||
+    record.preparationId !== request.preparationId ||
+    record.request.checkId !== request.checkId ||
+    record.request.conversationId !== request.conversationId ||
+    record.request.snapshotId !== request.snapshotId ||
+    snapshot.selection.snapshotId !== request.snapshotId ||
+    snapshot.baselines?.get(record.request.path) !== record.content.baseline
+  )
+    return null
+  if (Date.now() >= record.expiresAt) {
+    cleanupChangePreparation(windowId, request.checkId)
+    return null
+  }
+  clearTimeout(record.timer)
+  records.delete(windowId)
+  return record.content
+}
+
+export function preparationLockKeys(windowId: number, request: CommitRequest): string[] | null {
+  const record = records.get(windowId)
+  if (!record || record.preparationId !== request.preparationId) return null
+  const baseline = record.content.baseline
+  return [
+    `identity:${baseline.dev}:${baseline.ino}`,
+    `path:${process.platform === 'win32' ? baseline.absolutePath.toLowerCase() : baseline.absolutePath}`
+  ]
+}
 export const hasChangePreparation = (windowId: number): boolean => tasks.has(windowId)
 
 export function cleanupChangePreparation(windowId: number, checkId?: string): boolean {

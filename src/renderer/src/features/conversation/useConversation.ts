@@ -1,3 +1,9 @@
+import { useChangeCommit, type CommitController } from '../review/useChangeCommit'
+import {
+  deriveMessageCommandProposal,
+  type MessageCommandProposal
+} from '../../../../shared/command-proposal'
+import { useCommandReview } from '../review/useCommandReview'
 import { useChangePreparation, type PreparationController } from '../review/useChangePreparation'
 import { useCallback, useRef, useState } from 'react'
 import type { ChatMessage } from '../../../../shared/conversation'
@@ -21,6 +27,8 @@ function proposalKey(proposal: MessageChangeProposal): string {
 }
 
 export type ConversationController = {
+  commandProposals: Readonly<Record<string, MessageCommandProposal>>
+  commandReview: ReturnType<typeof useCommandReview>
   conversations: Conversation[]
   activeConversationId: string | null
   messages: ChatMessage[]
@@ -46,6 +54,7 @@ export type ConversationController = {
   engine: ChatEngine
   setEngine: (engine: ChatEngine) => Promise<boolean>
   removeFile: (path: string) => Promise<boolean>
+  commit: CommitController
   preparation: PreparationController
   changePreview: ChangePreviewController
   changeProposals: Readonly<Record<string, MessageChangeProposal>>
@@ -115,6 +124,7 @@ export function useConversation(): ConversationController {
     projectSelection,
     pendingSelection,
     markSent,
+    forgetSnapshot,
     projectError,
     clearError: clearProjectError,
     selectProjectFiles: selectFiles,
@@ -155,6 +165,24 @@ export function useConversation(): ConversationController {
   }
 
   const preview = changePreview.state.status === 'ready' ? changePreview.state.preview : null
+  const commandProposals: Record<string, MessageCommandProposal> = {}
+  for (const run of active?.toolRuns ?? []) {
+    const proposal = deriveMessageCommandProposal(
+      active!.id,
+      run,
+      messages.find((message) => message.id === run.userId),
+      messages.find((message) => message.id === run.assistantId)
+    )
+    if (proposal) commandProposals[proposal.assistantId] = proposal
+  }
+  const commandReview = useCommandReview(
+    commandProposals,
+    projectSelection?.snapshotId ?? null,
+    storage.ready &&
+      operations.operation === 'idle' &&
+      !closePending &&
+      changePreview.state.status === 'idle'
+  )
   const source = openedProposal && changeProposals[openedProposal.assistantId]
   const preparation = useChangePreparation(
     source &&
@@ -177,6 +205,17 @@ export function useConversation(): ConversationController {
       : null,
     operations,
     canChange
+  )
+
+  const commit = useChangeCommit(
+    active?.id ?? null,
+    preparation.available && preparation.state.status === 'ready' ? preparation.state : null,
+    operations,
+    canChange,
+    (snapshotId, clearGrant) => {
+      preparation.cancel()
+      if (clearGrant) forgetSnapshot(snapshotId)
+    }
   )
 
   const chatMode = resolveChatMode(engine, projectSelection !== null)
@@ -223,12 +262,20 @@ export function useConversation(): ConversationController {
   }
 
   const closePreview = useCallback((): boolean => {
+    if (commit.isActive()) {
+      commit.requestCancel()
+      return false
+    }
     preparation.cancel()
     setOpenedProposal(null)
     return changePreview.discard()
-  }, [changePreview, preparation, openedProposal])
+  }, [changePreview, preparation, commit])
 
   const discardProposal = useCallback((): boolean => {
+    if (commit.isActive()) {
+      commit.requestCancel()
+      return false
+    }
     preparation.cancel()
     const proposal = openedProposal
     const discarded = changePreview.discard()
@@ -238,7 +285,7 @@ export function useConversation(): ConversationController {
     }
     setOpenedProposal(null)
     return discarded
-  }, [changePreview, preparation, openedProposal])
+  }, [changePreview, preparation, openedProposal, commit])
   async function setEngine(next: ChatEngine): Promise<boolean> {
     if (next === engine) return true
     if (!canChange()) return false
@@ -323,6 +370,8 @@ export function useConversation(): ConversationController {
     ...request.toolActivity
   }
   return {
+    commandProposals,
+    commandReview,
     conversations: snapshot.conversations,
     activeConversationId: snapshot.activeConversationId,
     messages,
@@ -357,6 +406,7 @@ export function useConversation(): ConversationController {
       preparation.cancel()
       const accepted = request.send(content)
       if (accepted) {
+        commandReview.close()
         setCapacityError(null)
         markSent()
       }
@@ -368,6 +418,7 @@ export function useConversation(): ConversationController {
     setEngine,
     removeFile,
     preparation,
+    commit,
     changePreview: {
       ...changePreview,
       requestPreview: async (path, proposedText) => {
