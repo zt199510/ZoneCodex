@@ -137,27 +137,7 @@ export function ComposerAttachments({
         )}
         <details className="composer-debug">
           <summary>开发调试</summary>
-          <label>
-            响应来源
-            <select
-              aria-label="调试响应来源"
-              value={c.engine}
-              disabled={!c.canEdit}
-              onChange={(event) => {
-                const value = event.target.value
-                if (value === 'live' || value === 'mock' || value === 'stream')
-                  void c.setEngine(value)
-              }}
-            >
-              <option value="live">真实模型（默认）</option>
-              <option value="mock">离线模拟</option>
-              <option value="stream">纯文本流式调试</option>
-            </select>
-          </label>
-          <p>
-            模拟模式固定查询时间或搜索
-            greet，不理解任意问题。流式调试不使用附件，切换时会清除当前附件授权。
-          </p>
+          <p>正式聊天由 Agent 根据当前授权和可用工具自行决定调用方式。</p>
           <section className="change-preview-practice" aria-labelledby={`${id}-preview-title`}>
             <div className="change-preview-practice-heading">
               <Icon name="code" size={15} />

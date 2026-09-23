@@ -31,3 +31,8 @@ export function registerCommandPreparation(isSourceAllowed: (windowId: number, s
 }
 export function cleanupCommandPreparation(windowId: number): void { for (const [id,g] of grants) if (g.windowId===windowId) grants.delete(id); for (const [id,p] of prepared) if (p.windowId===windowId) prepared.delete(id); selecting.delete(windowId) }
 export function hasCommandPreparation(id: string): boolean { return [...prepared.values()].some(p=>p.preparedId===id && p.expires>Date.now()) }
+export function claimCommandPreparation(windowId: number, preparedId: string, source: CommandSource): { directory: string } | null {
+  const p = prepared.get(preparedId); if (!p || p.windowId !== windowId || p.expires <= Date.now() || JSON.stringify(p.source) !== JSON.stringify(source)) return null
+  const g = grants.get(p.grantId); prepared.delete(preparedId); if (!g || g.windowId !== windowId || JSON.stringify(g.source) !== JSON.stringify(source) || g.expires <= Date.now()) return null
+  grants.delete(p.grantId); return { directory: g.directory }
+}

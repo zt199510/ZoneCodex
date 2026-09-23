@@ -8,7 +8,7 @@ import type { AgentMode, AgentResult, AgentProgress } from './agent'
 import type { ProtocolItem } from './agent-history'
 import type { AgentContext, ProjectSelectionResult } from './project'
 import type { PreviewChangeRequest, PreviewChangeResult } from './change-preview'
-import type { CommandSource, CommandPreparationResult } from './command-preparation'
+import type { CommandSource, CommandPreparationResult, CommandExecutionRequest, CommandExecutionEvent } from './command-preparation'
 
 // 模型消息类型
 export type ModelMessage = {
@@ -31,6 +31,9 @@ export interface AppAPI {
   prepareCommand: (source: CommandSource, grantId: string, checkId: string) => Promise<CommandPreparationResult>
   releaseCommandDirectory: (grantId: string) => Promise<boolean>
   cancelCommandPreparation: (operationId: string) => Promise<boolean>
+  startCommandExecution: (request: CommandExecutionRequest) => Promise<{ status: 'started'; executionId: string } | { status: 'error'; error: string }>
+  cancelCommandExecution: (executionId: string) => Promise<boolean>
+  onCommandExecutionEvent: (listener: (event: CommandExecutionEvent) => void) => () => void
   commitChange: (request: CommitRequest) => Promise<CommitResult>
   cancelCommit: (commitId: string) => Promise<boolean>
   revealBackup: (recoveryId: string) => Promise<boolean>

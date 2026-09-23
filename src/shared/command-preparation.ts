@@ -23,6 +23,12 @@ export type CommandPreparationResult =
   | { status: 'conflict' | 'expired' | 'error'; error: string }
 export type SelectCommandDirectoryRequest = { source: CommandSource; operationId: string }
 export type PrepareCommandRequest = { source: CommandSource; grantId: string; checkId: string }
+export type CommandExecutionRequest = { source: CommandSource; preparedId: string; confirmationId: string }
+export type CommandExecutionEvent =
+  | { status: 'started'; executionId: string }
+  | { status: 'output'; executionId: string; stream: 'stdout' | 'stderr'; text: string; totalBytes: number; truncated?: boolean }
+  | { status: 'finished'; executionId: string; exitCode: number }
+  | { status: 'cancelled' | 'timed_out' | 'error'; executionId: string; error: string }
 
 const id = (v: unknown): v is string => typeof v === 'string' && /^[A-Za-z0-9-]{1,80}$/.test(v)
 const record = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v) && (Object.getPrototypeOf(v) === Object.prototype || Object.getPrototypeOf(v) === null)
@@ -37,6 +43,10 @@ export function parseSelectCommandDirectoryRequest(v: unknown): SelectCommandDir
 export function parsePrepareCommandRequest(v: unknown): PrepareCommandRequest | null {
   if (!record(v) || Object.keys(v).length !== 3 || !parseCommandSource(v.source) || !id(v.grantId) || !id(v.checkId)) return null
   return { source: parseCommandSource(v.source)!, grantId: v.grantId, checkId: v.checkId }
+}
+export function parseCommandExecutionRequest(v: unknown): CommandExecutionRequest | null {
+  if (!record(v) || Object.keys(v).length !== 3 || !parseCommandSource(v.source) || !id(v.preparedId) || !id(v.confirmationId)) return null
+  return { source: parseCommandSource(v.source)!, preparedId: v.preparedId, confirmationId: v.confirmationId }
 }
 export function parseCommandPreparationResult(v: unknown): CommandPreparationResult | null {
   if (!record(v) || typeof v.status !== 'string') return null

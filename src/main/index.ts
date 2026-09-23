@@ -24,6 +24,7 @@ import { registerLocalTerminal, attachTerminalCleanup } from './terminal/local-t
 import { abortProjectJob, hasAgentJob, registerAgentPractice } from './agent/agent-ipc'
 import { attachProjectAccessCleanup, registerProjectAccess } from './agent/project-access'
 import { cleanupCommandPreparation, registerCommandPreparation } from './agent/command-preparation-ipc'
+import { cleanupCommandExecution, hasCommandExecution, registerCommandExecution } from './agent/command-execution-ipc'
 
 // Handle creating/removing shortcuts on Windows when installing/uninstalling.
 // 创建/删除 Windows 快捷方式
@@ -54,7 +55,7 @@ function createWindow(): void {
   attachTerminalCleanup(mainWindow)
   // 注册项目快照授权清理处理器
   attachProjectAccessCleanup(mainWindow)
-  mainWindow.on('closed', () => cleanupCommandPreparation(mainWindow.id))
+  mainWindow.on('closed', () => { cleanupCommandExecution(mainWindow.id); cleanupCommandPreparation(mainWindow.id) })
   attachCommitCleanup(mainWindow)
   // 注册窗口控件
   mainWindow.on('ready-to-show', () => {
@@ -108,24 +109,26 @@ app.whenReady().then(() => {
   // 注册本地终端接口
   registerLocalTerminal()
   // 注册练习工具接口
-  registerAgentPractice((id) => hasChangePreparation(id) || hasChangeCommit(id))
+  registerAgentPractice((id) => hasChangePreparation(id) || hasChangeCommit(id) || hasCommandExecution(id))
   registerCommandPreparation((windowId, source) => hasProjectSelection(windowId) && source.template === 'npm_typecheck')
+  registerCommandExecution((windowId, source) => hasProjectSelection(windowId) && source.template === 'npm_typecheck')
   // 注册项目文件选择与撤销接口
   registerProjectAccess({
-    isAgentJobActive: (id) => hasAgentJob(id) || hasChangePreparation(id) || hasChangeCommit(id),
+    isAgentJobActive: (id) => hasAgentJob(id) || hasChangePreparation(id) || hasChangeCommit(id) || hasCommandExecution(id),
     abortProjectJob,
     onAccessChanged: (id) => {
       cleanupChangePreparation(id)
       cleanupCommandPreparation(id)
+      cleanupCommandExecution(id)
       cancelChangeCommit(id)
     }
   })
   registerChangePreview(hasChangeCommit)
   registerChangePreparation(
-    (id) => hasAgentJob(id) || hasProjectSelection(id) || hasChangeCommit(id)
+    (id) => hasAgentJob(id) || hasProjectSelection(id) || hasChangeCommit(id) || hasCommandExecution(id)
   )
   registerChangeCommit(
-    (id) => hasAgentJob(id) || hasProjectSelection(id) || hasChangePreparation(id)
+    (id) => hasAgentJob(id) || hasProjectSelection(id) || hasChangePreparation(id) || hasCommandExecution(id)
   )
 
   // 创建会话存储器
