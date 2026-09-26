@@ -5,6 +5,7 @@ import type { ProtocolItem, ToolRun } from '../../../../shared/agent-history'
 import type { AgentContext, ProjectSelection, ToolScope } from '../../../../shared/project'
 import type { ChatMessage } from '../../../../shared/conversation'
 import type { Conversation } from '../../../../shared/conversation-library'
+import { maxTaskRecords } from '../../../../shared/task'
 import type { OperationControl } from '../conversation/useOperation'
 import { buildContext, messagesAfterProjectBoundary } from './context'
 import { resolveToolRequest, type ChatMode } from './chat-mode'
@@ -25,6 +26,7 @@ type ActiveRequest = {
   chatHistory: ReturnType<typeof buildContext>
   trace: string[]
   text: string
+  taskId: string
 }
 type UpdateMessages = (
   conversationId: string,
@@ -47,7 +49,11 @@ type ChatRequestOptions = {
 type ChatRequest = {
   error: string | null
   toolActivity: ToolActivity
-  send: (rawContent: string) => boolean
+  send: (
+    rawContent: string,
+    sourceMessages?: readonly ChatMessage[],
+    sourceToolRuns?: readonly ToolRun[]
+  ) => boolean
   stop: () => Promise<void>
   clearError: () => void
   clearActivity: () => void
@@ -91,11 +97,24 @@ export function useChatRequest({
         [active.assistantId]: [...(previous[active.assistantId] ?? []), event.message].slice(-30)
       }))
     })
+    const offTask = window.api.onTaskState((record) => {
+      updateConversation(record.conversationId, (previous) => {
+        const known = previous.tasks.some((task) => task.taskId === record.taskId)
+        const tasks = known
+          ? previous.tasks.map((task) => (task.taskId === record.taskId ? record : task))
+          : [...previous.tasks, record].slice(-maxTaskRecords)
+        return {
+          ...previous,
+          tasks
+        }
+      })
+    })
     subscribed.current = true
     return () => {
       subscribed.current = false
       offDelta()
       offProgress()
+      offTask()
       const active = activeRequest.current
       activeRequest.current = null
       if (!active) return
@@ -103,7 +122,7 @@ export function useChatRequest({
         void window.api.cancelModelStream(active.requestId).catch(() => undefined)
       else void window.api.cancelAgentPractice(active.requestId).catch(() => undefined)
     }
-  }, [updateMessages])
+  }, [updateConversation, updateMessages])
 
   function finishTurn(active: ActiveRequest, status: ChatMessage['status'], answer?: string): void {
     updateMessages(active.conversationId, (previous) =>
@@ -153,13 +172,21 @@ export function useChatRequest({
   async function run(active: ActiveRequest): Promise<void> {
     try {
       if (active.mode === 'chat') {
-        const result = await window.api.startModelStream(active.requestId, active.chatHistory)
+        const result = await window.api.startModelStream(
+          active.requestId,
+          active.chatHistory,
+          active.taskId,
+          active.conversationId
+        )
         if (activeRequest.current?.requestId !== active.requestId) return
-        if (result.status === 'done' && active.text.trim()) finishTurn(active, 'complete')
-        else if (result.status === 'cancelled') finishTurn(active, 'cancelled')
-        else {
+        if (result.status === 'done' && active.text.trim()) {
+          finishTurn(active, 'complete')
+        } else if (result.status === 'cancelled') {
+          finishTurn(active, 'cancelled')
+        } else {
           finishTurn(active, 'failed')
-          setError(result.status === 'error' ? result.error : '未收到有效的回复文字。')
+          const error = result.status === 'error' ? result.error : '未收到有效的回复文字。'
+          setError(error)
         }
       } else {
         const result = await window.api.startAgentPractice(
@@ -167,7 +194,9 @@ export function useChatRequest({
           active.prompt,
           active.agentMode ?? 'mock',
           active.history,
-          active.context ?? { kind: 'time' }
+          active.context ?? { kind: 'time' },
+          active.taskId,
+          active.conversationId
         )
         if (activeRequest.current?.requestId !== active.requestId) return
         if (result.status === 'done') {
@@ -193,7 +222,11 @@ export function useChatRequest({
     }
   }
 
-  function send(rawContent: string): boolean {
+  function send(
+    rawContent: string,
+    sourceMessages: readonly ChatMessage[] = messages,
+    sourceToolRuns: readonly ToolRun[] = toolRuns
+  ): boolean {
     const content = rawContent.trim()
     if (!subscribed.current || !conversationId || !content || activeRequest.current) return false
     const limit = mode === 'chat' ? 4000 : 2000
@@ -207,7 +240,10 @@ export function useChatRequest({
     let context: AgentContext | null = null
     let agentMode: AgentMode | null = null
     if (mode === 'chat') {
-      chatHistory = buildContext(messagesAfterProjectBoundary(messages, toolRuns), content)
+      chatHistory = buildContext(
+        messagesAfterProjectBoundary(sourceMessages, sourceToolRuns),
+        content
+      )
     } else {
       try {
         const request = resolveToolRequest(mode, conversationId, projectSelection)
@@ -218,7 +254,7 @@ export function useChatRequest({
         agentMode = request.agentMode
         scope = request.scope
         context = request.context
-        history = selectToolHistory(messages, toolRuns, request.agentMode, request.scope)
+        history = selectToolHistory(sourceMessages, sourceToolRuns, request.agentMode, request.scope)
       } catch (error) {
         setError(error instanceof Error ? error.message : '工具上下文无效，请重新说明问题。')
         return false
@@ -238,7 +274,8 @@ export function useChatRequest({
       history,
       chatHistory,
       trace: [],
-      text: ''
+      text: '',
+      taskId: crypto.randomUUID()
     }
     activeRequest.current = active
     setError(null)

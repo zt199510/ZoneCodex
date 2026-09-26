@@ -10,6 +10,8 @@ import { ComposerAttachments } from '../project/ComposerAttachments'
 import { AttachmentCards } from '../project/AttachmentCards'
 import { ChangePreviewPanel } from '../review/ChangePreviewPanel'
 import { CommandReviewPanel } from '../review/CommandReviewPanel'
+import { WorkspaceStatus } from '../project/WorkspaceStatus'
+import type { ChatMessage } from '../../../../shared/conversation'
 
 export function ChatWorkspace({
   conversation
@@ -41,6 +43,20 @@ export function ChatWorkspace({
     setDraft(prompt)
     document.getElementById('chat-input')?.focus()
   }
+  async function copyMessage(message: ChatMessage): Promise<boolean> {
+    if (!navigator.clipboard) return false
+    try {
+      await navigator.clipboard.writeText(message.content)
+      return true
+    } catch {
+      return false
+    }
+  }
+  function retryAssistant(message: ChatMessage): void {
+    const index = messages.findIndex((item) => item.id === message.id)
+    const source = index > 0 ? messages[index - 1] : undefined
+    if (source?.role === 'user') send(source.content)
+  }
 
   return (
     <main className="chat-workspace" id="conversation">
@@ -55,6 +71,14 @@ export function ChatWorkspace({
           void storage.save()
         }}
         onClear={() => setConfirmClear(true)}
+      />
+      <WorkspaceStatus
+        selection={conversation.contextSelection}
+        operation={operation}
+        waitingApproval={conversation.commandReview.proposal !== null}
+        tasks={conversation.tasks}
+        canRetryTask={conversation.canRetryTask}
+        onRetryTask={conversation.retryTask}
       />
       {errors.length > 0 && (
         <div className="error-banner" role="alert">
@@ -88,6 +112,7 @@ export function ChatWorkspace({
           <EmptyState disabled={!conversation.canSend} onSuggestion={suggest} />
         ) : (
           <MessageList
+            key={conversation.activeConversationId}
             commandProposals={conversation.commandProposals}
             commandSnapshotId={conversation.contextSelection?.snapshotId ?? null}
             onOpenCommand={(proposal, trigger) => {
@@ -106,6 +131,11 @@ export function ChatWorkspace({
               previewTriggerRef.current = trigger
               void conversation.openProposal(proposal)
             }}
+            onSendEditedMessage={conversation.editAndSend}
+            editDisabled={!conversation.canSend}
+            editMaxLength={conversation.engine === 'stream' ? 4000 : 2000}
+            onCopyMessage={copyMessage}
+            onRetryAssistant={retryAssistant}
           />
         )}
       </div>

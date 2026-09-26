@@ -2,6 +2,9 @@ import { parseSnapshot } from './conversation'
 import type { ChatMessage } from './conversation'
 import { parseToolRuns, parseToolRunsV3 } from './agent-history'
 import type { LegacyToolRun, ToolRun } from './agent-history'
+import type { SavedWorkspace } from './project'
+import { parseTaskRecords } from './task'
+import type { TaskRecord } from './task'
 
 export type ConversationV2 = {
   id: string
@@ -33,6 +36,8 @@ export type Conversation = {
   title: string
   messages: ChatMessage[]
   toolRuns: ToolRun[]
+  workspace: SavedWorkspace | null
+  tasks: TaskRecord[]
 }
 
 export type ConversationLibrary = {
@@ -162,9 +167,36 @@ export function parseLibrary(value: unknown): ConversationLibrary | null {
     if (!toolRuns) return null
     protocolLength += serializedLength(toolRuns) ?? Number.POSITIVE_INFINITY
     if (protocolLength > 2_000_000) return null
+    let workspace: SavedWorkspace | null = null
+    if ('workspace' in raw && raw.workspace !== null) {
+      const candidate = raw.workspace
+      if (
+        !isRecord(candidate) ||
+        typeof candidate.workspaceId !== 'string' || candidate.workspaceId.length < 1 || candidate.workspaceId.length > 80 ||
+        typeof candidate.root !== 'string' || !candidate.root.trim() || candidate.root.length > 4096 ||
+        typeof candidate.label !== 'string' || !candidate.label.trim() || candidate.label.length > 80 ||
+        (candidate.instructionPath !== null && (typeof candidate.instructionPath !== 'string' || candidate.instructionPath.length > 4096)) ||
+        (candidate.instructionFingerprint !== null && (typeof candidate.instructionFingerprint !== 'string' || !/^[a-f0-9]{64}$/i.test(candidate.instructionFingerprint)))
+      ) return null
+      workspace = {
+        workspaceId: candidate.workspaceId,
+        root: candidate.root,
+        label: candidate.label,
+        instructionPath: candidate.instructionPath as string | null,
+        instructionFingerprint: candidate.instructionFingerprint as string | null
+      }
+    }
+    let tasks: TaskRecord[] = []
+    if ('tasks' in raw) {
+      const parsedTasks = parseTaskRecords(raw.tasks)
+      if (!parsedTasks) return null
+      tasks = parsedTasks
+    }
     conversations.push({
       ...common.conversations[index],
-      toolRuns
+      toolRuns,
+      workspace,
+      tasks
     })
   }
 
@@ -186,6 +218,8 @@ export function migrateV3(value: unknown): ConversationLibrary | null {
     activeConversationId: old.activeConversationId,
     conversations: old.conversations.map((conversation) => ({
       ...conversation,
+      workspace: null,
+      tasks: [],
       toolRuns: conversation.toolRuns.map((run) => ({ ...run, scope: { kind: 'time' as const } }))
     }))
   }

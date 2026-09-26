@@ -14,6 +14,8 @@ import { projectTools } from '../tools/project-snapshot'
 import { commandProposalTool, createCommandProposalExecutor } from '../tools/command-proposal'
 import { timeTool, executeTimeTool } from '../tools/current-time'
 import type { ProjectSnapshot } from '../tools/project-snapshot'
+import { createTask, newTaskId, updateTask } from './task-registry'
+import { isTaskId } from '../../shared/task'
 
 type Job = { id: string; controller: AbortController; snapshotId?: string }
 const jobs = new Map<number, Job>()
@@ -47,7 +49,9 @@ export function registerAgentPractice(
       prompt: unknown,
       mode: unknown,
       history: unknown = [],
-      context: unknown = { kind: 'time' }
+      context: unknown = { kind: 'time' },
+      taskId: unknown = undefined,
+      conversationId: unknown = undefined
     ): Promise<AgentResult> => {
       checkSource(event)
       const windowId = BrowserWindow.fromWebContents(event.sender)!.id
@@ -91,12 +95,29 @@ export function registerAgentPractice(
       if (!checkedHistory) return { status: 'error', error: '工具历史参数无效', trace }
       if (jobs.has(windowId)) return { status: 'error', error: '请等待上一次工具任务结束', trace }
       const controller = new AbortController()
+      const lifecycleId = isTaskId(taskId) ? taskId : newTaskId()
+      const task = createTask({
+        taskId: lifecycleId,
+        requestId: id,
+        conversationId:
+          checkedContext.kind === 'project'
+            ? checkedContext.conversationId
+            : typeof conversationId === 'string' && isAgentId(conversationId)
+              ? conversationId
+              : 'time',
+        kind: 'agent',
+        windowId,
+        snapshotId: projectSnapshot?.selection.snapshotId,
+        cancel: () => controller.abort()
+      })
+      if (!task) return { status: 'error', error: '任务标识已使用，请重新发起', trace }
       const job: Job = {
         id,
         controller,
         snapshotId: projectSnapshot?.selection.snapshotId
       }
       jobs.set(windowId, job)
+      updateTask(windowId, lifecycleId, 'running')
       let timedOut = false
       const cancel = (): void => {
         controller.abort()
@@ -154,10 +175,28 @@ export function registerAgentPractice(
         )
 
         controller.signal.throwIfAborted()
+        const needsApproval = completed.items.some(
+          (item) => item.type === 'function_call' && item.name === 'propose_command'
+        )
+        updateTask(
+          windowId,
+          lifecycleId,
+          needsApproval ? 'waiting_approval' : 'completed',
+          { result: completed.answer }
+        )
         return { status: 'done', answer: completed.answer, items: completed.items, trace }
       } catch (error) {
-        if (timedOut) return { status: 'error', error: '任务超过 90 秒，已停止', trace }
-        if (controller.signal.aborted) return { status: 'cancelled', trace }
+        if (timedOut) {
+          updateTask(windowId, lifecycleId, 'timed_out', { error: '任务超过 90 秒，已停止' })
+          return { status: 'error', error: '任务超过 90 秒，已停止', trace }
+        }
+        if (controller.signal.aborted) {
+          updateTask(windowId, lifecycleId, 'cancelled', { error: '用户已取消任务' })
+          return { status: 'cancelled', trace }
+        }
+        updateTask(windowId, lifecycleId, 'failed', {
+          error: error instanceof AgentError ? error.message : '请求或工具处理失败，请检查网络和响应格式'
+        })
         return {
           status: 'error',
           error:

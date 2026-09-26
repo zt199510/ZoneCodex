@@ -1,6 +1,7 @@
 import type { ToolRun } from './agent-history'
 import { parseProtocolTurn } from './agent-history'
 import type { ChatMessage } from './conversation'
+import { commandTemplates } from './permission-policy'
 
 export type CommandProposalArgs = { template: 'npm_typecheck'; reason: string }
 export type CommandProposalOutput =
@@ -12,14 +13,7 @@ export type MessageCommandProposal = CommandProposalArgs & {
   callId: string
   snapshotId: string
 }
-export const commandTemplate = {
-  program: 'npm',
-  args: ['run', 'typecheck'],
-  cwdStatus: 'unbound',
-  display: 'npm run typecheck',
-  impact:
-    'npm 脚本及前后置脚本可运行项目代码，可能写文件、联网或启动子进程。模板名不能证明脚本存在或安全。'
-} as const
+export const commandTemplate = commandTemplates.npm_typecheck
 
 function exact(value: unknown, keys: string[]): value is Record<string, unknown> {
   if (!value || typeof value !== 'object') return false

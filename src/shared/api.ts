@@ -9,6 +9,7 @@ import type { ProtocolItem } from './agent-history'
 import type { AgentContext, ProjectSelectionResult } from './project'
 import type { PreviewChangeRequest, PreviewChangeResult } from './change-preview'
 import type { CommandSource, CommandPreparationResult, CommandExecutionRequest, CommandExecutionEvent } from './command-preparation'
+import type { TaskRecord } from './task'
 
 // 模型消息类型
 export type ModelMessage = {
@@ -27,6 +28,9 @@ export type ModelStreamResult =
 
 // 应用 API 接口类型
 export interface AppAPI {
+  listTasks: () => Promise<TaskRecord[]>
+  cancelTask: (taskId: string) => Promise<boolean>
+  onTaskState: (listener: (record: TaskRecord) => void) => () => void
   selectCommandDirectory: (source: CommandSource, operationId: string) => Promise<CommandPreparationResult>
   prepareCommand: (source: CommandSource, grantId: string, checkId: string) => Promise<CommandPreparationResult>
   releaseCommandDirectory: (grantId: string) => Promise<boolean>
@@ -45,7 +49,12 @@ export interface AppAPI {
   // 向模型发送消息并获取回复
   askModel: (history: ModelMessage[]) => Promise<ModelReply>
   // 模型流相关接口
-  startModelStream: (requestId: string, history: ModelMessage[]) => Promise<ModelStreamResult>
+  startModelStream: (
+    requestId: string,
+    history: ModelMessage[],
+    taskId?: string,
+    conversationId?: string
+  ) => Promise<ModelStreamResult>
   // 取消模型流请求
   cancelModelStream: (requestId: string) => Promise<void>
   // 监听模型流增量事件
@@ -74,7 +83,9 @@ export interface AppAPI {
     prompt: string,
     mode: AgentMode,
     history?: ProtocolItem[],
-    context?: AgentContext
+    context?: AgentContext,
+    taskId?: string,
+    conversationId?: string
   ) => Promise<AgentResult>
   // 选择当前窗口与会话绑定的项目文件快照
   selectProjectFiles: (

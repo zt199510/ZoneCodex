@@ -5,7 +5,7 @@ import {
 } from '../../../../shared/command-proposal'
 import { useCommandReview } from '../review/useCommandReview'
 import { useChangePreparation, type PreparationController } from '../review/useChangePreparation'
-import { useCallback, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import type { ChatMessage } from '../../../../shared/conversation'
 import { deriveMessageChangeProposal } from '../../../../shared/change-proposal'
 import type { MessageChangeProposal } from '../../../../shared/change-proposal'
@@ -16,6 +16,8 @@ import { type ChatMode, type ChatEngine, resolveChatMode } from '../chat/chat-mo
 import { useProjectSelection } from '../project/useProjectSelection'
 import { getCapacityError } from './capacity'
 import type { ProjectSelection } from '../../../../shared/project'
+import { isTerminalTaskStatus, maxTaskRecords } from '../../../../shared/task'
+import type { TaskRecord } from '../../../../shared/task'
 import { useConversationStorage, ConversationStorage } from './useConversationStorage'
 import { useOperation, Operation } from './useOperation'
 import { useChangePreview, type ChangePreviewController } from '../review/useChangePreview'
@@ -32,6 +34,9 @@ export type ConversationController = {
   conversations: Conversation[]
   activeConversationId: string | null
   messages: ChatMessage[]
+  tasks: TaskRecord[]
+  canRetryTask: (taskId: string) => boolean
+  retryTask: (taskId: string) => boolean
   operation: Operation
   canEdit: boolean
   canSend: boolean
@@ -46,6 +51,7 @@ export type ConversationController = {
   projectSelection: ProjectSelection | null
   contextSelection: ProjectSelection | null
   send: (content: string) => boolean
+  editAndSend: (messageId: string, content: string) => boolean
   stop: () => Promise<void>
   setClosePending: (value: boolean) => void
   getOperation: () => Operation
@@ -76,6 +82,7 @@ export function useConversation(): ConversationController {
   const hiddenProposalKeysRef = useRef(new Set<string>())
   const [hiddenProposalKeys, setHiddenProposalKeys] = useState<ReadonlySet<string>>(new Set())
   const [openedProposal, setOpenedProposal] = useState<MessageChangeProposal | null>(null)
+  const reconciledTasks = useRef(false)
   const setClosePending = useCallback((value: boolean): void => {
     closePendingRef.current = value
     setClosePendingState(value)
@@ -89,6 +96,48 @@ export function useConversation(): ConversationController {
     closePending,
     isClosePending
   })
+  useEffect(() => {
+    if (!storage.ready || reconciledTasks.current) return
+    let disposed = false
+    async function reconcileTasks(): Promise<void> {
+      const liveTasks = await window.api.listTasks()
+      if (disposed) return
+      const liveById = new Map(liveTasks.map((task) => [task.taskId, task]))
+      setSnapshot((previous) => ({
+        ...previous,
+        conversations: previous.conversations.map((conversation) => {
+          const merged = conversation.tasks.map((task) => {
+            const live = liveById.get(task.taskId)
+            if (live && live.conversationId === conversation.id) return live
+            if (
+              !isTerminalTaskStatus(task.status) &&
+              (!live || live.conversationId !== conversation.id)
+            ) {
+              return {
+                ...task,
+                status: 'interrupted' as const,
+                finishedAt: new Date().toISOString(),
+                error: '页面重新加载，旧任务未继续运行'
+              }
+            }
+            return task
+          })
+          const known = new Set(merged.map((task) => task.taskId))
+          for (const task of liveTasks) {
+            if (task.conversationId === conversation.id && !known.has(task.taskId)) {
+              merged.push(task)
+            }
+          }
+          return { ...conversation, tasks: merged.slice(-maxTaskRecords) }
+        })
+      }))
+      reconciledTasks.current = true
+    }
+    void reconcileTasks()
+    return () => {
+      disposed = true
+    }
+  }, [storage.ready])
   const active = getActiveConversation(snapshot)
   const messages = active?.messages ?? []
   const canChange = useCallback(
@@ -231,6 +280,77 @@ export function useConversation(): ConversationController {
     projectSelection
   })
 
+  const canRetryTask = useCallback(
+    (taskId: string): boolean => {
+      if (!active || !canChange()) return false
+      const task = active.tasks.find((item) => item.taskId === taskId)
+      if (!task || !isTerminalTaskStatus(task.status) || task.kind !== 'agent') return false
+      const run = active.toolRuns.find((item) => item.requestId === task.requestId)
+      if (!run) return false
+      const source = active.messages.find((item) => item.id === run.userId && item.role === 'user')
+      if (!source) return false
+      if (run.scope.kind === 'project') {
+        return (
+          projectSelection?.snapshotId === run.scope.snapshotId &&
+          (chatMode === 'project-live' || chatMode === 'project-mock')
+        )
+      }
+      return chatMode === 'tool-live' || chatMode === 'tool-mock'
+    },
+    [active, canChange, chatMode, projectSelection]
+  )
+
+  const retryTask = useCallback(
+    (taskId: string): boolean => {
+      if (!canRetryTask(taskId) || !active) return false
+      const task = active.tasks.find((item) => item.taskId === taskId)
+      if (!task) return false
+      const run = active.toolRuns.find((item) => item.requestId === task.requestId)
+      const source =
+        run && active.messages.find((item) => item.id === run.userId && item.role === 'user')
+      return source ? request.send(source.content) : false
+    },
+    [active, canRetryTask, request]
+  )
+
+  const editAndSend = useCallback(
+    (messageId: string, rawContent: string): boolean => {
+      if (!active || !canChange()) return false
+      const content = rawContent.trim()
+      const index = active.messages.findIndex(
+        (message) => message.id === messageId && message.role === 'user'
+      )
+      if (index < 0 || !content || active.messages.slice(index + 1).some((message) => message.role === 'user')) {
+        return false
+      }
+      const trimmedMessages = active.messages.slice(0, index)
+      const keptIds = new Set(trimmedMessages.map((message) => message.id))
+      const trimmedToolRuns = active.toolRuns.filter(
+        (run) => keptIds.has(run.userId) && keptIds.has(run.assistantId)
+      )
+      const trimmedActive = { ...active, messages: trimmedMessages, toolRuns: trimmedToolRuns }
+      const nextSnapshot = {
+        ...snapshot,
+        conversations: snapshot.conversations.map((conversation) =>
+          conversation.id === active.id ? trimmedActive : conversation
+        )
+      }
+      const capacityMessage = getCapacityError(nextSnapshot, trimmedActive, chatMode !== 'chat')
+      if (capacityMessage) {
+        setCapacityError(capacityMessage)
+        return false
+      }
+      preparation.cancel()
+      commandReview.close()
+      setCapacityError(null)
+      setSnapshot(nextSnapshot)
+      const accepted = request.send(content, trimmedMessages, trimmedToolRuns)
+      if (accepted) markSent()
+      return accepted
+    },
+    [active, canChange, chatMode, commandReview, markSent, preparation, request, snapshot]
+  )
+
   async function openProposal(proposal: MessageChangeProposal): Promise<boolean> {
     if (
       hiddenProposalKeysRef.current.has(proposalKey(proposal)) ||
@@ -314,7 +434,9 @@ export function useConversation(): ConversationController {
             id,
             title: `新会话 ${previous.conversations.length + 1}`,
             messages: [],
-            toolRuns: []
+            toolRuns: [],
+            workspace: null,
+            tasks: []
           }
         ]
       }
@@ -351,7 +473,8 @@ export function useConversation(): ConversationController {
     updateConversation(active.id, (previous) => ({
       ...previous,
       messages: [],
-      toolRuns: []
+      toolRuns: [],
+      tasks: []
     }))
     setCapacityError(null)
     clearProjectError()
@@ -375,6 +498,9 @@ export function useConversation(): ConversationController {
     conversations: snapshot.conversations,
     activeConversationId: snapshot.activeConversationId,
     messages,
+    tasks: active?.tasks ?? [],
+    canRetryTask,
+    retryTask,
     operation: operations.operation,
     canNavigate,
     canEdit,
@@ -412,6 +538,7 @@ export function useConversation(): ConversationController {
       }
       return accepted
     },
+    editAndSend,
     chatMode,
     toolActivity: visibleActivity,
     engine,

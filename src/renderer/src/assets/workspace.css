@@ -279,6 +279,16 @@ button.conversation-item:disabled {
   overflow: hidden;
 }
 
+.workspace-status {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  padding: 6px 18px;
+  color: var(--muted-text, #68707a);
+  font-size: 12px;
+  border-bottom: 1px solid #edf0f2;
+}
+
 .workspace-body > .chat-workspace {
   flex: 1 1 0;
   height: auto;

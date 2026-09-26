@@ -10,7 +10,7 @@ import type { ProjectSnapshot } from '../tools/project-snapshot'
 export type ProjectAccessCallbacks = {
   isAgentJobActive: (windowId: number) => boolean
   abortProjectJob: (windowId: number, snapshotId: string) => void
-  onAccessChanged?: (windowId: number) => void
+  onAccessChanged?: (windowId: number, snapshotId?: string) => void
 }
 
 type Grant = {
@@ -92,7 +92,7 @@ export function registerProjectAccess(nextCallbacks: ProjectAccessCallbacks): vo
         return resultError('附件授权已失效')
       try {
         const snapshot = removeAttachment(grant.snapshot, path)
-        callbacks.onAccessChanged?.(owner.id)
+        callbacks.onAccessChanged?.(owner.id, snapshotId)
         if (!snapshot) {
           grants.delete(owner.id)
           return { status: 'cleared' }
@@ -152,7 +152,7 @@ export async function selectProjectFiles(
     )
     if (!isCurrent(windowId, state, window)) return { status: 'cancelled' }
 
-    callbacks.onAccessChanged?.(windowId)
+    callbacks.onAccessChanged?.(windowId, previous?.snapshotId)
     grants.set(windowId, {
       windowId,
       conversationId,
@@ -171,6 +171,11 @@ export async function selectProjectFiles(
 
 export function hasProjectSelection(windowId: number): boolean {
   return selections.has(windowId)
+}
+
+export function hasProjectSnapshot(windowId: number, snapshotId: string): boolean {
+  const grant = grants.get(windowId)
+  return !!grant && !selections.has(windowId) && grant.snapshotId === snapshotId
 }
 
 export function captureProjectAccess(
@@ -195,13 +200,13 @@ export function revokeProjectFiles(windowId: number, snapshotId: string): boolea
   const grant = grants.get(windowId)
   if (!grant || grant.snapshotId !== snapshotId) return false
   grants.delete(windowId)
-  callbacks.onAccessChanged?.(windowId)
+  callbacks.onAccessChanged?.(windowId, snapshotId)
   callbacks.abortProjectJob(windowId, snapshotId)
   return true
 }
 
 export function cleanupProjectAccess(windowId: number): void {
-  callbacks.onAccessChanged?.(windowId)
+  callbacks.onAccessChanged?.(windowId, grants.get(windowId)?.snapshotId)
   const selection = selections.get(windowId)
   if (selection) {
     selection.controller.abort()

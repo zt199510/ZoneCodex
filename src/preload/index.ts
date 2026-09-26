@@ -12,9 +12,31 @@ import { parseToolHistory } from '../shared/agent-history'
 import { parseAgentContext, parseProjectSelectionResult, parseToolScope } from '../shared/project'
 import { parsePreviewChangeRequest, parsePreviewChangeResult } from '../shared/change-preview'
 import { parseCommandPreparationResult, parseCommandSource, parseCommandExecutionRequest } from '../shared/command-preparation'
+import { isTaskId, parseTaskRecord, parseTaskRecords } from '../shared/task'
 
 // Custom APIs for renderer
 const api: AppAPI = {
+  listTasks: async () => {
+    try {
+      const result = parseTaskRecords(await ipcRenderer.invoke('task:list'))
+      return result ?? []
+    } catch {
+      return []
+    }
+  },
+  cancelTask: async (taskId) => {
+    if (!isTaskId(taskId)) return false
+    return Boolean(await ipcRenderer.invoke('task:cancel', taskId))
+  },
+  onTaskState: (listener) => {
+    const handler = (_event: IpcRendererEvent, value: unknown): void => {
+      if (typeof value !== 'object' || value === null || !('record' in value)) return
+      const record = parseTaskRecord(value.record)
+      if (record) listener(record)
+    }
+    ipcRenderer.on('task:state', handler)
+    return () => ipcRenderer.removeListener('task:state', handler)
+  },
   selectCommandDirectory: async (source, operationId) => {
     const checked = parseCommandSource(source); if (!checked) throw new Error('目录来源无效')
     const result = parseCommandPreparationResult(await ipcRenderer.invoke('command-directory:select', { source: checked, operationId })); if (!result) throw new Error('目录选择结果无效'); return result
@@ -83,8 +105,14 @@ const api: AppAPI = {
     throw new Error('模型请求结果格式不正确')
   },
   // 模型流请求
-  startModelStream: async (requestId, history) => {
-    const result: unknown = await ipcRenderer.invoke('model-stream:start', requestId, history)
+  startModelStream: async (requestId, history, taskId, conversationId) => {
+    const result: unknown = await ipcRenderer.invoke(
+      'model-stream:start',
+      requestId,
+      history,
+      taskId,
+      conversationId
+    )
     if (typeof result === 'object' && result !== null && 'status' in result) {
       if (result.status === 'done' || result.status === 'cancelled') {
         return { status: result.status }
@@ -191,7 +219,15 @@ const api: AppAPI = {
     return () => ipcRenderer.removeListener('terminal:event', handler)
   },
   // 练习工具相关接口
-  startAgentPractice: async (requestId, prompt, mode, history = [], context = { kind: 'time' }) => {
+  startAgentPractice: async (
+    requestId,
+    prompt,
+    mode,
+    history = [],
+    context = { kind: 'time' },
+    taskId,
+    conversationId
+  ) => {
     const checkedContext = parseAgentContext(context)
     if (!checkedContext) throw new Error('工具上下文格式不正确')
     const checkedScope = parseToolScope(
@@ -209,7 +245,9 @@ const api: AppAPI = {
         prompt,
         mode,
         checkedHistory,
-        checkedContext
+        checkedContext,
+        taskId,
+        conversationId
       ),
       checkedScope
     )

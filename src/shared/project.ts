@@ -1,5 +1,45 @@
 export type ToolScope = { kind: 'time' } | { kind: 'project'; snapshotId: string }
 
+/** 当前窗口的项目上下文。目录授权和文件快照仍由主进程单独维护。 */
+export type Workspace = {
+  workspaceId: string
+  root: string
+  label: string
+  snapshotId: string | null
+  instruction: ProjectInstruction | null
+}
+
+export type ProjectInstruction = {
+  path: string
+  content: string
+  fingerprint: string
+  truncated: boolean
+}
+
+/** 可写入会话库的展示信息；不包含目录 grant、preparedId 或执行 ID。 */
+export type SavedWorkspace = {
+  workspaceId: string
+  root: string
+  label: string
+  instructionPath: string | null
+  instructionFingerprint: string | null
+}
+
+export type TaskStatus =
+  | 'idle'
+  | 'running'
+  | 'waiting_approval'
+  | 'completed'
+  | 'cancelled'
+  | 'failed'
+
+export type PermissionStatus = 'unscoped' | 'scoped' | 'expired' | 'revoked'
+
+export type WorkspaceInstructionResult =
+  | { status: 'absent' }
+  | { status: 'read'; instruction: ProjectInstruction }
+  | { status: 'error'; error: string }
+
 export type ProjectSelection = {
   snapshotId: string
   label: string

@@ -10,7 +10,7 @@ import {
   hasChangePreparation,
   cleanupChangePreparation
 } from './agent/change-preparation-ipc'
-import { hasProjectSelection } from './agent/project-access'
+import { hasProjectSelection, hasProjectSnapshot } from './agent/project-access'
 import { app, shell, BrowserWindow, ipcMain } from 'electron'
 import { join } from 'path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
@@ -25,6 +25,8 @@ import { abortProjectJob, hasAgentJob, registerAgentPractice } from './agent/age
 import { attachProjectAccessCleanup, registerProjectAccess } from './agent/project-access'
 import { cleanupCommandPreparation, registerCommandPreparation } from './agent/command-preparation-ipc'
 import { cleanupCommandExecution, hasCommandExecution, registerCommandExecution } from './agent/command-execution-ipc'
+import { decideCommandPermission } from '../shared/permission-policy'
+import { cleanupTaskWindow, cleanupTasksForSnapshot, discardTaskWindow, registerTaskLifecycle } from './agent/task-registry'
 
 // Handle creating/removing shortcuts on Windows when installing/uninstalling.
 // 创建/删除 Windows 快捷方式
@@ -55,7 +57,16 @@ function createWindow(): void {
   attachTerminalCleanup(mainWindow)
   // 注册项目快照授权清理处理器
   attachProjectAccessCleanup(mainWindow)
-  mainWindow.on('closed', () => { cleanupCommandExecution(mainWindow.id); cleanupCommandPreparation(mainWindow.id) })
+  mainWindow.webContents.on('did-start-loading', () => {
+    cleanupTaskWindow(mainWindow.id)
+    cleanupCommandExecution(mainWindow.id)
+    cleanupCommandPreparation(mainWindow.id)
+  })
+  mainWindow.on('closed', () => {
+    discardTaskWindow(mainWindow.id)
+    cleanupCommandExecution(mainWindow.id)
+    cleanupCommandPreparation(mainWindow.id)
+  })
   attachCommitCleanup(mainWindow)
   // 注册窗口控件
   mainWindow.on('ready-to-show', () => {
@@ -102,6 +113,7 @@ app.whenReady().then(() => {
   })
   // 注册窗口控件
   registerWindowControls()
+  registerTaskLifecycle()
   // 注册关闭确认处理器
   registerCloseGuard(hasChangeCommit)
   // 注册真实流处理函数
@@ -110,17 +122,24 @@ app.whenReady().then(() => {
   registerLocalTerminal()
   // 注册练习工具接口
   registerAgentPractice((id) => hasChangePreparation(id) || hasChangeCommit(id) || hasCommandExecution(id))
-  registerCommandPreparation((windowId, source) => hasProjectSelection(windowId) && source.template === 'npm_typecheck')
-  registerCommandExecution((windowId, source) => hasProjectSelection(windowId) && source.template === 'npm_typecheck')
+  registerCommandPreparation((windowId, source) => {
+    const snapshotId = hasProjectSnapshot(windowId, source.snapshotId) ? source.snapshotId : ''
+    return decideCommandPermission({ template: source.template, reason: '已通过提案解析' }, { kind: 'project', snapshotId }).allowed
+  })
+  registerCommandExecution((windowId, source) => {
+    const snapshotId = hasProjectSnapshot(windowId, source.snapshotId) ? source.snapshotId : ''
+    return decideCommandPermission({ template: source.template, reason: '已通过提案解析' }, { kind: 'project', snapshotId }).allowed
+  })
   // 注册项目文件选择与撤销接口
   registerProjectAccess({
     isAgentJobActive: (id) => hasAgentJob(id) || hasChangePreparation(id) || hasChangeCommit(id) || hasCommandExecution(id),
     abortProjectJob,
-    onAccessChanged: (id) => {
+    onAccessChanged: (id, snapshotId) => {
       cleanupChangePreparation(id)
       cleanupCommandPreparation(id)
       cleanupCommandExecution(id)
       cancelChangeCommit(id)
+      if (snapshotId) cleanupTasksForSnapshot(id, snapshotId)
     }
   })
   registerChangePreview(hasChangeCommit)

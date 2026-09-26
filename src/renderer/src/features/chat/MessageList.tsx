@@ -1,3 +1,5 @@
+import { useLayoutEffect, useRef, useState } from 'react'
+import type { FormEvent, KeyboardEvent } from 'react'
 import type { ChatMessage } from '../../../../shared/conversation'
 import type { MessageCommandProposal } from '../../../../shared/command-proposal'
 import type { MessageChangeProposal } from '../../../../shared/change-proposal'
@@ -12,6 +14,81 @@ const roleLabels: Record<ChatMessage['role'], string> = {
   system: '系统'
 }
 
+function InlineMessageEditor({
+  initialValue,
+  maxLength,
+  disabled,
+  onCancel,
+  onSend
+}: {
+  initialValue: string
+  maxLength: number
+  disabled: boolean
+  onCancel: () => void
+  onSend: (content: string) => boolean
+}): React.JSX.Element {
+  const [value, setValue] = useState(initialValue)
+  const textarea = useRef<HTMLTextAreaElement>(null)
+
+  useLayoutEffect(() => {
+    textarea.current?.focus()
+    textarea.current?.setSelectionRange(initialValue.length, initialValue.length)
+  }, [initialValue])
+
+  useLayoutEffect(() => {
+    const element = textarea.current
+    if (!element) return
+    element.style.height = 'auto'
+    element.style.height = `${Math.min(element.scrollHeight, 240)}px`
+  }, [value])
+
+  function submit(event: FormEvent): void {
+    event.preventDefault()
+    if (!disabled && value.trim() && onSend(value)) onCancel()
+  }
+
+  function onKeyDown(event: KeyboardEvent<HTMLTextAreaElement>): void {
+    if (event.key === 'Escape') {
+      event.preventDefault()
+      onCancel()
+    } else if (
+      event.key === 'Enter' &&
+      !event.shiftKey &&
+      !event.nativeEvent.isComposing &&
+      event.nativeEvent.keyCode !== 229
+    ) {
+      event.preventDefault()
+      event.currentTarget.form?.requestSubmit()
+    }
+  }
+
+  return (
+    <form className="message-inline-editor" onSubmit={submit}>
+      <label className="sr-only" htmlFor="message-inline-input">
+        编辑消息
+      </label>
+      <textarea
+        id="message-inline-input"
+        ref={textarea}
+        value={value}
+        disabled={disabled}
+        maxLength={maxLength}
+        rows={2}
+        onChange={(event) => setValue(event.currentTarget.value)}
+        onKeyDown={onKeyDown}
+      />
+      <div className="message-inline-controls">
+        <button type="button" className="message-inline-cancel" onClick={onCancel}>
+          取消
+        </button>
+        <button type="submit" className="message-inline-send" disabled={disabled || !value.trim()}>
+          发送
+        </button>
+      </div>
+    </form>
+  )
+}
+
 export function MessageList({
   messages,
   commandProposals = {},
@@ -21,7 +98,12 @@ export function MessageList({
   changeProposals = {},
   changeProposalStatus = {},
   proposalOpenDisabled = false,
-  onOpenProposal
+  onOpenProposal,
+  onSendEditedMessage,
+  editDisabled = false,
+  editMaxLength = 2000,
+  onCopyMessage,
+  onRetryAssistant
 }: {
   messages: readonly ChatMessage[]
   commandProposals?: Readonly<Record<string, MessageCommandProposal>>
@@ -32,7 +114,15 @@ export function MessageList({
   changeProposalStatus?: Readonly<Record<string, ChangeProposalStatus>>
   proposalOpenDisabled?: boolean
   onOpenProposal?: (proposal: MessageChangeProposal, trigger: HTMLButtonElement) => void
+  onSendEditedMessage?: (messageId: string, content: string) => boolean
+  editDisabled?: boolean
+  editMaxLength?: number
+  onCopyMessage?: (message: ChatMessage) => Promise<boolean> | boolean
+  onRetryAssistant?: (message: ChatMessage) => void
 }): React.JSX.Element {
+  const [editingId, setEditingId] = useState<string | null>(null)
+  const [copiedId, setCopiedId] = useState<string | null>(null)
+  const lastUserMessageId = [...messages].reverse().find((message) => message.role === 'user')?.id
   return (
     <ol className="message-list" aria-label="聊天记录">
       {messages.map((message) => {
@@ -43,7 +133,10 @@ export function MessageList({
         const proposalStatus =
           message.role === 'assistant' ? changeProposalStatus[message.id] : undefined
         return (
-          <li className={`message message-${message.role}`} key={message.id}>
+          <li
+            className={`message message-${message.role}${editingId === message.id ? ' message-editing' : ''}`}
+            key={message.id}
+          >
             <div className="message-author">
               {message.role === 'assistant' && (
                 <span className="assistant-avatar">
@@ -65,23 +158,85 @@ export function MessageList({
                 </ol>
               </details>
             )}
-            <div className="message-content">
-              {message.content ? (
-                message.role === 'assistant' ? (
-                  <MarkdownContent content={message.content} />
+            {editingId === message.id && onSendEditedMessage ? (
+              <InlineMessageEditor
+                initialValue={message.content}
+                maxLength={editMaxLength}
+                disabled={editDisabled}
+                onCancel={() => setEditingId(null)}
+                onSend={(content) => onSendEditedMessage(message.id, content)}
+              />
+            ) : (
+              <div className="message-content">
+                {message.content ? (
+                  message.role === 'assistant' ? (
+                    <MarkdownContent content={message.content} />
+                  ) : (
+                    message.content
+                  )
+                ) : message.status === 'pending' ? (
+                  activity ? (
+                    '正在处理请求…'
+                  ) : (
+                    '正在思考…'
+                  )
                 ) : (
-                  message.content
-                )
-              ) : message.status === 'pending' ? (
-                activity ? (
-                  '正在处理请求…'
-                ) : (
-                  '正在思考…'
-                )
-              ) : (
-                '未收到回复文字'
-              )}
-            </div>
+                  '未收到回复文字'
+                )}
+              </div>
+            )}
+            {(message.content ||
+              (message.role === 'assistant' &&
+                (message.status === 'cancelled' || message.status === 'failed'))) &&
+              message.status !== 'pending' &&
+              editingId !== message.id && (
+              <div className="message-actions" aria-label="消息操作">
+                {message.role === 'user' &&
+                  message.id === lastUserMessageId &&
+                  onSendEditedMessage &&
+                  !editDisabled && (
+                  <button
+                    type="button"
+                    className="message-action"
+                    onClick={() => setEditingId(message.id)}
+                    title="编辑消息"
+                  >
+                    <Icon name="edit" size={13} />
+                    编辑
+                  </button>
+                )}
+                {message.content && onCopyMessage && (
+                  <button
+                    type="button"
+                    className="message-action"
+                    onClick={() => {
+                      void Promise.resolve(onCopyMessage(message)).then((copied) => {
+                        if (copied) {
+                          setCopiedId(message.id)
+                          window.setTimeout(() => setCopiedId(null), 1400)
+                        }
+                      })
+                    }}
+                    title="复制消息"
+                  >
+                    <Icon name="copy" size={13} />
+                    {copiedId === message.id ? '已复制' : '复制'}
+                  </button>
+                )}
+                {message.role === 'assistant' &&
+                  (message.status === 'cancelled' || message.status === 'failed') &&
+                  onRetryAssistant && (
+                    <button
+                      type="button"
+                      className="message-action"
+                      onClick={() => onRetryAssistant(message)}
+                      title="重新生成回复"
+                    >
+                      重新生成
+                    </button>
+                  )}
+              </div>
+            )}
             {message.status === 'pending' && message.role === 'assistant' && (
               <span className="message-note">
                 正在生成
