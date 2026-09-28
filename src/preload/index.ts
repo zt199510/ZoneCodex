@@ -11,7 +11,11 @@ import { isAgentId, parseAgentProgress, parseAgentResult } from '../shared/agent
 import { parseToolHistory } from '../shared/agent-history'
 import { parseAgentContext, parseProjectSelectionResult, parseToolScope } from '../shared/project'
 import { parsePreviewChangeRequest, parsePreviewChangeResult } from '../shared/change-preview'
-import { parseCommandPreparationResult, parseCommandSource, parseCommandExecutionRequest } from '../shared/command-preparation'
+import {
+  parseCommandPreparationResult,
+  parseCommandSource,
+  parseCommandExecutionRequest
+} from '../shared/command-preparation'
 import { isTaskId, parseTaskRecord, parseTaskRecords } from '../shared/task'
 
 // Custom APIs for renderer
@@ -38,23 +42,49 @@ const api: AppAPI = {
     return () => ipcRenderer.removeListener('task:state', handler)
   },
   selectCommandDirectory: async (source, operationId) => {
-    const checked = parseCommandSource(source); if (!checked) throw new Error('目录来源无效')
-    const result = parseCommandPreparationResult(await ipcRenderer.invoke('command-directory:select', { source: checked, operationId })); if (!result) throw new Error('目录选择结果无效'); return result
-  },
-  prepareCommand: async (source, grantId, checkId) => {
-    const checked = parseCommandSource(source); if (!checked) throw new Error('目录来源无效')
-    const result = parseCommandPreparationResult(await ipcRenderer.invoke('command-directory:prepare', { source: checked, grantId, checkId })); if (!result) throw new Error('准备结果无效'); return result
-  },
-  releaseCommandDirectory: async (grantId) => Boolean(await ipcRenderer.invoke('command-directory:release', grantId)),
-  cancelCommandPreparation: async (operationId) => Boolean(await ipcRenderer.invoke('command-directory:cancel', operationId)),
-  startCommandExecution: async (request) => {
-    const checked = parseCommandExecutionRequest(request); if (!checked) throw new Error('执行请求无效')
-    const result = await ipcRenderer.invoke('command-execution:start', checked)
-    if (!result || typeof result !== 'object' || (result.status !== 'started' && result.status !== 'error')) throw new Error('执行结果无效')
+    const checked = parseCommandSource(source)
+    if (!checked) throw new Error('目录来源无效')
+    const result = parseCommandPreparationResult(
+      await ipcRenderer.invoke('command-directory:select', { source: checked, operationId })
+    )
+    if (!result) throw new Error('目录选择结果无效')
     return result
   },
-  cancelCommandExecution: async (executionId) => Boolean(await ipcRenderer.invoke('command-execution:cancel', executionId)),
-  onCommandExecutionEvent: (listener) => { const wrapped = (_event: Electron.IpcRendererEvent, value: unknown): void => listener(value as never); ipcRenderer.on('command-execution:event', wrapped); return (): void => { ipcRenderer.removeListener('command-execution:event', wrapped) } },
+  prepareCommand: async (source, grantId, checkId) => {
+    const checked = parseCommandSource(source)
+    if (!checked) throw new Error('目录来源无效')
+    const result = parseCommandPreparationResult(
+      await ipcRenderer.invoke('command-directory:prepare', { source: checked, grantId, checkId })
+    )
+    if (!result) throw new Error('准备结果无效')
+    return result
+  },
+  releaseCommandDirectory: async (grantId) =>
+    Boolean(await ipcRenderer.invoke('command-directory:release', grantId)),
+  cancelCommandPreparation: async (operationId) =>
+    Boolean(await ipcRenderer.invoke('command-directory:cancel', operationId)),
+  startCommandExecution: async (request) => {
+    const checked = parseCommandExecutionRequest(request)
+    if (!checked) throw new Error('执行请求无效')
+    const result = await ipcRenderer.invoke('command-execution:start', checked)
+    if (
+      !result ||
+      typeof result !== 'object' ||
+      (result.status !== 'started' && result.status !== 'error')
+    )
+      throw new Error('执行结果无效')
+    return result
+  },
+  cancelCommandExecution: async (executionId) =>
+    Boolean(await ipcRenderer.invoke('command-execution:cancel', executionId)),
+  onCommandExecutionEvent: (listener) => {
+    const wrapped = (_event: Electron.IpcRendererEvent, value: unknown): void =>
+      listener(value as never)
+    ipcRenderer.on('command-execution:event', wrapped)
+    return (): void => {
+      ipcRenderer.removeListener('command-execution:event', wrapped)
+    }
+  },
   // 窗口控制
   controlWindow: async (action) => {
     await ipcRenderer.invoke('window:command', action)

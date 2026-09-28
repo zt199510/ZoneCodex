@@ -23,10 +23,22 @@ import { registerCloseGuard, attachCloseGuard } from './window/close-guard'
 import { registerLocalTerminal, attachTerminalCleanup } from './terminal/local-terminal'
 import { abortProjectJob, hasAgentJob, registerAgentPractice } from './agent/agent-ipc'
 import { attachProjectAccessCleanup, registerProjectAccess } from './agent/project-access'
-import { cleanupCommandPreparation, registerCommandPreparation } from './agent/command-preparation-ipc'
-import { cleanupCommandExecution, hasCommandExecution, registerCommandExecution } from './agent/command-execution-ipc'
+import {
+  cleanupCommandPreparation,
+  registerCommandPreparation
+} from './agent/command-preparation-ipc'
+import {
+  cleanupCommandExecution,
+  hasCommandExecution,
+  registerCommandExecution
+} from './agent/command-execution-ipc'
 import { decideCommandPermission } from '../shared/permission-policy'
-import { cleanupTaskWindow, cleanupTasksForSnapshot, discardTaskWindow, registerTaskLifecycle } from './agent/task-registry'
+import {
+  cleanupTaskWindow,
+  cleanupTasksForSnapshot,
+  discardTaskWindow,
+  registerTaskLifecycle
+} from './agent/task-registry'
 
 // Handle creating/removing shortcuts on Windows when installing/uninstalling.
 // 创建/删除 Windows 快捷方式
@@ -121,18 +133,27 @@ app.whenReady().then(() => {
   // 注册本地终端接口
   registerLocalTerminal()
   // 注册练习工具接口
-  registerAgentPractice((id) => hasChangePreparation(id) || hasChangeCommit(id) || hasCommandExecution(id))
+  registerAgentPractice(
+    (id) => hasChangePreparation(id) || hasChangeCommit(id) || hasCommandExecution(id)
+  )
   registerCommandPreparation((windowId, source) => {
     const snapshotId = hasProjectSnapshot(windowId, source.snapshotId) ? source.snapshotId : ''
-    return decideCommandPermission({ template: source.template, reason: '已通过提案解析' }, { kind: 'project', snapshotId }).allowed
+    return decideCommandPermission(
+      { template: source.template, reason: '已通过提案解析' },
+      { kind: 'project', snapshotId }
+    ).allowed
   })
   registerCommandExecution((windowId, source) => {
     const snapshotId = hasProjectSnapshot(windowId, source.snapshotId) ? source.snapshotId : ''
-    return decideCommandPermission({ template: source.template, reason: '已通过提案解析' }, { kind: 'project', snapshotId }).allowed
+    return decideCommandPermission(
+      { template: source.template, reason: '已通过提案解析' },
+      { kind: 'project', snapshotId }
+    ).allowed
   })
   // 注册项目文件选择与撤销接口
   registerProjectAccess({
-    isAgentJobActive: (id) => hasAgentJob(id) || hasChangePreparation(id) || hasChangeCommit(id) || hasCommandExecution(id),
+    isAgentJobActive: (id) =>
+      hasAgentJob(id) || hasChangePreparation(id) || hasChangeCommit(id) || hasCommandExecution(id),
     abortProjectJob,
     onAccessChanged: (id, snapshotId) => {
       cleanupChangePreparation(id)
@@ -144,10 +165,15 @@ app.whenReady().then(() => {
   })
   registerChangePreview(hasChangeCommit)
   registerChangePreparation(
-    (id) => hasAgentJob(id) || hasProjectSelection(id) || hasChangeCommit(id) || hasCommandExecution(id)
+    (id) =>
+      hasAgentJob(id) || hasProjectSelection(id) || hasChangeCommit(id) || hasCommandExecution(id)
   )
   registerChangeCommit(
-    (id) => hasAgentJob(id) || hasProjectSelection(id) || hasChangePreparation(id) || hasCommandExecution(id)
+    (id) =>
+      hasAgentJob(id) ||
+      hasProjectSelection(id) ||
+      hasChangePreparation(id) ||
+      hasCommandExecution(id)
   )
 
   // 创建会话存储器

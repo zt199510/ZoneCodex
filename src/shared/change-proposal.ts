@@ -7,8 +7,7 @@ export type ChangeProposalArgs = {
 }
 
 export type ChangeProposalOutput =
-  | { status: 'proposal_ready'; path: string }
-  | { status: 'error'; error: string }
+  { status: 'proposal_ready'; path: string } | { status: 'error'; error: string }
 
 export type MessageChangeProposal = {
   conversationId: string
@@ -147,8 +146,7 @@ export function deriveMessageChangeProposal(
     const args = parseChangeProposalArgs(parseJsonObject(item.arguments))
     if (!args) continue
     const outputs = run.items.filter(
-      (candidate) =>
-        candidate.type === 'function_call_output' && candidate.call_id === item.call_id
+      (candidate) => candidate.type === 'function_call_output' && candidate.call_id === item.call_id
     )
     if (outputs.length !== 1) continue
     const output = parseChangeProposalOutput(parseJsonObject(outputs[0].output))

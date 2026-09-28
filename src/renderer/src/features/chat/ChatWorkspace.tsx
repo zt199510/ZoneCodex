@@ -52,12 +52,6 @@ export function ChatWorkspace({
       return false
     }
   }
-  function retryAssistant(message: ChatMessage): void {
-    const index = messages.findIndex((item) => item.id === message.id)
-    const source = index > 0 ? messages[index - 1] : undefined
-    if (source?.role === 'user') send(source.content)
-  }
-
   return (
     <main className="chat-workspace" id="conversation">
       <ChatHeader
@@ -135,7 +129,10 @@ export function ChatWorkspace({
             editDisabled={!conversation.canSend}
             editMaxLength={conversation.engine === 'stream' ? 4000 : 2000}
             onCopyMessage={copyMessage}
-            onRetryAssistant={retryAssistant}
+            onRetryAssistant={(message) => {
+              conversation.retryMessage(message.id)
+            }}
+            canRetryAssistant={(message) => conversation.canRetryMessage(message.id)}
           />
         )}
       </div>

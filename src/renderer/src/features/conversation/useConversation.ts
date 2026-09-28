@@ -9,7 +9,12 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import type { ChatMessage } from '../../../../shared/conversation'
 import { deriveMessageChangeProposal } from '../../../../shared/change-proposal'
 import type { MessageChangeProposal } from '../../../../shared/change-proposal'
-import { getActiveConversation } from '../../../../shared/conversation-library'
+import {
+  createConversationTitle,
+  getActiveConversation,
+  isPlaceholderConversationTitle,
+  maxConversationTitleLength
+} from '../../../../shared/conversation-library'
 import type { Conversation, ConversationLibrary } from '../../../../shared/conversation-library'
 import { useChatRequest, type ToolActivity } from '../chat/useChatRequest'
 import { type ChatMode, type ChatEngine, resolveChatMode } from '../chat/chat-mode'
@@ -32,11 +37,14 @@ export type ConversationController = {
   commandProposals: Readonly<Record<string, MessageCommandProposal>>
   commandReview: ReturnType<typeof useCommandReview>
   conversations: Conversation[]
+  visibleConversations: Conversation[]
   activeConversationId: string | null
   messages: ChatMessage[]
   tasks: TaskRecord[]
   canRetryTask: (taskId: string) => boolean
   retryTask: (taskId: string) => boolean
+  canRetryMessage: (messageId: string) => boolean
+  retryMessage: (messageId: string) => boolean
   operation: Operation
   canEdit: boolean
   canSend: boolean
@@ -45,6 +53,12 @@ export type ConversationController = {
   chatError: string | null
   create: () => Promise<boolean>
   select: (id: string) => Promise<boolean>
+  rename: (id: string, title: string) => boolean
+  togglePinned: (id: string) => boolean
+  archive: (id: string) => Promise<boolean>
+  restore: (id: string) => Promise<boolean>
+  search: string
+  setSearch: (value: string) => void
   clear: () => Promise<boolean>
   selectProjectFiles: () => Promise<boolean>
   revokeProjectFiles: () => Promise<boolean>
@@ -72,12 +86,14 @@ export type ConversationController = {
 
 export function useConversation(): ConversationController {
   const [snapshot, setSnapshot] = useState<ConversationLibrary>({
-    version: 4,
+    version: 5,
     activeConversationId: null,
     conversations: []
   })
   const [closePending, setClosePendingState] = useState(false)
   const [capacityError, setCapacityError] = useState<string | null>(null)
+  const [conversationError, setConversationError] = useState<string | null>(null)
+  const [search, setSearch] = useState('')
   const closePendingRef = useRef(false)
   const hiddenProposalKeysRef = useRef(new Set<string>())
   const [hiddenProposalKeys, setHiddenProposalKeys] = useState<ReadonlySet<string>>(new Set())
@@ -313,6 +329,31 @@ export function useConversation(): ConversationController {
     [active, canRetryTask, request]
   )
 
+  const canRetryMessage = useCallback(
+    (messageId: string): boolean => {
+      if (!active || !canChange()) return false
+      const message = active.messages.find((item) => item.id === messageId)
+      if (
+        !message ||
+        message.role !== 'assistant' ||
+        (message.status !== 'failed' && message.status !== 'cancelled')
+      )
+        return false
+      return request.canRetry(messageId)
+    },
+    [active, canChange, request]
+  )
+
+  const retryMessage = useCallback(
+    (messageId: string): boolean => {
+      if (!canRetryMessage(messageId)) return false
+      const accepted = request.retry(messageId)
+      if (accepted) markSent()
+      return accepted
+    },
+    [canRetryMessage, markSent, request]
+  )
+
   const editAndSend = useCallback(
     (messageId: string, rawContent: string): boolean => {
       if (!active || !canChange()) return false
@@ -320,7 +361,11 @@ export function useConversation(): ConversationController {
       const index = active.messages.findIndex(
         (message) => message.id === messageId && message.role === 'user'
       )
-      if (index < 0 || !content || active.messages.slice(index + 1).some((message) => message.role === 'user')) {
+      if (
+        index < 0 ||
+        !content ||
+        active.messages.slice(index + 1).some((message) => message.role === 'user')
+      ) {
         return false
       }
       const trimmedMessages = active.messages.slice(0, index)
@@ -433,6 +478,8 @@ export function useConversation(): ConversationController {
           {
             id,
             title: `新会话 ${previous.conversations.length + 1}`,
+            pinned: false,
+            archived: false,
             messages: [],
             toolRuns: [],
             workspace: null,
@@ -442,6 +489,7 @@ export function useConversation(): ConversationController {
       }
     })
     setCapacityError(null)
+    setConversationError(null)
     clearProjectError()
     request.clearError()
     request.clearActivity()
@@ -449,7 +497,10 @@ export function useConversation(): ConversationController {
   }
 
   async function select(id: string): Promise<boolean> {
-    if (!canChange() || !snapshot.conversations.some((item) => item.id === id)) return false
+    if (!canChange() || !snapshot.conversations.some((item) => item.id === id && !item.archived)) {
+      setConversationError('当前会话正在忙碌，或目标会话已归档。')
+      return false
+    }
     if (id === active?.id) return true
     if (!(await revokeSelectionForChange())) return false
     setSnapshot((previous) =>
@@ -461,7 +512,86 @@ export function useConversation(): ConversationController {
           }
     )
     setCapacityError(null)
+    setConversationError(null)
     clearProjectError()
+    request.clearError()
+    request.clearActivity()
+    return true
+  }
+
+  function rename(id: string, rawTitle: string): boolean {
+    if (!canChange()) {
+      setConversationError('生成、保存或关闭保护期间不能修改会话。')
+      return false
+    }
+    const title = rawTitle.trim()
+    if (!title) {
+      setConversationError('会话标题不能为空。')
+      return false
+    }
+    if (title.length > maxConversationTitleLength) {
+      setConversationError(`会话标题不能超过 ${maxConversationTitleLength} 个字符。`)
+      return false
+    }
+    if (!snapshot.conversations.some((item) => item.id === id)) return false
+    updateConversation(id, (conversation) => ({ ...conversation, title }))
+    setConversationError(null)
+    return true
+  }
+
+  function togglePinned(id: string): boolean {
+    if (!canChange()) {
+      setConversationError('生成、保存或关闭保护期间不能修改会话。')
+      return false
+    }
+    if (!snapshot.conversations.some((item) => item.id === id)) return false
+    updateConversation(id, (conversation) => ({ ...conversation, pinned: !conversation.pinned }))
+    setConversationError(null)
+    return true
+  }
+
+  async function archive(id: string): Promise<boolean> {
+    if (!canChange()) {
+      setConversationError('生成、保存或关闭保护期间不能修改会话。')
+      return false
+    }
+    const target = snapshot.conversations.find((item) => item.id === id)
+    if (!target || target.archived) return false
+    if (id === active?.id && !(await revokeSelectionForChange())) return false
+    setSnapshot((previous) => {
+      const nextActive =
+        previous.activeConversationId === id
+          ? (previous.conversations.find((item) => item.id !== id && !item.archived)?.id ?? null)
+          : previous.activeConversationId
+      return {
+        ...previous,
+        activeConversationId: nextActive,
+        conversations: previous.conversations.map((item) =>
+          item.id === id ? { ...item, archived: true } : item
+        )
+      }
+    })
+    setConversationError(null)
+    request.clearError()
+    request.clearActivity()
+    return true
+  }
+
+  async function restore(id: string): Promise<boolean> {
+    if (!canChange()) {
+      setConversationError('生成、保存或关闭保护期间不能修改会话。')
+      return false
+    }
+    if (!snapshot.conversations.some((item) => item.id === id && item.archived)) return false
+    if (id !== active?.id && !(await revokeSelectionForChange())) return false
+    setSnapshot((previous) => ({
+      ...previous,
+      activeConversationId: id,
+      conversations: previous.conversations.map((item) =>
+        item.id === id ? { ...item, archived: false } : item
+      )
+    }))
+    setConversationError(null)
     request.clearError()
     request.clearActivity()
     return true
@@ -477,6 +607,7 @@ export function useConversation(): ConversationController {
       tasks: []
     }))
     setCapacityError(null)
+    setConversationError(null)
     clearProjectError()
     request.clearError()
     request.clearActivity()
@@ -485,6 +616,19 @@ export function useConversation(): ConversationController {
 
   const canNavigate = storage.ready && operations.operation === 'idle' && !closePending
   const canEdit = canNavigate && active !== null
+  const canSend = canNavigate
+  const normalizedSearch = search.trim().toLocaleLowerCase()
+  const visibleConversations = normalizedSearch
+    ? snapshot.conversations.filter((conversation) => {
+        const haystack = [
+          conversation.title,
+          ...conversation.messages.map((message) => message.content)
+        ]
+          .join('\n')
+          .toLocaleLowerCase()
+        return haystack.includes(normalizedSearch)
+      })
+    : snapshot.conversations
   const savedActivity = Object.fromEntries(
     (active?.toolRuns ?? []).map((run) => [run.assistantId, run.trace])
   )
@@ -501,14 +645,23 @@ export function useConversation(): ConversationController {
     tasks: active?.tasks ?? [],
     canRetryTask,
     retryTask,
+    canRetryMessage,
+    retryMessage,
     operation: operations.operation,
     canNavigate,
     canEdit,
-    canSend: canEdit,
+    canSend,
     storage,
-    chatError: capacityError ?? projectError ?? request.error,
+    chatError: conversationError ?? capacityError ?? projectError ?? request.error,
     create,
     select,
+    rename,
+    togglePinned,
+    archive,
+    restore,
+    search,
+    setSearch: (value) => setSearch(value),
+    visibleConversations,
     clear,
     stop: request.stop,
     selectProjectFiles: async () => {
@@ -523,17 +676,57 @@ export function useConversation(): ConversationController {
     setClosePending,
     getOperation: operations.getOperation,
     send: (content) => {
-      if (!canChange() || !active) return false
-      const capacityMessage = getCapacityError(snapshot, active, chatMode !== 'chat')
+      if (!canChange()) return false
+      if (!active && snapshot.conversations.length >= 100) {
+        setCapacityError('会话数量已达到上限，请整理已有会话后再发送。')
+        return false
+      }
+      const target =
+        active ??
+        (() => {
+          const id = crypto.randomUUID()
+          return {
+            id,
+            title: `新会话 ${snapshot.conversations.length + 1}`,
+            pinned: false,
+            archived: false,
+            messages: [],
+            toolRuns: [],
+            workspace: null,
+            tasks: []
+          }
+        })()
+      const nextSnapshot = active
+        ? snapshot
+        : {
+            ...snapshot,
+            activeConversationId: target.id,
+            conversations: [...snapshot.conversations, target]
+          }
+      const capacityMessage = getCapacityError(nextSnapshot, target, chatMode !== 'chat')
       if (capacityMessage) {
         setCapacityError(capacityMessage)
         return false
       }
       preparation.cancel()
-      const accepted = request.send(content)
+      if (!active) setSnapshot(nextSnapshot)
+      const accepted = request.send(content, target.messages, target.toolRuns, target.id)
+      if (!accepted && !active) setSnapshot(snapshot)
       if (accepted) {
+        const hadUserMessage = target.messages.some((message) => message.role === 'user')
+        if (isPlaceholderConversationTitle(target.title) && !hadUserMessage) {
+          const generatedTitle = createConversationTitle(content)
+          if (generatedTitle) {
+            updateConversation(target.id, (conversation) =>
+              isPlaceholderConversationTitle(conversation.title)
+                ? { ...conversation, title: generatedTitle }
+                : conversation
+            )
+          }
+        }
         commandReview.close()
         setCapacityError(null)
+        setConversationError(null)
         markSent()
       }
       return accepted

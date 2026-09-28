@@ -89,9 +89,12 @@ ipcMain.handle('conversation:load', async () => {
     ok: true,
     missing: saved === null,
     snapshot: saved || {
-      version: 4,
+      version: 5,
       activeConversationId: 'fixture-conversation',
-      conversations: [{ id: 'fixture-conversation', title: '检查会话', messages: [], toolRuns: [] }]
+      conversations: [{
+        id: 'fixture-conversation', title: '检查会话', pinned: false, archived: false,
+        messages: [], toolRuns: [], workspace: null, tasks: []
+      }]
     }
   }
 })
@@ -333,7 +336,7 @@ app
     await click('button[aria-label="清空对话"]')
     await click('dialog[open] .danger-button')
     await until(() => saved.conversations[0].messages.length === 0, 'clear saved')
-    assert.equal(saved.version, 4)
+    assert.equal(saved.version, 5)
     assert.equal(saved.activeConversationId, 'fixture-conversation')
     await idle()
 
@@ -600,6 +603,54 @@ app
       'Lesson 26 reload passed: saved descriptions restored, review authorization not restored.'
     )
 
+    // 第34课：空白工作台首次发送自动创建会话，并在异步失败后允许第二轮继续。
+    saved = { version: 5, activeConversationId: null, conversations: [] }
+    await window.loadFile(join(root, 'out/renderer/index.html'))
+    await idle()
+    assert.equal(await evaluate("document.querySelector('.empty-state') !== null"), true)
+    assert.equal(await evaluate("document.querySelector('#chat-input').disabled"), false)
+    const startsBeforeFirstSend = starts
+    await input('空白工作台的第一条消息')
+    await evaluate(
+      "(() => { const form = document.querySelector('.composer'); form.requestSubmit(); form.requestSubmit(); })()"
+    )
+    await until(() => !!pending, 'empty workspace first request')
+    assert.equal(starts, startsBeforeFirstSend + 1, 'duplicate first send is ignored')
+    assert.equal(await evaluate("document.querySelector('#chat-input').value"), '')
+    delta('第一轮回答。')
+    done()
+    await until(
+      () => saved?.conversations?.length === 1 && saved.conversations[0].messages.length === 2,
+      'first conversation saved'
+    )
+    assert.equal(saved.activeConversationId, saved.conversations[0].id)
+    assert.equal(saved.conversations[0].messages[0].role, 'user')
+    assert.equal(saved.conversations[0].messages[1].status, 'complete')
+
+    await idle()
+    await input('第一轮失败后的继续消息')
+    await click('button[aria-label="发送消息"]')
+    await until(() => !!pending, 'failed follow-up request')
+    assert.equal(pending.history.length, 3, 'successful first pair is included')
+    done('error')
+    await until(
+      () => saved?.conversations?.[0]?.messages?.at(-1)?.status === 'failed',
+      'failed follow-up saved'
+    )
+    await idle()
+    await input('失败后第二轮消息')
+    await click('button[aria-label="发送消息"]')
+    await until(() => !!pending, 'second round after failure')
+    assert.equal(pending.history.length, 3, 'failed pair is excluded from context')
+    delta('失败后第二轮已恢复。')
+    done()
+    await until(
+      () => saved?.conversations?.[0]?.messages?.at(-1)?.status === 'complete',
+      'second round after failure saved'
+    )
+    await idle()
+    console.log('Lesson 34 first-send and failed-follow-up checks passed.')
+
     // 刷新后只从内存替身恢复已保存记录；损坏加载时禁止任何写入。
     failLoad = true
     const beforeLoadFailure = saves
@@ -639,7 +690,8 @@ app
             'project request mode, ownership and cancelled history',
             'popover layout stability, Escape and narrow terminal layout',
             'change preview diff panel, focus, scrolling and discard',
-            'load failure protection'
+            'load failure protection',
+            'lesson 34 empty workspace first send and failed follow-up'
           ]
         },
         null,

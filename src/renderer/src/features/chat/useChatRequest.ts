@@ -28,6 +28,14 @@ type ActiveRequest = {
   text: string
   taskId: string
 }
+type ChatRetrySource = {
+  conversationId: string
+  prompt: string
+  sourceMessages: readonly ChatMessage[]
+  sourceToolRuns: readonly ToolRun[]
+  mode: ChatMode
+  projectSelection: ProjectSelection | null
+}
 type UpdateMessages = (
   conversationId: string,
   update: (previous: ChatMessage[]) => ChatMessage[]
@@ -52,8 +60,11 @@ type ChatRequest = {
   send: (
     rawContent: string,
     sourceMessages?: readonly ChatMessage[],
-    sourceToolRuns?: readonly ToolRun[]
+    sourceToolRuns?: readonly ToolRun[],
+    targetConversationId?: string | null
   ) => boolean
+  canRetry: (assistantId: string) => boolean
+  retry: (assistantId: string) => boolean
   stop: () => Promise<void>
   clearError: () => void
   clearActivity: () => void
@@ -73,6 +84,7 @@ export function useChatRequest({
   const [error, setError] = useState<string | null>(null)
   const [toolActivity, setToolActivity] = useState<ToolActivity>({})
   const activeRequest = useRef<ActiveRequest | null>(null)
+  const retrySources = useRef(new Map<string, ChatRetrySource>())
   const subscribed = useRef(false)
 
   useEffect(() => {
@@ -99,6 +111,12 @@ export function useChatRequest({
     })
     const offTask = window.api.onTaskState((record) => {
       updateConversation(record.conversationId, (previous) => {
+        const active = activeRequest.current
+        const belongsToActiveRequest =
+          active?.taskId === record.taskId && active.conversationId === record.conversationId
+        const belongsToKnownTask = previous.tasks.some((task) => task.taskId === record.taskId)
+        // Ignore late events for tasks already removed from this conversation.
+        if (!belongsToActiveRequest && !belongsToKnownTask) return previous
         const known = previous.tasks.some((task) => task.taskId === record.taskId)
         const tasks = known
           ? previous.tasks.map((task) => (task.taskId === record.taskId ? record : task))
@@ -225,11 +243,15 @@ export function useChatRequest({
   function send(
     rawContent: string,
     sourceMessages: readonly ChatMessage[] = messages,
-    sourceToolRuns: readonly ToolRun[] = toolRuns
+    sourceToolRuns: readonly ToolRun[] = toolRuns,
+    targetConversationId: string | null = conversationId,
+    sourceMode: ChatMode = mode,
+    sourceProjectSelection: ProjectSelection | null = projectSelection
   ): boolean {
     const content = rawContent.trim()
-    if (!subscribed.current || !conversationId || !content || activeRequest.current) return false
-    const limit = mode === 'chat' ? 4000 : 2000
+    if (!subscribed.current || !targetConversationId || !content || activeRequest.current)
+      return false
+    const limit = sourceMode === 'chat' ? 4000 : 2000
     if (content.length > limit) {
       setError(`当前模式请输入不超过 ${limit} 个字符的消息。`)
       return false
@@ -239,14 +261,14 @@ export function useChatRequest({
     let scope: ToolScope | null = null
     let context: AgentContext | null = null
     let agentMode: AgentMode | null = null
-    if (mode === 'chat') {
+    if (sourceMode === 'chat') {
       chatHistory = buildContext(
         messagesAfterProjectBoundary(sourceMessages, sourceToolRuns),
         content
       )
     } else {
       try {
-        const request = resolveToolRequest(mode, conversationId, projectSelection)
+        const request = resolveToolRequest(sourceMode, targetConversationId, sourceProjectSelection)
         if (!request) {
           setError('附件已失效，请重新添加文件。')
           return false
@@ -262,11 +284,11 @@ export function useChatRequest({
     }
     if (!begin('generating')) return false
     const active: ActiveRequest = {
-      conversationId,
+      conversationId: targetConversationId,
       requestId: crypto.randomUUID(),
       userId: crypto.randomUUID(),
       assistantId: crypto.randomUUID(),
-      mode,
+      mode: sourceMode,
       agentMode,
       prompt: content,
       scope,
@@ -279,10 +301,10 @@ export function useChatRequest({
     }
     activeRequest.current = active
     setError(null)
-    if (mode !== 'chat') {
+    if (sourceMode !== 'chat') {
       setToolActivity((previous) => ({ ...previous, [active.assistantId]: ['正在处理请求…'] }))
     }
-    if (mode === 'chat') {
+    if (sourceMode === 'chat') {
       updateMessages(active.conversationId, (previous) => [
         ...previous,
         { id: active.userId, role: 'user', content, status: 'pending' },
@@ -310,8 +332,42 @@ export function useChatRequest({
         ]
       }))
     }
+    if (sourceMode === 'chat') {
+      retrySources.current.set(active.assistantId, {
+        conversationId: active.conversationId,
+        prompt: content,
+        sourceMessages: [...sourceMessages],
+        sourceToolRuns: [...sourceToolRuns],
+        mode: sourceMode,
+        projectSelection: sourceProjectSelection
+      })
+    }
     void run(active)
     return true
+  }
+
+  function canRetry(assistantId: string): boolean {
+    const source = retrySources.current.get(assistantId)
+    return Boolean(
+      source &&
+        source.mode === 'chat' &&
+        source.conversationId === conversationId &&
+        operations.isIdle() &&
+        !activeRequest.current
+    )
+  }
+
+  function retry(assistantId: string): boolean {
+    const source = retrySources.current.get(assistantId)
+    if (!source || !canRetry(assistantId)) return false
+    return send(
+      source.prompt,
+      source.sourceMessages,
+      source.sourceToolRuns,
+      source.conversationId,
+      source.mode,
+      source.projectSelection
+    )
   }
 
   async function stop(): Promise<void> {
@@ -331,6 +387,8 @@ export function useChatRequest({
     error,
     toolActivity,
     send,
+    canRetry,
+    retry,
     stop,
     clearError: () => setError(null),
     clearActivity: () => setToolActivity({})

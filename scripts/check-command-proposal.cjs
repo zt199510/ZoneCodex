@@ -106,15 +106,18 @@ async function main() {
   duplicate.items.splice(-1, 0, ...pair)
   assert.equal(derive('conversation-26', duplicate, user, assistant), null)
   const library = {
-    version: 4,
+    version: 5,
     activeConversationId: 'conversation-26',
     conversations: [
-      { id: 'conversation-26', title: '测试', messages: [user, assistant], toolRuns: [run] }
+      {
+        id: 'conversation-26', title: '测试', pinned: false, archived: false,
+        messages: [user, assistant], toolRuns: [run], workspace: null, tasks: []
+      }
     ]
   }
   assert(parseLibrary(JSON.parse(JSON.stringify(library))))
   console.log(
-    'Lesson 26 protocol checks passed: exact parameters, quota, cancellation, mock loop, scope, pairing, failed rounds and v4 history.'
+    'Lesson 26 protocol checks passed: exact parameters, quota, cancellation, mock loop, scope, pairing, failed rounds and v5 history.'
   )
 }
 main().catch((error) => {

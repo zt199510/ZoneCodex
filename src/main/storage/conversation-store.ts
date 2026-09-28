@@ -13,7 +13,7 @@ import type { SaveConversationResult } from '../../shared/conversation'
 type Existing = {
   bytes: Buffer
   library: ConversationLibrary
-  sourceVersion: 1 | 2 | 3 | 4
+  sourceVersion: 1 | 2 | 3 | 4 | 5
 }
 
 /**
@@ -55,7 +55,11 @@ export function createConversationStore(directory: string): {
       typeof value !== 'object' ||
       value === null ||
       !('version' in value) ||
-      (value.version !== 1 && value.version !== 2 && value.version !== 3 && value.version !== 4)
+      (value.version !== 1 &&
+        value.version !== 2 &&
+        value.version !== 3 &&
+        value.version !== 4 &&
+        value.version !== 5)
     ) {
       throw new Error('文件格式或版本不支持')
     }
@@ -104,11 +108,11 @@ export function createConversationStore(directory: string): {
             return {
               ok: true,
               missing: true,
-              snapshot: { version: 4, activeConversationId: null, conversations: [] }
+              snapshot: { version: 5, activeConversationId: null, conversations: [] }
             }
           }
           const snapshot = recoverPending(saved.library)
-          // 旧版本先备份原始字节，再统一写入版本 4。
+          // 旧版本先备份原始字节，再统一写入版本 5。
           if (saved.sourceVersion !== snapshot.version) {
             const backup = join(
               directory,

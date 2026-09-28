@@ -103,7 +103,8 @@ export function MessageList({
   editDisabled = false,
   editMaxLength = 2000,
   onCopyMessage,
-  onRetryAssistant
+  onRetryAssistant,
+  canRetryAssistant
 }: {
   messages: readonly ChatMessage[]
   commandProposals?: Readonly<Record<string, MessageCommandProposal>>
@@ -119,6 +120,7 @@ export function MessageList({
   editMaxLength?: number
   onCopyMessage?: (message: ChatMessage) => Promise<boolean> | boolean
   onRetryAssistant?: (message: ChatMessage) => void
+  canRetryAssistant?: (message: ChatMessage) => boolean
 }): React.JSX.Element {
   const [editingId, setEditingId] = useState<string | null>(null)
   const [copiedId, setCopiedId] = useState<string | null>(null)
@@ -225,7 +227,8 @@ export function MessageList({
                 )}
                 {message.role === 'assistant' &&
                   (message.status === 'cancelled' || message.status === 'failed') &&
-                  onRetryAssistant && (
+                  onRetryAssistant &&
+                  (!canRetryAssistant || canRetryAssistant(message)) && (
                     <button
                       type="button"
                       className="message-action"

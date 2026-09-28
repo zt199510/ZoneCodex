@@ -47,30 +47,39 @@ export function registerModelStream(): void {
       const sender = event.sender
       const windowId = owner.id
       if (jobs.has(windowId)) return { status: 'error', error: '请等待当前真实流任务结束。' }
-      const endpoint = process.env.MODEL_ENDPOINT
-      const model = process.env.MODEL_NAME
-      const apiKey = process.env.MODEL_API_KEY
-      if (!endpoint || !model || !apiKey) {
-        return { status: 'error', error: '请配置模型地址、名称和密钥，再重启调试。' }
+      const checkedConversationId =
+        typeof conversationId === 'string' && validId(conversationId) ? conversationId : null
+      if (!checkedConversationId) {
+        return { status: 'error', error: '会话标识无效，请重新发起。' }
       }
-      try {
-        if (new URL(endpoint).protocol !== 'https:') throw new Error('协议不支持')
-      } catch {
-        return { status: 'error', error: '模型地址必须是有效的 HTTPS 地址。' }
-      }
-
       const controller = new AbortController()
       const lifecycleId = isTaskId(taskId) ? taskId : newTaskId()
       const task = createTask({
         taskId: lifecycleId,
         requestId,
-        conversationId:
-          typeof conversationId === 'string' && validId(conversationId) ? conversationId : 'time',
+        conversationId: checkedConversationId,
         kind: 'chat',
         windowId,
         cancel: () => controller.abort()
       })
       if (!task) return { status: 'error', error: '任务标识已使用，请重新发起。' }
+      const endpoint = process.env.MODEL_ENDPOINT
+      const model = process.env.MODEL_NAME
+      const apiKey = process.env.MODEL_API_KEY
+      if (!endpoint || !model || !apiKey) {
+        updateTask(windowId, lifecycleId, 'failed', {
+          error: '请配置模型地址、名称和密钥，再重启调试。'
+        })
+        return { status: 'error', error: '请配置模型地址、名称和密钥，再重启调试。' }
+      }
+      try {
+        if (new URL(endpoint).protocol !== 'https:') throw new Error('协议不支持')
+      } catch {
+        updateTask(windowId, lifecycleId, 'failed', {
+          error: '模型地址必须是有效的 HTTPS 地址。'
+        })
+        return { status: 'error', error: '模型地址必须是有效的 HTTPS 地址。' }
+      }
       let timedOut = false
       function cancel(): void {
         controller.abort()

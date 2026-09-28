@@ -33,7 +33,11 @@ export function expireWorkspace(state: WorkspaceRuntimeState): WorkspaceRuntimeS
 }
 
 export function revokeWorkspace(state: WorkspaceRuntimeState): WorkspaceRuntimeState {
-  return { ...state, permission: 'revoked', task: state.task === 'running' ? 'cancelled' : state.task }
+  return {
+    ...state,
+    permission: 'revoked',
+    task: state.task === 'running' ? 'cancelled' : state.task
+  }
 }
 
 export function resetWorkspaceRuntime(): WorkspaceRuntimeState {

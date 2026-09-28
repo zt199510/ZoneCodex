@@ -42,10 +42,22 @@ export function decideCommandPermission(
 ): PermissionDecision {
   const template = getCommandTemplate(proposal.template)
   if (!template) {
-    return { risk: 'command', approval: 'user', allowed: false, scope: scope ?? { kind: 'project', snapshotId: '' }, reason: '未知命令模板' }
+    return {
+      risk: 'command',
+      approval: 'user',
+      allowed: false,
+      scope: scope ?? { kind: 'project', snapshotId: '' },
+      reason: '未知命令模板'
+    }
   }
   if (!scope?.snapshotId) {
-    return { risk: 'command', approval: 'user', allowed: false, scope: { kind: 'project', snapshotId: '' }, reason: '缺少项目快照' }
+    return {
+      risk: 'command',
+      approval: 'user',
+      allowed: false,
+      scope: { kind: 'project', snapshotId: '' },
+      reason: '缺少项目快照'
+    }
   }
   return { risk: 'command', approval: 'user', allowed: true, scope }
 }

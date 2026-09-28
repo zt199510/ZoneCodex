@@ -136,6 +136,125 @@ body,
   text-align: center;
 }
 
+.sidebar-heading {
+  background: transparent !important;
+  min-width: 0 !important;
+  text-align: left !important;
+}
+
+.conversation-search {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin: 0 4px 10px;
+  padding: 7px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--muted);
+}
+
+.conversation-search input {
+  width: 100%;
+  min-width: 0;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--text);
+  font-size: 12px;
+}
+
+.search-clear {
+  width: 22px;
+  height: 22px;
+}
+
+.conversation-views {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px;
+  margin: 0 4px 10px;
+}
+
+.view-tab {
+  border: 0;
+  border-radius: 5px;
+  padding: 6px 5px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.view-tab span {
+  margin-left: 3px;
+  color: var(--soft-text);
+}
+
+.view-tab.selected {
+  background: #e8eae4;
+  color: var(--text);
+}
+
+.conversation-row {
+  position: relative;
+  margin-bottom: 4px;
+}
+
+.conversation-row .conversation-item {
+  padding-right: 86px;
+}
+
+.conversation-actions {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  display: flex;
+  align-items: center;
+  gap: 1px;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+
+.conversation-row:hover .conversation-actions,
+.conversation-row:focus-within .conversation-actions {
+  opacity: 1;
+}
+
+.conversation-actions .icon-button {
+  width: 25px;
+  height: 25px;
+}
+
+.conversation-edit {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 4px;
+  border-radius: 6px;
+  background: #e8eae4;
+}
+
+.conversation-edit input {
+  min-width: 0;
+  width: 100%;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 5px 7px;
+  background: var(--surface);
+  color: var(--text);
+  font-size: 12px;
+}
+
+.conversation-edit .icon-button {
+  width: 25px;
+  height: 25px;
+}
+
+.edit-error {
+  padding: 3px 8px 0;
+  color: var(--danger);
+}
+
 .conversation-nav {
   margin-top: 24px;
   flex: 1;

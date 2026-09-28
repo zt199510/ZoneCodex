@@ -178,12 +178,9 @@ export function registerAgentPractice(
         const needsApproval = completed.items.some(
           (item) => item.type === 'function_call' && item.name === 'propose_command'
         )
-        updateTask(
-          windowId,
-          lifecycleId,
-          needsApproval ? 'waiting_approval' : 'completed',
-          { result: completed.answer }
-        )
+        updateTask(windowId, lifecycleId, needsApproval ? 'waiting_approval' : 'completed', {
+          result: completed.answer
+        })
         return { status: 'done', answer: completed.answer, items: completed.items, trace }
       } catch (error) {
         if (timedOut) {
@@ -195,7 +192,8 @@ export function registerAgentPractice(
           return { status: 'cancelled', trace }
         }
         updateTask(windowId, lifecycleId, 'failed', {
-          error: error instanceof AgentError ? error.message : '请求或工具处理失败，请检查网络和响应格式'
+          error:
+            error instanceof AgentError ? error.message : '请求或工具处理失败，请检查网络和响应格式'
         })
         return {
           status: 'error',

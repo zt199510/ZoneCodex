@@ -208,9 +208,12 @@ async function main() {
     )
     assert(
       parseLibrary({
-        version: 4,
+        version: 5,
         activeConversationId: 'c',
-        conversations: [{ id: 'c', title: '附件', messages, toolRuns: runs }]
+        conversations: [{
+          id: 'c', title: '附件', pinned: false, archived: false,
+          messages, toolRuns: runs, workspace: null, tasks: []
+        }]
       })
     )
 

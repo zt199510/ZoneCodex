@@ -26,12 +26,7 @@ export type SavedWorkspace = {
 }
 
 export type TaskStatus =
-  | 'idle'
-  | 'running'
-  | 'waiting_approval'
-  | 'completed'
-  | 'cancelled'
-  | 'failed'
+  'idle' | 'running' | 'waiting_approval' | 'completed' | 'cancelled' | 'failed'
 
 export type PermissionStatus = 'unscoped' | 'scoped' | 'expired' | 'revoked'
 

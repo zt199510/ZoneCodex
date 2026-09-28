@@ -39,10 +39,17 @@ function App(): React.JSX.Element {
       {sidebarOpen && (
         <Sidebar
           conversations={conversation.conversations}
+          visibleConversations={conversation.visibleConversations}
           activeConversationId={conversation.activeConversationId}
           disabled={!conversation.canNavigate}
+          search={conversation.search}
+          onSearch={conversation.setSearch}
           onCreate={conversation.create}
           onSelect={conversation.select}
+          onRename={conversation.rename}
+          onTogglePinned={conversation.togglePinned}
+          onArchive={conversation.archive}
+          onRestore={conversation.restore}
         />
       )}
       <div className="workspace-body">

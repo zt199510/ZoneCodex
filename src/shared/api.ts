@@ -8,7 +8,12 @@ import type { AgentMode, AgentResult, AgentProgress } from './agent'
 import type { ProtocolItem } from './agent-history'
 import type { AgentContext, ProjectSelectionResult } from './project'
 import type { PreviewChangeRequest, PreviewChangeResult } from './change-preview'
-import type { CommandSource, CommandPreparationResult, CommandExecutionRequest, CommandExecutionEvent } from './command-preparation'
+import type {
+  CommandSource,
+  CommandPreparationResult,
+  CommandExecutionRequest,
+  CommandExecutionEvent
+} from './command-preparation'
 import type { TaskRecord } from './task'
 
 // 模型消息类型
@@ -31,11 +36,20 @@ export interface AppAPI {
   listTasks: () => Promise<TaskRecord[]>
   cancelTask: (taskId: string) => Promise<boolean>
   onTaskState: (listener: (record: TaskRecord) => void) => () => void
-  selectCommandDirectory: (source: CommandSource, operationId: string) => Promise<CommandPreparationResult>
-  prepareCommand: (source: CommandSource, grantId: string, checkId: string) => Promise<CommandPreparationResult>
+  selectCommandDirectory: (
+    source: CommandSource,
+    operationId: string
+  ) => Promise<CommandPreparationResult>
+  prepareCommand: (
+    source: CommandSource,
+    grantId: string,
+    checkId: string
+  ) => Promise<CommandPreparationResult>
   releaseCommandDirectory: (grantId: string) => Promise<boolean>
   cancelCommandPreparation: (operationId: string) => Promise<boolean>
-  startCommandExecution: (request: CommandExecutionRequest) => Promise<{ status: 'started'; executionId: string } | { status: 'error'; error: string }>
+  startCommandExecution: (
+    request: CommandExecutionRequest
+  ) => Promise<{ status: 'started'; executionId: string } | { status: 'error'; error: string }>
   cancelCommandExecution: (executionId: string) => Promise<boolean>
   onCommandExecutionEvent: (listener: (event: CommandExecutionEvent) => void) => () => void
   commitChange: (request: CommitRequest) => Promise<CommitResult>

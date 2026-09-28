@@ -330,6 +330,14 @@ export function selectToolHistory(
     const user = messages[index - 1]
     const run = runs.find((item) => item.assistantId === assistant.id)
     if (
+      assistant.role === 'assistant' &&
+      user.role === 'user' &&
+      (assistant.status === 'failed' || assistant.status === 'cancelled') &&
+      (user.status === 'failed' || user.status === 'cancelled')
+    ) {
+      continue
+    }
+    if (
       assistant.role !== 'assistant' ||
       user.role !== 'user' ||
       assistant.status !== 'complete' ||
