@@ -20,11 +20,12 @@ import { useChatRequest, type AcceptedChatRequest, type ToolActivity } from '../
 import { type ChatMode, resolveChatMode } from '../chat/chat-mode'
 import { useProjectSelection } from '../project/useProjectSelection'
 import { getCapacityError } from './capacity'
-import type { ProjectSelection } from '../../../../shared/project'
+import type { ProjectSelection, SavedWorkspace } from '../../../../shared/project'
 import { isTerminalTaskStatus, maxTaskRecords } from '../../../../shared/task'
 import { useConversationStorage, ConversationStorage } from './useConversationStorage'
 import { useOperation, Operation } from './useOperation'
 import { useChangePreview, type ChangePreviewController } from '../review/useChangePreview'
+import { useWorkspace, type WorkspaceController } from '../project/useWorkspace'
 
 export type ChangeProposalStatus = 'available' | 'stale'
 
@@ -60,6 +61,7 @@ export type ConversationController = {
   revokeProjectFiles: () => Promise<boolean>
   projectSelection: ProjectSelection | null
   contextSelection: ProjectSelection | null
+  workspace: WorkspaceController
   send: (content: string) => boolean
   editAndSend: (messageId: string, content: string) => boolean
   stop: () => Promise<void>
@@ -199,7 +201,7 @@ export function useConversation(): ConversationController {
     () => storage.ready && !closePendingRef.current && operations.isIdle(),
     [operations, storage.ready]
   )
-  const canSubmit =
+  const canSubmitBase =
     storage.ready &&
     operations.operation === 'idle' &&
     !closePending &&
@@ -228,6 +230,20 @@ export function useConversation(): ConversationController {
     },
     []
   )
+  const activeConversationId = active?.id ?? null
+  const workspace = useWorkspace({
+    conversationId: activeConversationId,
+    saved: active?.workspace ?? null,
+    operations,
+    canChange,
+    onSavedChange: (next: SavedWorkspace | null): void => {
+      if (!activeConversationId) return
+      updateConversation(activeConversationId, (previous) => ({ ...previous, workspace: next }))
+    }
+  })
+  // Persisted workspace metadata is only a display record. After a reload,
+  // the directory grant must be selected again before sending with it.
+  const canSubmit = canSubmitBase && (!active?.workspace || workspace.runtime !== null)
   const {
     projectSelection,
     pendingSelection,
@@ -336,7 +352,8 @@ export function useConversation(): ConversationController {
     toolRuns: active?.toolRuns ?? [],
     operations,
     mode: chatMode,
-    projectSelection
+    projectSelection,
+    workspace: workspace.runtime
   })
 
   function startTitleGeneration(accepted: AcceptedChatRequest, fallbackTitle: string): void {
@@ -464,11 +481,11 @@ export function useConversation(): ConversationController {
       commandReview.close()
       setCapacityError(null)
       setSnapshot(nextSnapshot)
-      const accepted = request.send(content, trimmedMessages, trimmedToolRuns)
+      const accepted = request.send(content, trimmedMessages, trimmedToolRuns, undefined, undefined, undefined, workspace.runtime)
       if (accepted) markSent()
       return accepted
     },
-    [active, canSubmit, commandReview, markSent, preparation, request, snapshot]
+    [active, canSubmit, commandReview, markSent, preparation, request, snapshot, workspace]
   )
 
   async function openProposal(proposal: MessageChangeProposal): Promise<boolean> {
@@ -529,7 +546,10 @@ export function useConversation(): ConversationController {
   async function create(): Promise<boolean> {
     if (!canChange() || snapshot.conversations.length >= 100) return false
     if (!(await revokeSelectionForChange())) return false
-    if (active) invalidateTitle(active.id)
+    if (active) {
+      if (!(await workspace.release())) return false
+      invalidateTitle(active.id)
+    }
     const id = crypto.randomUUID()
     setSnapshot((previous) => {
       if (previous.conversations.length >= 100) return previous
@@ -565,6 +585,7 @@ export function useConversation(): ConversationController {
       return false
     }
     if (id === active?.id) return true
+    if (active && !(await workspace.release())) return false
     if (!(await revokeSelectionForChange())) return false
     if (active) invalidateTitle(active.id)
     setSnapshot((previous) =>
@@ -623,7 +644,10 @@ export function useConversation(): ConversationController {
     }
     const target = snapshot.conversations.find((item) => item.id === id)
     if (!target || target.archived) return false
-    if (id === active?.id && !(await revokeSelectionForChange())) return false
+    if (id === active?.id) {
+      if (!(await workspace.release())) return false
+      if (!(await revokeSelectionForChange())) return false
+    }
     invalidateTitle(id)
     setSnapshot((previous) => {
       const nextActive =
@@ -651,6 +675,7 @@ export function useConversation(): ConversationController {
       return false
     }
     if (!snapshot.conversations.some((item) => item.id === id && item.archived)) return false
+    if (active && !(await workspace.release())) return false
     if (id !== active?.id && !(await revokeSelectionForChange())) return false
     invalidateTitle(id)
     setSnapshot((previous) => ({
@@ -745,6 +770,7 @@ export function useConversation(): ConversationController {
     revokeProjectFiles,
     projectSelection: pendingSelection,
     contextSelection: projectSelection,
+    workspace,
     setClosePending,
     getOperation: operations.getOperation,
     send: (content) => {
@@ -794,6 +820,7 @@ export function useConversation(): ConversationController {
         target.id,
         undefined,
         undefined,
+        workspace.runtime,
         fallbackTitle
           ? (acceptedRequest) => startTitleGeneration(acceptedRequest, fallbackTitle)
           : undefined

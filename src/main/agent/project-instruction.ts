@@ -24,12 +24,34 @@ export async function readProjectInstruction(root: string): Promise<WorkspaceIns
     if (candidateReal !== candidate) return { status: 'error', error: 'AGENTS.md 不得是符号链接' }
     const bytes = await readFile(candidate)
     const truncated = bytes.byteLength > maxInstructionBytes
-    const selected = bytes.subarray(0, maxInstructionBytes)
+    try {
+      // Validate the complete file before taking the bounded model prefix.
+      new TextDecoder('utf-8', { fatal: true }).decode(bytes)
+    } catch {
+      return { status: 'error', error: 'AGENTS.md 必须是 UTF-8 文本' }
+    }
+    let selected = bytes.subarray(0, maxInstructionBytes)
     let content: string
     try {
       content = new TextDecoder('utf-8', { fatal: true }).decode(selected)
     } catch {
-      return { status: 'error', error: 'AGENTS.md 必须是 UTF-8 文本' }
+      if (!truncated) return { status: 'error', error: 'AGENTS.md 必须是 UTF-8 文本' }
+      // The byte limit may split the final UTF-8 code point. Remove at most
+      // three trailing bytes to find a valid prefix; failures beyond that
+      // indicate malformed input rather than a truncation boundary.
+      let decoded: string | null = null
+      for (let trim = 1; trim <= 3 && trim < selected.byteLength; trim++) {
+        const candidate = selected.subarray(0, selected.byteLength - trim)
+        try {
+          decoded = new TextDecoder('utf-8', { fatal: true }).decode(candidate)
+          selected = candidate
+          break
+        } catch {
+          // Try the next possible UTF-8 boundary.
+        }
+      }
+      if (decoded === null) return { status: 'error', error: 'AGENTS.md 必须是 UTF-8 文本' }
+      content = decoded
     }
     const instruction: ProjectInstruction = {
       path: join(canonicalRoot, instructionName),

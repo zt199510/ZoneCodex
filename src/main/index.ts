@@ -10,7 +10,7 @@ import {
   hasChangePreparation,
   cleanupChangePreparation
 } from './agent/change-preparation-ipc'
-import { hasProjectSelection, hasProjectSnapshot } from './agent/project-access'
+import { hasProjectSelection, hasProjectSnapshot, hasWorkspaceSelection } from './agent/project-access'
 import { app, shell, BrowserWindow, ipcMain } from 'electron'
 import { join } from 'path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
@@ -126,7 +126,11 @@ app.whenReady().then(() => {
   registerLocalTerminal()
   // 注册真实 Agent 请求接口
   registerAgentRequest(
-    (id) => hasChangePreparation(id) || hasChangeCommit(id) || hasCommandExecution(id)
+    (id) =>
+      hasChangePreparation(id) ||
+      hasChangeCommit(id) ||
+      hasCommandExecution(id) ||
+      hasWorkspaceSelection(id)
   )
   registerConversationTitleRequest()
   registerCommandPreparation((windowId, source) => {
@@ -159,12 +163,17 @@ app.whenReady().then(() => {
   registerChangePreview(hasChangeCommit)
   registerChangePreparation(
     (id) =>
-      hasAgentJob(id) || hasProjectSelection(id) || hasChangeCommit(id) || hasCommandExecution(id)
+      hasAgentJob(id) ||
+      hasProjectSelection(id) ||
+      hasWorkspaceSelection(id) ||
+      hasChangeCommit(id) ||
+      hasCommandExecution(id)
   )
   registerChangeCommit(
     (id) =>
       hasAgentJob(id) ||
       hasProjectSelection(id) ||
+      hasWorkspaceSelection(id) ||
       hasChangePreparation(id) ||
       hasCommandExecution(id)
   )

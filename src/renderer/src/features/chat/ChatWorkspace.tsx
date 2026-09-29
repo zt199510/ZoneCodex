@@ -95,6 +95,7 @@ export function ChatWorkspace({
         selection={conversation.contextSelection}
         operation={operation}
         waitingApproval={conversation.commandReview.proposal !== null}
+        workspace={conversation.workspace}
       />
       {errors.length > 0 && (
         <div className="error-banner" role="alert">

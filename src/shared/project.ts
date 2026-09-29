@@ -35,6 +35,12 @@ export type WorkspaceInstructionResult =
   | { status: 'read'; instruction: ProjectInstruction }
   | { status: 'error'; error: string }
 
+export type WorkspaceSelectionResult =
+  | { status: 'selected'; workspace: Workspace }
+  | { status: 'cancelled' }
+  | { status: 'cleared' }
+  | { status: 'error'; error: string }
+
 export type ProjectSelection = {
   snapshotId: string
   label: string
@@ -179,6 +185,25 @@ function cloneSelection(selection: ProjectSelection): ProjectSelection {
   }
 }
 
+function cloneInstruction(instruction: ProjectInstruction): ProjectInstruction {
+  return {
+    path: instruction.path,
+    content: instruction.content,
+    fingerprint: instruction.fingerprint,
+    truncated: instruction.truncated
+  }
+}
+
+function cloneWorkspace(workspace: Workspace): Workspace {
+  return {
+    workspaceId: workspace.workspaceId,
+    root: workspace.root,
+    label: workspace.label,
+    snapshotId: workspace.snapshotId,
+    instruction: workspace.instruction ? cloneInstruction(workspace.instruction) : null
+  }
+}
+
 export function parseToolScope(value: unknown): ToolScope | null {
   try {
     if (!isPlainRecord(value) || typeof value.kind !== 'string') return null
@@ -278,6 +303,87 @@ export function parseProjectSelectionResult(value: unknown): ProjectSelectionRes
         label: raw.label,
         createdAt: raw.createdAt,
         files
+      })
+    }
+  } catch {
+    return null
+  }
+}
+
+export function parseWorkspaceInstructionResult(value: unknown): WorkspaceInstructionResult | null {
+  try {
+    if (!isPlainRecord(value) || typeof value.status !== 'string') return null
+    if (value.status === 'absent') return { status: 'absent' }
+    if (value.status === 'error') {
+      if (typeof value.error !== 'string' || !value.error.trim() || value.error.length > 500)
+        return null
+      return { status: 'error', error: value.error }
+    }
+    if (value.status !== 'read' || !isPlainRecord(value.instruction)) return null
+    const raw = value.instruction
+    if (
+      typeof raw.path !== 'string' ||
+      !raw.path.trim() ||
+      raw.path.length > 4096 ||
+      typeof raw.content !== 'string' ||
+      raw.content.length > 65536 ||
+      typeof raw.fingerprint !== 'string' ||
+      !/^[a-f0-9]{64}$/i.test(raw.fingerprint) ||
+      typeof raw.truncated !== 'boolean'
+    ) {
+      return null
+    }
+    return {
+      status: 'read',
+      instruction: cloneInstruction({
+        path: raw.path,
+        content: raw.content,
+        fingerprint: raw.fingerprint,
+        truncated: raw.truncated
+      })
+    }
+  } catch {
+    return null
+  }
+}
+
+export function parseWorkspaceSelectionResult(value: unknown): WorkspaceSelectionResult | null {
+  try {
+    if (!isPlainRecord(value) || typeof value.status !== 'string') return null
+    if (value.status === 'cleared') return { status: 'cleared' }
+    if (value.status === 'cancelled') return { status: 'cancelled' }
+    if (value.status === 'error') {
+      if (typeof value.error !== 'string' || !value.error.trim() || value.error.length > 500)
+        return null
+      return { status: 'error', error: value.error }
+    }
+    if (value.status !== 'selected' || !isPlainRecord(value.workspace)) return null
+    const raw = value.workspace
+    if (
+      !isAgentId(raw.workspaceId) ||
+      typeof raw.root !== 'string' ||
+      !raw.root.trim() ||
+      raw.root.length > 4096 ||
+      typeof raw.label !== 'string' ||
+      !raw.label.trim() ||
+      raw.label.length > 80 ||
+      (raw.snapshotId !== null && !isAgentId(raw.snapshotId))
+    ) {
+      return null
+    }
+    const instructionResult =
+      raw.instruction === null
+        ? null
+        : parseWorkspaceInstructionResult({ status: 'read', instruction: raw.instruction })
+    if (raw.instruction !== null && !instructionResult) return null
+    return {
+      status: 'selected',
+      workspace: cloneWorkspace({
+        workspaceId: raw.workspaceId,
+        root: raw.root,
+        label: raw.label,
+        snapshotId: raw.snapshotId,
+        instruction: instructionResult?.status === 'read' ? instructionResult.instruction : null
       })
     }
   } catch {

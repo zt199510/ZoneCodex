@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { selectToolHistory } from '../../../../shared/agent-history'
 import type { ProtocolItem, ToolRun } from '../../../../shared/agent-history'
-import type { AgentContext, ProjectSelection, ToolScope } from '../../../../shared/project'
+import type { AgentContext, ProjectSelection, ToolScope, Workspace } from '../../../../shared/project'
 import type { ChatMessage } from '../../../../shared/conversation'
 import type { Conversation } from '../../../../shared/conversation-library'
 import { isTerminalTaskStatus, maxTaskRecords } from '../../../../shared/task'
@@ -22,6 +22,7 @@ type ActiveRequest = {
   prompt: string
   scope: ToolScope | null
   context: AgentContext | null
+  workspaceId: string | null
   history: ProtocolItem[]
   trace: string[]
   taskId: string
@@ -33,6 +34,7 @@ type ChatRetrySource = {
   sourceToolRuns: readonly ToolRun[]
   mode: ChatMode
   projectSelection: ProjectSelection | null
+  workspaceId: string | null
 }
 type UpdateMessages = (
   conversationId: string,
@@ -51,6 +53,7 @@ type ChatRequestOptions = {
   operations: OperationControl
   mode: ChatMode
   projectSelection: ProjectSelection | null
+  workspace: Workspace | null
 }
 type ChatRequest = {
   error: string | null
@@ -62,6 +65,7 @@ type ChatRequest = {
     targetConversationId?: string | null,
     sourceMode?: ChatMode,
     sourceProjectSelection?: ProjectSelection | null,
+    sourceWorkspace?: Workspace | null,
     onAccepted?: (accepted: AcceptedChatRequest) => void
   ) => boolean
   canRetry: (assistantId: string) => boolean
@@ -86,7 +90,8 @@ export function useChatRequest({
   toolRuns,
   operations,
   mode,
-  projectSelection
+  projectSelection,
+  workspace
 }: ChatRequestOptions): ChatRequest {
   const { begin, finish } = operations
   const [error, setError] = useState<string | null>(null)
@@ -195,7 +200,8 @@ export function useChatRequest({
         active.history,
         active.context ?? { kind: 'time' },
         active.taskId,
-        active.conversationId
+        active.conversationId,
+        active.workspaceId ?? undefined
       )
       if (activeRequest.current?.requestId !== active.requestId) return
       if (result.status === 'done') {
@@ -226,6 +232,7 @@ export function useChatRequest({
     targetConversationId: string | null = conversationId,
     sourceMode: ChatMode = mode,
     sourceProjectSelection: ProjectSelection | null = projectSelection,
+    sourceWorkspace: Workspace | null = workspace,
     onAccepted?: (accepted: AcceptedChatRequest) => void
   ): boolean {
     const content = rawContent.trim()
@@ -269,6 +276,7 @@ export function useChatRequest({
       prompt: content,
       scope,
       context,
+      workspaceId: sourceWorkspace?.workspaceId ?? null,
       history,
       trace: [],
       taskId: crypto.randomUUID()
@@ -307,7 +315,8 @@ export function useChatRequest({
       sourceMessages: [...sourceMessages],
       sourceToolRuns: [...sourceToolRuns],
       mode: sourceMode,
-      projectSelection: sourceProjectSelection
+      projectSelection: sourceProjectSelection,
+      workspaceId: sourceWorkspace?.workspaceId ?? null
     })
     void run(active)
     return true
@@ -321,6 +330,7 @@ export function useChatRequest({
       source.mode === mode &&
       (!isProjectChatMode(source.mode) ||
         source.projectSelection?.snapshotId === projectSelection?.snapshotId) &&
+      source.workspaceId === (workspace?.workspaceId ?? null) &&
       operations.isIdle() &&
       !activeRequest.current
     )
@@ -335,7 +345,8 @@ export function useChatRequest({
       source.sourceToolRuns,
       source.conversationId,
       source.mode,
-      source.projectSelection
+      source.projectSelection,
+      workspace
     )
   }
 

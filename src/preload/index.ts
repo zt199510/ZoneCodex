@@ -9,7 +9,13 @@ import { parseLibrary } from '../shared/conversation-library'
 import { parseTerminalEvent, parseTerminalResult } from '../shared/terminal'
 import { isAgentId, parseAgentDelta, parseAgentProgress, parseAgentResult } from '../shared/agent'
 import { parseToolHistory } from '../shared/agent-history'
-import { parseAgentContext, parseProjectSelectionResult, parseToolScope } from '../shared/project'
+import {
+  parseAgentContext,
+  parseProjectSelectionResult,
+  parseToolScope,
+  parseWorkspaceInstructionResult,
+  parseWorkspaceSelectionResult
+} from '../shared/project'
 import { parsePreviewChangeRequest, parsePreviewChangeResult } from '../shared/change-preview'
 import {
   parseCommandPreparationResult,
@@ -200,7 +206,8 @@ const api: AppAPI = {
     history = [],
     context = { kind: 'time' },
     taskId,
-    conversationId
+    conversationId,
+    workspaceId
   ) => {
     const checkedContext = parseAgentContext(context)
     if (!checkedContext) throw new Error('工具上下文格式不正确')
@@ -212,6 +219,9 @@ const api: AppAPI = {
     if (!checkedScope) throw new Error('工具范围格式不正确')
     const checkedHistory = parseToolHistory(history, checkedScope)
     if (!checkedHistory) throw new Error('工具历史参数格式不正确')
+    if (workspaceId !== undefined && !isAgentId(workspaceId)) {
+      throw new Error('工作区 ID 格式不正确')
+    }
     return parseAgentResult(
       await ipcRenderer.invoke(
         'agent:start',
@@ -220,7 +230,8 @@ const api: AppAPI = {
         checkedHistory,
         checkedContext,
         taskId,
-        conversationId
+        conversationId,
+        workspaceId
       ),
       checkedScope
     )
@@ -247,6 +258,29 @@ const api: AppAPI = {
       await ipcRenderer.invoke('project:remove', conversationId, snapshotId, path)
     )
     if (!result) throw new Error('附件移除结果无效')
+    return result
+  },
+  selectWorkspace: async (conversationId, operationId) => {
+    if (!isAgentId(conversationId) || !isAgentId(operationId))
+      throw new Error('工作区选择参数无效')
+    const result = parseWorkspaceSelectionResult(
+      await ipcRenderer.invoke('workspace:select', conversationId, operationId)
+    )
+    if (!result) throw new Error('工作区选择结果格式不正确')
+    return result
+  },
+  clearWorkspace: async (conversationId) => {
+    if (!isAgentId(conversationId)) throw new Error('会话 ID 格式不正确')
+    const result = await ipcRenderer.invoke('workspace:clear', conversationId)
+    if (typeof result !== 'boolean') throw new Error('工作区清除结果格式不正确')
+    return result
+  },
+  readWorkspaceInstruction: async (conversationId) => {
+    if (!isAgentId(conversationId)) throw new Error('会话 ID 格式不正确')
+    const result = parseWorkspaceInstructionResult(
+      await ipcRenderer.invoke('workspace:instruction', conversationId)
+    )
+    if (!result) throw new Error('工作区指令结果格式不正确')
     return result
   },
   // 从当前已授权快照生成只读修改预览

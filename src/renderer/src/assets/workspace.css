@@ -408,6 +408,16 @@ button.conversation-item:disabled {
   border-bottom: 1px solid #edf0f2;
 }
 
+.workspace-status-actions {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.workspace-status-error {
+  color: var(--danger-text, #b42318);
+}
+
 .workspace-body > .chat-workspace {
   flex: 1 1 0;
   height: auto;

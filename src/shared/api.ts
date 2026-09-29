@@ -7,7 +7,12 @@ import type { TerminalSize, TerminalResult, TerminalEvent } from './terminal'
 import type { AgentDelta, AgentResult, AgentProgress } from './agent'
 import type { ConversationTitleOutcome, ConversationTitleRequest } from './conversation-title'
 import type { ProtocolItem } from './agent-history'
-import type { AgentContext, ProjectSelectionResult } from './project'
+import type {
+  AgentContext,
+  ProjectSelectionResult,
+  WorkspaceInstructionResult,
+  WorkspaceSelectionResult
+} from './project'
 import type { PreviewChangeRequest, PreviewChangeResult } from './change-preview'
 import type {
   CommandSource,
@@ -76,7 +81,8 @@ export interface AppAPI {
     history?: ProtocolItem[],
     context?: AgentContext,
     taskId?: string,
-    conversationId?: string
+    conversationId?: string,
+    workspaceId?: string
   ) => Promise<AgentResult>
   // 选择当前窗口与会话绑定的项目文件快照
   selectProjectFiles: (
@@ -88,6 +94,10 @@ export interface AppAPI {
     snapshotId: string,
     path: string
   ) => Promise<ProjectSelectionResult>
+  // 选择、清除和读取当前会话的工作区；运行时目录授权只存在于主进程。
+  selectWorkspace: (conversationId: string, operationId: string) => Promise<WorkspaceSelectionResult>
+  clearWorkspace: (conversationId: string) => Promise<boolean>
+  readWorkspaceInstruction: (conversationId: string) => Promise<WorkspaceInstructionResult>
   // 从当前已授权快照生成只读修改预览
   previewChange: (request: PreviewChangeRequest) => Promise<PreviewChangeResult>
   // 撤销当前窗口的指定项目快照授权
