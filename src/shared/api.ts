@@ -4,7 +4,7 @@ import type { SaveConversationResult } from './conversation'
 import type { WindowAction, WindowState } from './window'
 import type { ConversationLibrary, LoadLibraryResult } from './conversation-library'
 import type { TerminalSize, TerminalResult, TerminalEvent } from './terminal'
-import type { AgentMode, AgentResult, AgentProgress } from './agent'
+import type { AgentDelta, AgentResult, AgentProgress } from './agent'
 import type { ProtocolItem } from './agent-history'
 import type { AgentContext, ProjectSelectionResult } from './project'
 import type { PreviewChangeRequest, PreviewChangeResult } from './change-preview'
@@ -16,20 +16,8 @@ import type {
 } from './command-preparation'
 import type { TaskRecord } from './task'
 
-// 模型消息类型
-export type ModelMessage = {
-  role: 'user' | 'assistant'
-  content: string
-}
-
-// 模型回复类型
-export type ModelReply = { ok: true; content: string } | { ok: false; error: string }
-
-// 模型流增量事件
-export type ModelStreamDelta = { requestId: string; delta: string }
-// 模型请求结果类型
-export type ModelStreamResult =
-  { status: 'done' | 'cancelled' } | { status: 'error'; error: string }
+// 正式聊天与 Agent 共用的流式文字增量事件。
+export type StreamDelta = AgentDelta
 
 // 应用 API 接口类型
 export interface AppAPI {
@@ -60,19 +48,8 @@ export interface AppAPI {
   controlWindow: (action: WindowAction) => Promise<void>
   getWindowState: () => Promise<WindowState>
   onWindowStateChanged: (listener: (state: WindowState) => void) => () => void
-  // 向模型发送消息并获取回复
-  askModel: (history: ModelMessage[]) => Promise<ModelReply>
-  // 模型流相关接口
-  startModelStream: (
-    requestId: string,
-    history: ModelMessage[],
-    taskId?: string,
-    conversationId?: string
-  ) => Promise<ModelStreamResult>
-  // 取消模型流请求
-  cancelModelStream: (requestId: string) => Promise<void>
-  // 监听模型流增量事件
-  onModelDelta: (listener: (event: ModelStreamDelta) => void) => () => void
+  // 监听正式聊天与 Agent 的流式增量
+  onModelDelta: (listener: (event: StreamDelta) => void) => () => void
   // 加载和保存会话
   loadConversation: () => Promise<LoadLibraryResult>
   // 保存会话
@@ -91,11 +68,10 @@ export interface AppAPI {
   closeTerminal: (sessionId: string) => Promise<TerminalResult>
   // 监听终端事件
   onTerminalEvent: (listener: (event: TerminalEvent) => void) => () => void
-  // 练习工具相关接口
-  startAgentPractice: (
+  // 真实 Agent 请求接口
+  startAgentRequest: (
     requestId: string,
     prompt: string,
-    mode: AgentMode,
     history?: ProtocolItem[],
     context?: AgentContext,
     taskId?: string,
@@ -115,8 +91,8 @@ export interface AppAPI {
   previewChange: (request: PreviewChangeRequest) => Promise<PreviewChangeResult>
   // 撤销当前窗口的指定项目快照授权
   revokeProjectFiles: (snapshotId: string) => Promise<boolean>
-  //  取消练习工具任务
-  cancelAgentPractice: (requestId: string) => Promise<boolean>
-  // 监听练习工具进度事件
+  // 取消真实 Agent 请求
+  cancelAgentRequest: (requestId: string) => Promise<boolean>
+  // 监听 Agent 进度事件
   onAgentProgress: (listener: (event: AgentProgress) => void) => () => void
 }

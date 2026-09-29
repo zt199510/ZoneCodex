@@ -7,7 +7,7 @@ import type { AppAPI } from '../shared/api'
 import { parseWindowState } from '../shared/window'
 import { parseLibrary } from '../shared/conversation-library'
 import { parseTerminalEvent, parseTerminalResult } from '../shared/terminal'
-import { isAgentId, parseAgentProgress, parseAgentResult } from '../shared/agent'
+import { isAgentId, parseAgentDelta, parseAgentProgress, parseAgentResult } from '../shared/agent'
 import { parseToolHistory } from '../shared/agent-history'
 import { parseAgentContext, parseProjectSelectionResult, parseToolScope } from '../shared/project'
 import { parsePreviewChangeRequest, parsePreviewChangeResult } from '../shared/change-preview'
@@ -106,70 +106,11 @@ const api: AppAPI = {
       ipcRenderer.removeListener('window:state-changed', handler)
     }
   },
-  // 模型请求
-  askModel: async (history) => {
-    // 通过 IPC 调用主进程的模型请求处理函数
-    const result: unknown = await ipcRenderer.invoke('chat:ask', history)
-    // 检查返回结果的格式是否符合预期
-    if (typeof result !== 'object' || result === null) {
-      throw new Error('模型请求结果格式不正确')
-    }
-    // 根据返回结果的类型，返回相应的 ModelReply 对象
-    if (
-      'ok' in result &&
-      result.ok === true &&
-      'content' in result &&
-      typeof result.content === 'string'
-    ) {
-      return { ok: true, content: result.content }
-    }
-    // 如果返回结果表示请求失败，返回包含错误信息的 ModelReply 对象
-    if (
-      'ok' in result &&
-      result.ok === false &&
-      'error' in result &&
-      typeof result.error === 'string'
-    ) {
-      return { ok: false, error: result.error }
-    }
-    throw new Error('模型请求结果格式不正确')
-  },
-  // 模型流请求
-  startModelStream: async (requestId, history, taskId, conversationId) => {
-    const result: unknown = await ipcRenderer.invoke(
-      'model-stream:start',
-      requestId,
-      history,
-      taskId,
-      conversationId
-    )
-    if (typeof result === 'object' && result !== null && 'status' in result) {
-      if (result.status === 'done' || result.status === 'cancelled') {
-        return { status: result.status }
-      }
-      if (result.status === 'error' && 'error' in result && typeof result.error === 'string') {
-        return { status: 'error', error: result.error }
-      }
-    }
-    throw new Error('真实流结束结果格式不正确')
-  },
-  //  取消模型流
-  cancelModelStream: async (requestId) => {
-    await ipcRenderer.invoke('model-stream:cancel', requestId)
-  },
-  // 监听模型流增量事件
+  // 监听模型与 Agent 共用的流式增量事件
   onModelDelta: (listener) => {
     const handler = (_event: IpcRendererEvent, value: unknown): void => {
-      if (
-        typeof value !== 'object' ||
-        value === null ||
-        !('requestId' in value) ||
-        typeof value.requestId !== 'string' ||
-        !('delta' in value) ||
-        typeof value.delta !== 'string'
-      )
-        return
-      listener({ requestId: value.requestId, delta: value.delta })
+      const delta = parseAgentDelta(value)
+      if (delta) listener(delta)
     }
     ipcRenderer.on('model-stream:delta', handler)
     return () => {
@@ -248,11 +189,10 @@ const api: AppAPI = {
     ipcRenderer.on('terminal:event', handler)
     return () => ipcRenderer.removeListener('terminal:event', handler)
   },
-  // 练习工具相关接口
-  startAgentPractice: async (
+  // 真实 Agent 请求接口
+  startAgentRequest: async (
     requestId,
     prompt,
-    mode,
     history = [],
     context = { kind: 'time' },
     taskId,
@@ -273,7 +213,6 @@ const api: AppAPI = {
         'agent:start',
         requestId,
         prompt,
-        mode,
         checkedHistory,
         checkedContext,
         taskId,
@@ -372,13 +311,13 @@ const api: AppAPI = {
     if (typeof result !== 'boolean') throw new Error('项目撤销结果格式不正确')
     return result
   },
-  //  取消练习工具任务
-  cancelAgentPractice: async (requestId) => {
+  // 取消真实 Agent 请求
+  cancelAgentRequest: async (requestId) => {
     const result: unknown = await ipcRenderer.invoke('agent:cancel', requestId)
     if (typeof result !== 'boolean') throw new Error('取消结果格式不正确')
     return result
   },
-  // 监听练习工具进度事件
+  // 监听 Agent 进度事件
   onAgentProgress: (listener) => {
     const handler = (_event: IpcRendererEvent, value: unknown): void => {
       const progress = parseAgentProgress(value)

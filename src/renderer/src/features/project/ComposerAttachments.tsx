@@ -1,4 +1,4 @@
-import { useId, useLayoutEffect, useRef, useState } from 'react'
+import { useEffect, useId, useLayoutEffect, useRef, useState } from 'react'
 import type { ConversationController } from '../conversation/useConversation'
 import { Icon } from '../../components/ui/Icon'
 
@@ -12,6 +12,7 @@ export function ComposerAttachments({
   const id = useId()
   const trigger = useRef<HTMLButtonElement>(null)
   const panel = useRef<HTMLDivElement>(null)
+  const restoreFocusOnClose = useRef(false)
   const [open, setOpen] = useState(false)
   const selection = c.contextSelection
   const count = selection?.files.length ?? 0
@@ -52,9 +53,17 @@ export function ComposerAttachments({
     }
   }, [open, count, c.chatError])
 
-  function close(): void {
+  function close(restoreFocus = true): void {
+    // Native popover dismissal does not submit the surrounding composer form.
+    // Restore focus only for dismissals initiated from inside the panel; an
+    // outside click should leave focus on the element the user clicked.
+    restoreFocusOnClose.current = restoreFocus
     panel.current?.hidePopover()
   }
+
+  useEffect(() => {
+    if (open) close(false)
+  }, [c.activeConversationId])
 
   return (
     <div className="composer-attachments">
@@ -73,9 +82,6 @@ export function ComposerAttachments({
       >
         <span aria-hidden="true">＋</span>
       </button>
-      {c.engine !== 'live' && (
-        <span className="debug-badge">{c.engine === 'mock' ? '离线模拟' : '流式调试'}</span>
-      )}
       <div
         ref={panel}
         id={id}
@@ -83,14 +89,30 @@ export function ComposerAttachments({
         className="attachment-popover"
         role="dialog"
         aria-label="附件与调试设置"
-        onToggle={(event) => setOpen((event.nativeEvent as ToggleEvent).newState === 'open')}
+        onToggle={(event) => {
+          const nextOpen = (event.nativeEvent as ToggleEvent).newState === 'open'
+          setOpen(nextOpen)
+          if (!nextOpen && restoreFocusOnClose.current) {
+            restoreFocusOnClose.current = false
+            queueMicrotask(() => trigger.current?.focus({ preventScroll: true }))
+          }
+        }}
         onKeyDown={(event) => {
-          if (event.key === 'Escape') event.stopPropagation()
+          if (event.key === 'Escape') {
+            event.preventDefault()
+            event.stopPropagation()
+            close()
+          }
         }}
       >
         <div className="attachment-heading">
           <strong>添加</strong>
-          <button type="button" className="icon-button" onClick={close} aria-label="关闭附件菜单">
+          <button
+            type="button"
+            className="icon-button"
+            onClick={() => close()}
+            aria-label="关闭附件菜单"
+          >
             ×
           </button>
         </div>
@@ -137,7 +159,7 @@ export function ComposerAttachments({
         )}
         <details className="composer-debug">
           <summary>开发调试</summary>
-          <p>正式聊天由 Agent 根据当前授权和可用工具自行决定调用方式。</p>
+          <p>所有请求使用真实模型流式响应；工具调用受当前附件授权范围限制。</p>
           <section className="change-preview-practice" aria-labelledby={`${id}-preview-title`}>
             <div className="change-preview-practice-heading">
               <Icon name="code" size={15} />

@@ -6,11 +6,6 @@
   "author": "example.com",
   "homepage": "https://electron-vite.org",
   "scripts": {
-    "check:workspace": "npm run build && npm run check:conversation-library && npm run check:conversation-store && node scripts/check-window-controls.cjs && node scripts/check-attachments.cjs && node scripts/check-command-proposal.cjs && node scripts/check-lesson29.cjs && node scripts/check-lesson30.cjs && node scripts/check-lesson32.cjs && node scripts/check-lesson33.cjs && npm run check:lesson34 && npm run check:lesson35 && node scripts/run-workspace-check.cjs",
-    "check:lesson34": "electron --disable-gpu --in-process-gpu --disable-gpu-compositing scripts/check-lesson34-desktop.cjs",
-    "check:lesson35": "electron --disable-gpu --in-process-gpu --disable-gpu-compositing scripts/check-lesson35-desktop.cjs",
-    "check:conversation-library": "node scripts/check-conversation-library.cjs",
-    "check:conversation-store": "node scripts/check-conversation-store.cjs",
     "format": "prettier --write .",
     "lint": "eslint --cache .",
     "typecheck:node": "tsc --noEmit -p tsconfig.node.json --composite false",

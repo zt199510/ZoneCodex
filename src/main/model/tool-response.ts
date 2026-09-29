@@ -1,82 +1,10 @@
-import { randomUUID } from 'node:crypto'
-import { setTimeout as delay } from 'node:timers/promises'
-import { AgentError, isRecord } from '../agent/tool-loop'
+import { AgentError } from '../agent/tool-loop'
 import type { SendResponse } from '../agent/tool-loop'
 import { timeTool } from '../tools/current-time'
-
-export function createMockResponse(): SendResponse {
-  let step = 0
-  const callId = `call_mock_${randomUUID()}`
-  return async (input, signal) => {
-    // 模拟等待也支持取消，方便在不联网时练习停止。
-    await delay(800, undefined, { signal })
-    step++
-    if (step === 1) {
-      return {
-        status: 'completed',
-        output: [
-          {
-            type: 'function_call',
-            call_id: callId,
-            name: 'get_current_time',
-            arguments: JSON.stringify({ timeZone: 'Asia/Hong_Kong' })
-          }
-        ]
-      }
-    }
-    const result = input[input.length - 1]
-    if (
-      !isRecord(result) ||
-      result.type !== 'function_call_output' ||
-      result.call_id !== callId ||
-      typeof result.output !== 'string'
-    ) {
-      throw new AgentError('模拟服务没有收到匹配的工具结果')
-    }
-    const userTurns = input.filter((item) => isRecord(item) && item.role === 'user').length
-    return {
-      status: 'completed',
-      output: [
-        {
-          type: 'message',
-          role: 'assistant',
-          phase: 'final_answer',
-          content: [
-            {
-              type: 'output_text',
-              text: `模拟服务收到 ${userTurns} 轮用户问题。实际工具结果：${result.output}`
-            }
-          ]
-        }
-      ]
-    }
-  }
-}
-
-async function readLimitedJson(response: Response): Promise<unknown> {
-  if (!response.body) throw new AgentError('响应体为空')
-  const reader = response.body.getReader()
-  const decoder = new TextDecoder()
-  let bytes = 0
-  let text = ''
-  try {
-    while (true) {
-      const chunk = await reader.read()
-      if (chunk.done) break
-      bytes += chunk.value.byteLength
-      if (bytes > 1_000_000) throw new AgentError('模型响应过大')
-      text += decoder.decode(chunk.value, { stream: true })
-    }
-    text += decoder.decode()
-    return JSON.parse(text) as unknown
-  } finally {
-    await reader.cancel().catch(() => undefined)
-    reader.releaseLock()
-  }
-}
+import { readResponseStreamResult, StreamError } from './sse'
 
 export function createLiveResponse(tools: readonly unknown[], instructions: string): SendResponse {
-  return async (input, signal) => {
+  return async (input, signal, options = {}) => {
     const endpoint = process.env.MODEL_ENDPOINT
     const model = process.env.MODEL_NAME
     const apiKey = process.env.MODEL_API_KEY
@@ -90,7 +18,11 @@ export function createLiveResponse(tools: readonly unknown[], instructions: stri
     const response = await fetch(endpoint, {
       method: 'POST',
       redirect: 'error',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
+      headers: {
+        'Content-Type': 'application/json',
+        Accept: 'text/event-stream',
+        Authorization: `Bearer ${apiKey}`
+      },
       body: JSON.stringify({
         model,
         instructions,
@@ -98,7 +30,7 @@ export function createLiveResponse(tools: readonly unknown[], instructions: stri
         tools,
         tool_choice: 'auto',
         parallel_tool_calls: false,
-        stream: false,
+        stream: true,
         store: false,
         include: ['reasoning.encrypted_content'],
         max_output_tokens: 4096
@@ -109,7 +41,17 @@ export function createLiveResponse(tools: readonly unknown[], instructions: stri
       await response.body?.cancel()
       throw new AgentError(`模型请求失败（HTTP ${response.status}），请检查权限、额度和协议支持`)
     }
-    return readLimitedJson(response)
+    const mime = response.headers.get('content-type')?.split(';')[0].trim().toLowerCase()
+    if (mime !== 'text/event-stream' || !response.body) {
+      await response.body?.cancel()
+      throw new AgentError('服务未返回 SSE，请确认网关支持 Responses 流式接口')
+    }
+    try {
+      return await readResponseStreamResult(response.body, options.onTextDelta)
+    } catch (error) {
+      if (error instanceof StreamError) throw new AgentError(error.message)
+      throw error
+    }
   }
 }
 

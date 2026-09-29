@@ -26,15 +26,21 @@ export function ChatInput({
   attachments
 }: ChatInputProps): React.JSX.Element {
   const textarea = useRef<HTMLTextAreaElement>(null)
+  const composing = useRef(false)
+  const wasSending = useRef(isSending)
   useLayoutEffect(() => {
     const element = textarea.current
     if (!element) return
     element.style.height = 'auto'
     element.style.height = `${Math.min(element.scrollHeight, 180)}px`
   }, [value])
+  useLayoutEffect(() => {
+    if (wasSending.current && !isSending && !disabled) textarea.current?.focus()
+    wasSending.current = isSending
+  }, [disabled, isSending])
   function submit(event: FormEvent): void {
     event.preventDefault()
-    if (disabled || !value.trim()) return
+    if (disabled || !value.trim() || value.length > maxLength) return
     if (onSend(value)) onChange('')
   }
   function onKeyDown(event: KeyboardEvent<HTMLTextAreaElement>): void {
@@ -42,6 +48,7 @@ export function ChatInput({
     if (
       event.key === 'Enter' &&
       !event.shiftKey &&
+      !composing.current &&
       !event.nativeEvent.isComposing &&
       event.nativeEvent.keyCode !== 229
     ) {
@@ -65,6 +72,12 @@ export function ChatInput({
         placeholder={isSending ? '正在回复，你可以随时停止…' : '有什么想一起探索的？'}
         onChange={(event) => onChange(event.currentTarget.value)}
         onKeyDown={onKeyDown}
+        onCompositionStart={() => {
+          composing.current = true
+        }}
+        onCompositionEnd={() => {
+          composing.current = false
+        }}
       />
       <div className="composer-toolbar">
         {tools}
@@ -84,7 +97,7 @@ export function ChatInput({
             <button
               className="send-button"
               type="submit"
-              disabled={disabled || !value.trim()}
+              disabled={disabled || !value.trim() || value.length > maxLength}
               aria-label="发送消息"
               title="发送消息"
             >

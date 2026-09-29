@@ -275,7 +275,8 @@ function parseToolRunsInternal(
       requestId: item.requestId,
       userId: item.userId,
       assistantId: item.assistantId,
-      mode: item.mode,
+      // 历史版本允许本地模拟记录；当前运行时统一按真实模型处理。
+      mode: 'live',
       scope,
       trace: item.trace,
       items

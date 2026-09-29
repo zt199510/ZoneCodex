@@ -1,5 +1,4 @@
 import { useEffect, useRef, useState } from 'react'
-import type { AgentMode } from '../../../../shared/agent'
 import { selectToolHistory } from '../../../../shared/agent-history'
 import type { ProtocolItem, ToolRun } from '../../../../shared/agent-history'
 import type { AgentContext, ProjectSelection, ToolScope } from '../../../../shared/project'
@@ -7,10 +6,12 @@ import type { ChatMessage } from '../../../../shared/conversation'
 import type { Conversation } from '../../../../shared/conversation-library'
 import { maxTaskRecords } from '../../../../shared/task'
 import type { OperationControl } from '../conversation/useOperation'
-import { buildContext, messagesAfterProjectBoundary } from './context'
-import { resolveToolRequest, type ChatMode } from './chat-mode'
+import { isProjectChatMode, resolveToolRequest, type ChatMode } from './chat-mode'
 
 export type ToolActivity = Record<string, string[]>
+
+// 输入框和请求层共用同一条上限；请求层仍需独立校验，避免其他入口绕过表单限制。
+const maxPromptLength = 2000
 
 type ActiveRequest = {
   conversationId: string
@@ -18,14 +19,11 @@ type ActiveRequest = {
   userId: string
   assistantId: string
   mode: ChatMode
-  agentMode: AgentMode | null
   prompt: string
   scope: ToolScope | null
   context: AgentContext | null
   history: ProtocolItem[]
-  chatHistory: ReturnType<typeof buildContext>
   trace: string[]
-  text: string
   taskId: string
 }
 type ChatRetrySource = {
@@ -90,8 +88,7 @@ export function useChatRequest({
   useEffect(() => {
     const offDelta = window.api.onModelDelta((event) => {
       const active = activeRequest.current
-      if (!active || active.mode !== 'chat' || active.requestId !== event.requestId) return
-      active.text += event.delta
+      if (!active || active.requestId !== event.requestId) return
       updateMessages(active.conversationId, (previous) =>
         previous.map((message) =>
           message.id === active.assistantId && message.status === 'pending'
@@ -102,7 +99,7 @@ export function useChatRequest({
     })
     const offProgress = window.api.onAgentProgress((event) => {
       const active = activeRequest.current
-      if (!active || active.mode === 'chat' || active.requestId !== event.requestId) return
+      if (!active || active.requestId !== event.requestId) return
       active.trace = [...active.trace, event.message].slice(-30)
       setToolActivity((previous) => ({
         ...previous,
@@ -136,25 +133,9 @@ export function useChatRequest({
       const active = activeRequest.current
       activeRequest.current = null
       if (!active) return
-      if (active.mode === 'chat')
-        void window.api.cancelModelStream(active.requestId).catch(() => undefined)
-      else void window.api.cancelAgentPractice(active.requestId).catch(() => undefined)
+      void window.api.cancelAgentRequest(active.requestId).catch(() => undefined)
     }
   }, [updateConversation, updateMessages])
-
-  function finishTurn(active: ActiveRequest, status: ChatMessage['status'], answer?: string): void {
-    updateMessages(active.conversationId, (previous) =>
-      previous.map((message) => {
-        if (message.id !== active.userId && message.id !== active.assistantId) return message
-        return {
-          ...message,
-          status,
-          content:
-            message.id === active.assistantId && answer !== undefined ? answer : message.content
-        }
-      })
-    )
-  }
 
   function finishToolTurn(
     active: ActiveRequest,
@@ -189,47 +170,26 @@ export function useChatRequest({
 
   async function run(active: ActiveRequest): Promise<void> {
     try {
-      if (active.mode === 'chat') {
-        const result = await window.api.startModelStream(
-          active.requestId,
-          active.chatHistory,
-          active.taskId,
-          active.conversationId
-        )
-        if (activeRequest.current?.requestId !== active.requestId) return
-        if (result.status === 'done' && active.text.trim()) {
-          finishTurn(active, 'complete')
-        } else if (result.status === 'cancelled') {
-          finishTurn(active, 'cancelled')
-        } else {
-          finishTurn(active, 'failed')
-          const error = result.status === 'error' ? result.error : '未收到有效的回复文字。'
-          setError(error)
-        }
+      const result = await window.api.startAgentRequest(
+        active.requestId,
+        active.prompt,
+        active.history,
+        active.context ?? { kind: 'time' },
+        active.taskId,
+        active.conversationId
+      )
+      if (activeRequest.current?.requestId !== active.requestId) return
+      if (result.status === 'done') {
+        finishToolTurn(active, 'complete', result.trace, result.items, result.answer)
+      } else if (result.status === 'cancelled') {
+        finishToolTurn(active, 'cancelled', result.trace, [])
       } else {
-        const result = await window.api.startAgentPractice(
-          active.requestId,
-          active.prompt,
-          active.agentMode ?? 'mock',
-          active.history,
-          active.context ?? { kind: 'time' },
-          active.taskId,
-          active.conversationId
-        )
-        if (activeRequest.current?.requestId !== active.requestId) return
-        if (result.status === 'done') {
-          finishToolTurn(active, 'complete', result.trace, result.items, result.answer)
-        } else if (result.status === 'cancelled') {
-          finishToolTurn(active, 'cancelled', result.trace, [])
-        } else {
-          finishToolTurn(active, 'failed', result.trace, [])
-          setError(result.error)
-        }
+        finishToolTurn(active, 'failed', result.trace, [])
+        setError(result.error)
       }
     } catch {
       if (activeRequest.current?.requestId === active.requestId) {
-        if (active.mode === 'chat') finishTurn(active, 'failed')
-        else finishToolTurn(active, 'failed', active.trace, [])
+        finishToolTurn(active, 'failed', active.trace, [])
         setError('回复连接中断，请稍后重试。')
       }
     } finally {
@@ -249,38 +209,35 @@ export function useChatRequest({
     sourceProjectSelection: ProjectSelection | null = projectSelection
   ): boolean {
     const content = rawContent.trim()
-    if (!subscribed.current || !targetConversationId || !content || activeRequest.current)
+    // `begin` 仍是最终的原子互斥点；这里的同步检查让保存、选文件或生成期间
+    // 的调用在解析附件和历史之前就被拒绝，避免产生任何请求副作用。
+    if (
+      !subscribed.current ||
+      !operations.isIdle() ||
+      !targetConversationId ||
+      !content ||
+      activeRequest.current
+    )
       return false
-    const limit = sourceMode === 'chat' ? 4000 : 2000
-    if (content.length > limit) {
-      setError(`当前模式请输入不超过 ${limit} 个字符的消息。`)
+    if (rawContent.length > maxPromptLength || content.length > maxPromptLength) {
+      setError(`当前模式请输入不超过 ${maxPromptLength} 个字符的消息。`)
       return false
     }
-    let history: ProtocolItem[] = []
-    let chatHistory: ReturnType<typeof buildContext> = []
-    let scope: ToolScope | null = null
-    let context: AgentContext | null = null
-    let agentMode: AgentMode | null = null
-    if (sourceMode === 'chat') {
-      chatHistory = buildContext(
-        messagesAfterProjectBoundary(sourceMessages, sourceToolRuns),
-        content
-      )
-    } else {
-      try {
-        const request = resolveToolRequest(sourceMode, targetConversationId, sourceProjectSelection)
-        if (!request) {
-          setError('附件已失效，请重新添加文件。')
-          return false
-        }
-        agentMode = request.agentMode
-        scope = request.scope
-        context = request.context
-        history = selectToolHistory(sourceMessages, sourceToolRuns, request.agentMode, request.scope)
-      } catch (error) {
-        setError(error instanceof Error ? error.message : '工具上下文无效，请重新说明问题。')
+    let history: ProtocolItem[]
+    let scope: ToolScope
+    let context: AgentContext
+    try {
+      const request = resolveToolRequest(sourceMode, targetConversationId, sourceProjectSelection)
+      if (!request) {
+        setError('附件已失效，请重新添加文件。')
         return false
       }
+      scope = request.scope
+      context = request.context
+      history = selectToolHistory(sourceMessages, sourceToolRuns, 'live', request.scope)
+    } catch (error) {
+      setError(error instanceof Error ? error.message : '工具上下文无效，请重新说明问题。')
+      return false
     }
     if (!begin('generating')) return false
     const active: ActiveRequest = {
@@ -289,59 +246,44 @@ export function useChatRequest({
       userId: crypto.randomUUID(),
       assistantId: crypto.randomUUID(),
       mode: sourceMode,
-      agentMode,
       prompt: content,
       scope,
       context,
       history,
-      chatHistory,
       trace: [],
-      text: '',
       taskId: crypto.randomUUID()
     }
     activeRequest.current = active
     setError(null)
-    if (sourceMode !== 'chat') {
-      setToolActivity((previous) => ({ ...previous, [active.assistantId]: ['正在处理请求…'] }))
-    }
-    if (sourceMode === 'chat') {
-      updateMessages(active.conversationId, (previous) => [
-        ...previous,
+    setToolActivity((previous) => ({ ...previous, [active.assistantId]: ['正在处理请求…'] }))
+    updateConversation(active.conversationId, (previous) => ({
+      ...previous,
+      messages: [
+        ...previous.messages,
         { id: active.userId, role: 'user', content, status: 'pending' },
         { id: active.assistantId, role: 'assistant', content: '', status: 'pending' }
-      ])
-    } else {
-      updateConversation(active.conversationId, (previous) => ({
-        ...previous,
-        messages: [
-          ...previous.messages,
-          { id: active.userId, role: 'user', content, status: 'pending' },
-          { id: active.assistantId, role: 'assistant', content: '', status: 'pending' }
-        ],
-        toolRuns: [
-          ...previous.toolRuns,
-          {
-            requestId: active.requestId,
-            userId: active.userId,
-            assistantId: active.assistantId,
-            mode: agentMode ?? 'mock',
-            scope: active.scope ?? { kind: 'time' },
-            trace: [],
-            items: []
-          }
-        ]
-      }))
-    }
-    if (sourceMode === 'chat') {
-      retrySources.current.set(active.assistantId, {
-        conversationId: active.conversationId,
-        prompt: content,
-        sourceMessages: [...sourceMessages],
-        sourceToolRuns: [...sourceToolRuns],
-        mode: sourceMode,
-        projectSelection: sourceProjectSelection
-      })
-    }
+      ],
+      toolRuns: [
+        ...previous.toolRuns,
+        {
+          requestId: active.requestId,
+          userId: active.userId,
+          assistantId: active.assistantId,
+          mode: 'live',
+          scope,
+          trace: [],
+          items: []
+        }
+      ]
+    }))
+    retrySources.current.set(active.assistantId, {
+      conversationId: active.conversationId,
+      prompt: content,
+      sourceMessages: [...sourceMessages],
+      sourceToolRuns: [...sourceToolRuns],
+      mode: sourceMode,
+      projectSelection: sourceProjectSelection
+    })
     void run(active)
     return true
   }
@@ -350,10 +292,12 @@ export function useChatRequest({
     const source = retrySources.current.get(assistantId)
     return Boolean(
       source &&
-        source.mode === 'chat' &&
-        source.conversationId === conversationId &&
-        operations.isIdle() &&
-        !activeRequest.current
+      source.conversationId === conversationId &&
+      source.mode === mode &&
+      (!isProjectChatMode(source.mode) ||
+        source.projectSelection?.snapshotId === projectSelection?.snapshotId) &&
+      operations.isIdle() &&
+      !activeRequest.current
     )
   }
 
@@ -374,8 +318,7 @@ export function useChatRequest({
     const active = activeRequest.current
     if (!active) return
     try {
-      if (active.mode === 'chat') await window.api.cancelModelStream(active.requestId)
-      else await window.api.cancelAgentPractice(active.requestId)
+      await window.api.cancelAgentRequest(active.requestId)
     } catch {
       if (activeRequest.current?.requestId === active.requestId) {
         setError('停止请求失败，请等待回复结束或超时。')

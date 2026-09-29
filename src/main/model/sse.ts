@@ -44,46 +44,63 @@ export class SseParser {
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
-/// 读取响应流并处理增量数据的异步函数
-export async function readResponseStream(
+
+export type ResponseStreamEvent = Record<string, unknown>
+
+// 读取 Responses SSE，并在 response.completed 时返回服务端的完整响应对象。
+// 工具调用轮次可能没有 output_text，因此这里不要求文字非空；调用方按自己的协议校验 output。
+export async function readResponseStreamResult(
   body: ReadableStream<Uint8Array>,
-  onDelta: (delta: string) => void
-): Promise<void> {
+  onDelta: (delta: string) => void = () => undefined,
+  onEvent: (event: ResponseStreamEvent) => void = () => undefined
+): Promise<Record<string, unknown>> {
   const reader = body.getReader()
   const decoder = new TextDecoder('utf-8', { fatal: true })
   const parser = new SseParser()
-  let output = ''
+  let completed: Record<string, unknown> | null = null
+  let outputTextLength = 0
+  let totalEventSize = 0
+  let responseSize = 0
 
   function accept(data: string): boolean {
-    let event: unknown
+    totalEventSize += data.length
+    if (totalEventSize > 1_000_000) throw new StreamError('模型响应过大。')
+    let parsed: unknown
     try {
-      event = JSON.parse(data)
+      parsed = JSON.parse(data)
     } catch {
       throw new StreamError('流事件不是有效 JSON。')
     }
-    if (!isRecord(event) || typeof event.type !== 'string') {
+    if (!isRecord(parsed) || typeof parsed.type !== 'string') {
       throw new StreamError('流事件格式不正确。')
     }
-    if (event.type === 'response.output_text.delta') {
-      if (typeof event.delta !== 'string') throw new StreamError('文字片段格式不正确。')
-      if (output.length + event.delta.length > 100_000) {
-        throw new StreamError('回复超过本课显示长度上限。')
-      }
-      output += event.delta
-      onDelta(event.delta)
-    } else if (event.type === 'response.completed') {
-      if (!isRecord(event.response) || event.response.status !== 'completed') {
+    responseSize += data.length
+    if (responseSize > 1_000_000) throw new StreamError('模型响应过大。')
+    onEvent(parsed)
+    if (parsed.type === 'response.output_text.delta') {
+      if (typeof parsed.delta !== 'string') throw new StreamError('文字片段格式不正确。')
+      outputTextLength += parsed.delta.length
+      if (outputTextLength > 100_000) throw new StreamError('回复超过本课显示长度上限。')
+      onDelta(parsed.delta)
+    } else if (parsed.type === 'response.completed') {
+      if (!isRecord(parsed.response) || parsed.response.status !== 'completed') {
         throw new StreamError('完成事件的状态不正确。')
       }
-      if (!output.trim()) throw new StreamError('响应完成，但没有可显示的文字。')
+      if (JSON.stringify(parsed.response).length > 1_000_000) {
+        throw new StreamError('模型响应过大。')
+      }
+      completed = parsed.response
       return true
     } else if (
-      event.type === 'response.failed' ||
-      event.type === 'response.incomplete' ||
-      event.type === 'error'
+      parsed.type === 'response.failed' ||
+      parsed.type === 'response.incomplete' ||
+      parsed.type === 'error'
     ) {
       throw new StreamError('模型未完整完成回复，请重试。')
-    } else if (event.type === 'response.refusal.delta' || event.type === 'response.refusal.done') {
+    } else if (
+      parsed.type === 'response.refusal.delta' ||
+      parsed.type === 'response.refusal.done'
+    ) {
       throw new StreamError('模型未提供本课要求的文字回答。')
     }
     return false
@@ -94,7 +111,7 @@ export async function readResponseStream(
       const { value, done } = await reader.read()
       const text = done ? decoder.decode() : decoder.decode(value, { stream: true })
       for (const data of parser.push(text)) {
-        if (accept(data)) return
+        if (accept(data)) return completed!
       }
       if (done) throw new StreamError('连接已结束，但没有收到完成事件。')
     }

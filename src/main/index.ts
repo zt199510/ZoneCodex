@@ -15,13 +15,11 @@ import { app, shell, BrowserWindow, ipcMain } from 'electron'
 import { join } from 'path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
-import { askModel } from './model/model'
-import { registerModelStream } from './model/model-stream'
 import { createConversationStore } from './storage/conversation-store'
 import { registerWindowControls, observeWindowState } from './window/window-controls'
 import { registerCloseGuard, attachCloseGuard } from './window/close-guard'
 import { registerLocalTerminal, attachTerminalCleanup } from './terminal/local-terminal'
-import { abortProjectJob, hasAgentJob, registerAgentPractice } from './agent/agent-ipc'
+import { abortProjectJob, hasAgentJob, registerAgentRequest } from './agent/agent-ipc'
 import { attachProjectAccessCleanup, registerProjectAccess } from './agent/project-access'
 import {
   cleanupCommandPreparation,
@@ -113,27 +111,15 @@ app.whenReady().then(() => {
     optimizer.watchWindowShortcuts(window)
   })
 
-  // IPC test
-  ipcMain.on('ping', () => console.log('pong'))
-  // 注册非流式模型请求（保留早期课程接口）
-  ipcMain.handle('chat:ask', async (event, history: unknown) => {
-    const owner = BrowserWindow.fromWebContents(event.sender)
-    if (!owner || event.senderFrame !== event.sender.mainFrame) {
-      throw new Error('不支持的模型请求来源')
-    }
-    return askModel(history)
-  })
   // 注册窗口控件
   registerWindowControls()
   registerTaskLifecycle()
   // 注册关闭确认处理器
   registerCloseGuard(hasChangeCommit)
-  // 注册真实流处理函数
-  registerModelStream()
   // 注册本地终端接口
   registerLocalTerminal()
-  // 注册练习工具接口
-  registerAgentPractice(
+  // 注册真实 Agent 请求接口
+  registerAgentRequest(
     (id) => hasChangePreparation(id) || hasChangeCommit(id) || hasCommandExecution(id)
   )
   registerCommandPreparation((windowId, source) => {

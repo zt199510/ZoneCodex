@@ -54,7 +54,6 @@ function App(): React.JSX.Element {
       )}
       <div className="workspace-body">
         <ChatWorkspace
-          key={conversation.activeConversationId ?? 'empty'}
           conversation={conversation}
         />
         {/* {terminalOpen ? (

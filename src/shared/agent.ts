@@ -2,9 +2,12 @@ import { parseProtocolTurn } from './agent-history'
 import type { ProtocolItem } from './agent-history'
 import type { ToolScope } from './project'
 
-// 练习工具的模式
-export type AgentMode = 'mock' | 'live'
-// 练习工具的执行结果
+// 正式 Agent 只使用真实模型 SSE。
+export type AgentMode = 'live'
+// 统一模型与 Agent 的文字增量事件。Agent 通过同一 IPC 通道发送，
+// 这样 renderer 不需要根据请求模式选择另一套消息更新协议。
+export type AgentDelta = { requestId: string; delta: string }
+// Agent 请求的执行结果
 export type AgentResult =
   | { status: 'done'; answer: string; trace: string[]; items: ProtocolItem[] }
   | { status: 'cancelled'; trace: string[] }
@@ -24,7 +27,7 @@ export function parseAgentResult(value: unknown, scope: ToolScope = { kind: 'tim
     value.trace.length > 30 ||
     !value.trace.every((line: unknown) => typeof line === 'string' && line.length <= 500)
   ) {
-    throw new Error('工具练习结果格式不正确')
+    throw new Error('Agent 结果格式不正确')
   }
   const trace: string[] = value.trace
   if (value.status === 'cancelled') return { status: 'cancelled', trace }
@@ -37,7 +40,7 @@ export function parseAgentResult(value: unknown, scope: ToolScope = { kind: 'tim
   ) {
     const items = parseProtocolTurn(value.items, scope)
     if (!items || items[items.length - 1].type !== 'message') {
-      throw new Error('工具练习协议历史格式不正确')
+      throw new Error('Agent 协议历史格式不正确')
     }
     const finalContent = items[items.length - 1].content
     const finalText = Array.isArray(finalContent)
@@ -56,18 +59,18 @@ export function parseAgentResult(value: unknown, scope: ToolScope = { kind: 'tim
           .join('\n')
       : ''
     if (finalText !== value.answer) {
-      throw new Error('工具练习最终回答与协议历史不一致')
+      throw new Error('Agent 最终回答与协议历史不一致')
     }
     return { status: 'done', answer: value.answer, trace, items }
   }
   if (value.status === 'error' && 'error' in value && typeof value.error === 'string') {
     return { status: 'error', error: value.error, trace }
   }
-  throw new Error('工具练习状态格式不正确')
+  throw new Error('Agent 状态格式不正确')
 }
 
 //19课 1定义独立的进度事件
-// 练习工具的进度信息
+// Agent 请求的进度信息
 export type AgentProgress = { requestId: string; message: string }
 // 判断是否为合法的 Agent 进度信息
 export function parseAgentProgress(value: unknown): AgentProgress | null {
@@ -82,4 +85,21 @@ export function parseAgentProgress(value: unknown): AgentProgress | null {
   )
     return null
   return { requestId: value.requestId, message: value.message }
+}
+
+// 解析统一文字增量；单片段限制与普通消息的 100,000 字符边界一致，
+// Agent 最终答案的 16,000 字符限制仍由 AgentResult 协议解析负责。
+export function parseAgentDelta(value: unknown): AgentDelta | null {
+  if (
+    typeof value !== 'object' ||
+    value === null ||
+    !('requestId' in value) ||
+    !isAgentId(value.requestId) ||
+    !('delta' in value) ||
+    typeof value.delta !== 'string' ||
+    value.delta.length > 100_000
+  ) {
+    return null
+  }
+  return { requestId: value.requestId, delta: value.delta }
 }

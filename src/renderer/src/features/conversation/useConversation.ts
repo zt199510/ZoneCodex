@@ -17,7 +17,7 @@ import {
 } from '../../../../shared/conversation-library'
 import type { Conversation, ConversationLibrary } from '../../../../shared/conversation-library'
 import { useChatRequest, type ToolActivity } from '../chat/useChatRequest'
-import { type ChatMode, type ChatEngine, resolveChatMode } from '../chat/chat-mode'
+import { type ChatMode, resolveChatMode } from '../chat/chat-mode'
 import { useProjectSelection } from '../project/useProjectSelection'
 import { getCapacityError } from './capacity'
 import type { ProjectSelection } from '../../../../shared/project'
@@ -71,8 +71,6 @@ export type ConversationController = {
   getOperation: () => Operation
   chatMode: ChatMode
   toolActivity: ToolActivity
-  engine: ChatEngine
-  setEngine: (engine: ChatEngine) => Promise<boolean>
   removeFile: (path: string) => Promise<boolean>
   commit: CommitController
   preparation: PreparationController
@@ -160,6 +158,12 @@ export function useConversation(): ConversationController {
     () => storage.ready && !closePendingRef.current && operations.isIdle(),
     [operations, storage.ready]
   )
+  const canSubmit =
+    storage.ready &&
+    operations.operation === 'idle' &&
+    !closePending &&
+    !capacityError &&
+    (active !== null || snapshot.conversations.length < 100)
 
   const updateMessages = useCallback(
     (conversationId: string, update: (previous: ChatMessage[]) => ChatMessage[]): void => {
@@ -183,8 +187,6 @@ export function useConversation(): ConversationController {
     },
     []
   )
-  const [engine, setEngineState] = useState<ChatEngine>('live')
-
   const {
     projectSelection,
     pendingSelection,
@@ -283,7 +285,7 @@ export function useConversation(): ConversationController {
     }
   )
 
-  const chatMode = resolveChatMode(engine, projectSelection !== null)
+  const chatMode = resolveChatMode(projectSelection !== null)
 
   const request = useChatRequest({
     conversationId: active?.id ?? null,
@@ -298,7 +300,7 @@ export function useConversation(): ConversationController {
 
   const canRetryTask = useCallback(
     (taskId: string): boolean => {
-      if (!active || !canChange()) return false
+      if (!active || !canSubmit) return false
       const task = active.tasks.find((item) => item.taskId === taskId)
       if (!task || !isTerminalTaskStatus(task.status) || task.kind !== 'agent') return false
       const run = active.toolRuns.find((item) => item.requestId === task.requestId)
@@ -308,12 +310,12 @@ export function useConversation(): ConversationController {
       if (run.scope.kind === 'project') {
         return (
           projectSelection?.snapshotId === run.scope.snapshotId &&
-          (chatMode === 'project-live' || chatMode === 'project-mock')
+          chatMode === 'project-live'
         )
       }
-      return chatMode === 'tool-live' || chatMode === 'tool-mock'
+      return chatMode === 'tool-live'
     },
-    [active, canChange, chatMode, projectSelection]
+    [active, canSubmit, chatMode, projectSelection]
   )
 
   const retryTask = useCallback(
@@ -331,7 +333,7 @@ export function useConversation(): ConversationController {
 
   const canRetryMessage = useCallback(
     (messageId: string): boolean => {
-      if (!active || !canChange()) return false
+      if (!active || !canSubmit) return false
       const message = active.messages.find((item) => item.id === messageId)
       if (
         !message ||
@@ -341,7 +343,7 @@ export function useConversation(): ConversationController {
         return false
       return request.canRetry(messageId)
     },
-    [active, canChange, request]
+    [active, canSubmit, request]
   )
 
   const retryMessage = useCallback(
@@ -356,7 +358,7 @@ export function useConversation(): ConversationController {
 
   const editAndSend = useCallback(
     (messageId: string, rawContent: string): boolean => {
-      if (!active || !canChange()) return false
+      if (!active || !canSubmit) return false
       const content = rawContent.trim()
       const index = active.messages.findIndex(
         (message) => message.id === messageId && message.role === 'user'
@@ -380,7 +382,7 @@ export function useConversation(): ConversationController {
           conversation.id === active.id ? trimmedActive : conversation
         )
       }
-      const capacityMessage = getCapacityError(nextSnapshot, trimmedActive, chatMode !== 'chat')
+      const capacityMessage = getCapacityError(nextSnapshot, trimmedActive, true)
       if (capacityMessage) {
         setCapacityError(capacityMessage)
         return false
@@ -393,7 +395,7 @@ export function useConversation(): ConversationController {
       if (accepted) markSent()
       return accepted
     },
-    [active, canChange, chatMode, commandReview, markSent, preparation, request, snapshot]
+    [active, canSubmit, commandReview, markSent, preparation, request, snapshot]
   )
 
   async function openProposal(proposal: MessageChangeProposal): Promise<boolean> {
@@ -451,19 +453,6 @@ export function useConversation(): ConversationController {
     setOpenedProposal(null)
     return discarded
   }, [changePreview, preparation, openedProposal, commit])
-  async function setEngine(next: ChatEngine): Promise<boolean> {
-    if (next === engine) return true
-    if (!canChange()) return false
-    if (next === 'stream') {
-      if (!(await revokeSelectionForChange())) return false
-    }
-    setEngineState(next)
-    setCapacityError(null)
-    clearProjectError()
-    request.clearError()
-    return true
-  }
-
   async function create(): Promise<boolean> {
     if (!canChange() || snapshot.conversations.length >= 100) return false
     if (!(await revokeSelectionForChange())) return false
@@ -571,6 +560,7 @@ export function useConversation(): ConversationController {
         )
       }
     })
+    if (id === active?.id) setCapacityError(null)
     setConversationError(null)
     request.clearError()
     request.clearActivity()
@@ -591,6 +581,7 @@ export function useConversation(): ConversationController {
         item.id === id ? { ...item, archived: false } : item
       )
     }))
+    setCapacityError(null)
     setConversationError(null)
     request.clearError()
     request.clearActivity()
@@ -616,7 +607,9 @@ export function useConversation(): ConversationController {
 
   const canNavigate = storage.ready && operations.operation === 'idle' && !closePending
   const canEdit = canNavigate && active !== null
-  const canSend = canNavigate
+  // 满容量的新会话无法再创建；容量检查失败后也要让所有提交入口保持拒绝，
+  // 直到用户新建、清理或归档记录后由对应操作清除错误。
+  const canSend = canSubmit
   const normalizedSearch = search.trim().toLocaleLowerCase()
   const visibleConversations = normalizedSearch
     ? snapshot.conversations.filter((conversation) => {
@@ -666,7 +659,6 @@ export function useConversation(): ConversationController {
     stop: request.stop,
     selectProjectFiles: async () => {
       if (!canChange()) return false
-      if (engine === 'stream') setEngineState('live')
       request.clearError()
       return selectFiles()
     },
@@ -676,7 +668,7 @@ export function useConversation(): ConversationController {
     setClosePending,
     getOperation: operations.getOperation,
     send: (content) => {
-      if (!canChange()) return false
+      if (!canSubmit) return false
       if (!active && snapshot.conversations.length >= 100) {
         setCapacityError('会话数量已达到上限，请整理已有会话后再发送。')
         return false
@@ -703,7 +695,7 @@ export function useConversation(): ConversationController {
             activeConversationId: target.id,
             conversations: [...snapshot.conversations, target]
           }
-      const capacityMessage = getCapacityError(nextSnapshot, target, chatMode !== 'chat')
+      const capacityMessage = getCapacityError(nextSnapshot, target, true)
       if (capacityMessage) {
         setCapacityError(capacityMessage)
         return false
@@ -734,8 +726,6 @@ export function useConversation(): ConversationController {
     editAndSend,
     chatMode,
     toolActivity: visibleActivity,
-    engine,
-    setEngine,
     removeFile,
     preparation,
     commit,

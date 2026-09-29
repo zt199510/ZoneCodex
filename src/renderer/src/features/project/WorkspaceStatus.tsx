@@ -87,7 +87,7 @@ export function WorkspaceStatus({
   const task = currentTaskLabel(latest, waitingApproval, operation)
   return (
     <div className="workspace-status" role="status" aria-label="工作区状态">
-      <span>工作区：{selection?.label ?? '未选择工作区'}</span>
+      {/* <span>工作区：{selection?.label ?? '未选择工作区'}</span>
       <span>AGENTS.md：{selection ? '未读取' : '未发现'}</span>
       <span>任务：{task}</span>
       <span
@@ -120,7 +120,7 @@ export function WorkspaceStatus({
         )}
       </span>
       <span title={taskSummary(latest)}>结果：{taskSummary(latest)}</span>
-      <span>权限：{selection ? '已限定' : '未限定'}</span>
+      <span>权限：{selection ? '已限定' : '未限定'}</span> */}
     </div>
   )
 }

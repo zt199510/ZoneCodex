@@ -18,7 +18,10 @@ export function ChatWorkspace({
 }: {
   conversation: ConversationController
 }): React.JSX.Element {
-  const [draft, setDraft] = useState('')
+  const [draft, setDraftState] = useState('')
+  const drafts = useRef(new Map<string | null, string>())
+  const currentDraft = useRef('')
+  const currentConversationId = useRef<string | null>(conversation.activeConversationId)
   const [confirmClear, setConfirmClear] = useState(false)
   const scrollArea = useRef<HTMLDivElement>(null)
   const previewTriggerRef = useRef<HTMLButtonElement>(null)
@@ -26,6 +29,25 @@ export function ChatWorkspace({
   const followBottom = useRef(true)
   const { storage, messages, operation } = conversation
   const errors = [storage.error, conversation.chatError].filter(Boolean)
+
+  useLayoutEffect(() => {
+    const nextConversationId = conversation.activeConversationId
+    const previousConversationId = currentConversationId.current
+    if (nextConversationId === previousConversationId) return
+    drafts.current.set(previousConversationId, currentDraft.current)
+    const nextDraft = drafts.current.get(nextConversationId) ?? ''
+    currentConversationId.current = nextConversationId
+    currentDraft.current = nextDraft
+    followBottom.current = true
+    setConfirmClear(false)
+    setDraftState(nextDraft)
+  }, [conversation.activeConversationId])
+
+  function setDraft(value: string): void {
+    currentDraft.current = value
+    drafts.current.set(currentConversationId.current, value)
+    setDraftState(value)
+  }
 
   useLayoutEffect(() => {
     const area = scrollArea.current
@@ -36,7 +58,10 @@ export function ChatWorkspace({
 
   function send(content: string): boolean {
     const accepted = conversation.send(content)
-    if (accepted) followBottom.current = true
+    if (accepted) {
+      setDraft('')
+      followBottom.current = true
+    }
     return accepted
   }
   function suggest(prompt: string): void {
@@ -127,7 +152,7 @@ export function ChatWorkspace({
             }}
             onSendEditedMessage={conversation.editAndSend}
             editDisabled={!conversation.canSend}
-            editMaxLength={conversation.engine === 'stream' ? 4000 : 2000}
+            editMaxLength={2000}
             onCopyMessage={copyMessage}
             onRetryAssistant={(message) => {
               conversation.retryMessage(message.id)
@@ -186,7 +211,7 @@ export function ChatWorkspace({
           }}
           disabled={!conversation.canSend}
           isSending={operation === 'generating'}
-          maxLength={conversation.engine === 'stream' ? 4000 : 2000}
+          maxLength={2000}
           tools={
             <ComposerAttachments
               conversation={conversation}

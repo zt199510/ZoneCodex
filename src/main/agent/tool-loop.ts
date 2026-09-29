@@ -5,7 +5,14 @@ import { parseToolScope, isToolAllowed } from '../../shared/project'
 import type { ToolScope } from '../../shared/project'
 
 export class AgentError extends Error {}
-export type SendResponse = (input: unknown[], signal: AbortSignal) => Promise<unknown>
+export type SendResponseOptions = {
+  onTextDelta?: (delta: string) => void
+}
+export type SendResponse = (
+  input: unknown[],
+  signal: AbortSignal,
+  options?: SendResponseOptions
+) => Promise<unknown>
 export type ExecuteTool = (
   name: string,
   argumentsText: string,
@@ -29,7 +36,8 @@ export async function runToolLoop(
     signal.throwIfAborted()
     return output
   },
-  scope: ToolScope = { kind: 'time' }
+  scope: ToolScope = { kind: 'time' },
+  onTextDelta: (delta: string) => void = () => undefined
 ): Promise<{ answer: string; items: ProtocolItem[] }> {
   const parsedScope = parseToolScope(scope)
   if (!parsedScope) throw new AgentError('工具范围参数无效')
@@ -59,7 +67,11 @@ export async function runToolLoop(
     checkInputSize()
     record(`第 ${round} 次模型请求`) // trace.push(`第 ${round} 次模型请求`)
 
-    const response = await send(input, signal)
+    const response = await send(input, signal, {
+      onTextDelta: (delta) => {
+        onTextDelta(delta)
+      }
+    })
     signal.throwIfAborted()
     if (
       !isRecord(response) ||
