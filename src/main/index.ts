@@ -20,6 +20,10 @@ import { registerWindowControls, observeWindowState } from './window/window-cont
 import { registerCloseGuard, attachCloseGuard } from './window/close-guard'
 import { registerLocalTerminal, attachTerminalCleanup } from './terminal/local-terminal'
 import { abortProjectJob, hasAgentJob, registerAgentRequest } from './agent/agent-ipc'
+import {
+  cancelConversationTitleJob,
+  registerConversationTitleRequest
+} from './agent/conversation-title-ipc'
 import { attachProjectAccessCleanup, registerProjectAccess } from './agent/project-access'
 import {
   cleanupCommandPreparation,
@@ -68,11 +72,13 @@ function createWindow(): void {
   // 注册项目快照授权清理处理器
   attachProjectAccessCleanup(mainWindow)
   mainWindow.webContents.on('did-start-loading', () => {
+    cancelConversationTitleJob(mainWindow.id)
     cleanupTaskWindow(mainWindow.id)
     cleanupCommandExecution(mainWindow.id)
     cleanupCommandPreparation(mainWindow.id)
   })
   mainWindow.on('closed', () => {
+    cancelConversationTitleJob(mainWindow.id)
     discardTaskWindow(mainWindow.id)
     cleanupCommandExecution(mainWindow.id)
     cleanupCommandPreparation(mainWindow.id)
@@ -122,6 +128,7 @@ app.whenReady().then(() => {
   registerAgentRequest(
     (id) => hasChangePreparation(id) || hasChangeCommit(id) || hasCommandExecution(id)
   )
+  registerConversationTitleRequest()
   registerCommandPreparation((windowId, source) => {
     const snapshotId = hasProjectSnapshot(windowId, source.snapshotId) ? source.snapshotId : ''
     return decideCommandPermission(

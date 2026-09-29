@@ -59,13 +59,23 @@ type ChatRequest = {
     rawContent: string,
     sourceMessages?: readonly ChatMessage[],
     sourceToolRuns?: readonly ToolRun[],
-    targetConversationId?: string | null
+    targetConversationId?: string | null,
+    sourceMode?: ChatMode,
+    sourceProjectSelection?: ProjectSelection | null,
+    onAccepted?: (accepted: AcceptedChatRequest) => void
   ) => boolean
   canRetry: (assistantId: string) => boolean
   retry: (assistantId: string) => boolean
   stop: () => Promise<void>
   clearError: () => void
   clearActivity: () => void
+}
+
+/** Metadata for the message that was accepted into the live conversation. */
+export type AcceptedChatRequest = {
+  conversationId: string
+  messageId: string
+  content: string
 }
 
 export function useChatRequest({
@@ -206,7 +216,8 @@ export function useChatRequest({
     sourceToolRuns: readonly ToolRun[] = toolRuns,
     targetConversationId: string | null = conversationId,
     sourceMode: ChatMode = mode,
-    sourceProjectSelection: ProjectSelection | null = projectSelection
+    sourceProjectSelection: ProjectSelection | null = projectSelection,
+    onAccepted?: (accepted: AcceptedChatRequest) => void
   ): boolean {
     const content = rawContent.trim()
     // `begin` 仍是最终的原子互斥点；这里的同步检查让保存、选文件或生成期间
@@ -276,6 +287,11 @@ export function useChatRequest({
         }
       ]
     }))
+    onAccepted?.({
+      conversationId: active.conversationId,
+      messageId: active.userId,
+      content
+    })
     retrySources.current.set(active.assistantId, {
       conversationId: active.conversationId,
       prompt: content,

@@ -16,7 +16,7 @@ import {
   maxConversationTitleLength
 } from '../../../../shared/conversation-library'
 import type { Conversation, ConversationLibrary } from '../../../../shared/conversation-library'
-import { useChatRequest, type ToolActivity } from '../chat/useChatRequest'
+import { useChatRequest, type AcceptedChatRequest, type ToolActivity } from '../chat/useChatRequest'
 import { type ChatMode, resolveChatMode } from '../chat/chat-mode'
 import { useProjectSelection } from '../project/useProjectSelection'
 import { getCapacityError } from './capacity'
@@ -97,10 +97,55 @@ export function useConversation(): ConversationController {
   const [hiddenProposalKeys, setHiddenProposalKeys] = useState<ReadonlySet<string>>(new Set())
   const [openedProposal, setOpenedProposal] = useState<MessageChangeProposal | null>(null)
   const reconciledTasks = useRef(false)
-  const setClosePending = useCallback((value: boolean): void => {
-    closePendingRef.current = value
-    setClosePendingState(value)
+  type TitleJob = {
+    requestId: string
+    conversationId: string
+    messageId: string
+    generation: number
+    fallbackTitle: string
+  }
+  const titleJobsRef = useRef(new Map<string, TitleJob>())
+  const titleGenerationRef = useRef(new Map<string, number>())
+  const manuallyRenamedRef = useRef(new Set<string>())
+
+  const invalidateTitle = useCallback((conversationId: string): void => {
+    const generation = (titleGenerationRef.current.get(conversationId) ?? 0) + 1
+    titleGenerationRef.current.set(conversationId, generation)
+    const job = titleJobsRef.current.get(conversationId)
+    if (!job) return
+    titleJobsRef.current.delete(conversationId)
+    void Promise.resolve()
+      .then(() => window.api.cancelConversationTitle(job.requestId))
+      .catch(() => undefined)
   }, [])
+
+  useEffect(
+    () => () => {
+      for (const [conversationId, job] of titleJobsRef.current) {
+        titleGenerationRef.current.set(
+          conversationId,
+          (titleGenerationRef.current.get(conversationId) ?? job.generation) + 1
+        )
+        void Promise.resolve()
+          .then(() => window.api.cancelConversationTitle(job.requestId))
+          .catch(() => undefined)
+      }
+      titleJobsRef.current.clear()
+    },
+    []
+  )
+  const setClosePending = useCallback(
+    (value: boolean): void => {
+      if (value) {
+        for (const conversationId of titleJobsRef.current.keys()) {
+          invalidateTitle(conversationId)
+        }
+      }
+      closePendingRef.current = value
+      setClosePendingState(value)
+    },
+    [invalidateTitle]
+  )
   const isClosePending = useCallback(() => closePendingRef.current, [])
   const operations = useOperation()
   const storage = useConversationStorage({
@@ -298,6 +343,71 @@ export function useConversation(): ConversationController {
     projectSelection
   })
 
+  function startTitleGeneration(accepted: AcceptedChatRequest, fallbackTitle: string): void {
+    if (manuallyRenamedRef.current.has(accepted.conversationId)) return
+    invalidateTitle(accepted.conversationId)
+    const generation = titleGenerationRef.current.get(accepted.conversationId) ?? 0
+    const job: TitleJob = {
+      requestId: crypto.randomUUID(),
+      conversationId: accepted.conversationId,
+      messageId: accepted.messageId,
+      generation,
+      fallbackTitle
+    }
+    titleJobsRef.current.set(job.conversationId, job)
+    void Promise.resolve()
+      .then(() =>
+        window.api.generateConversationTitle({
+          requestId: job.requestId,
+          conversationId: job.conversationId,
+          messageId: job.messageId,
+          content: accepted.content
+        })
+      )
+      .then((result) => {
+        if (titleJobsRef.current.get(job.conversationId) !== job) return
+        if (
+          result.status !== 'done' ||
+          result.requestId !== job.requestId ||
+          result.conversationId !== job.conversationId ||
+          result.messageId !== job.messageId ||
+          titleGenerationRef.current.get(job.conversationId) !== job.generation
+        ) {
+          titleJobsRef.current.delete(job.conversationId)
+          return
+        }
+        setSnapshot((previous) => {
+          const conversation = previous.conversations.find((item) => item.id === job.conversationId)
+          const first = conversation?.messages.find((message) => message.role === 'user')
+          if (
+            !conversation ||
+            conversation.archived ||
+            manuallyRenamedRef.current.has(job.conversationId) ||
+            conversation.title !== job.fallbackTitle ||
+            !first ||
+            first.role !== 'user' ||
+            first.id !== job.messageId ||
+            first.content !== accepted.content ||
+            titleGenerationRef.current.get(job.conversationId) !== job.generation
+          ) {
+            return previous
+          }
+          return {
+            ...previous,
+            conversations: previous.conversations.map((item) =>
+              item.id === job.conversationId ? { ...item, title: result.title } : item
+            )
+          }
+        })
+        titleJobsRef.current.delete(job.conversationId)
+      })
+      .catch(() => {
+        if (titleJobsRef.current.get(job.conversationId) === job) {
+          titleJobsRef.current.delete(job.conversationId)
+        }
+      })
+  }
+
   const canRetryTask = useCallback(
     (taskId: string): boolean => {
       if (!active || !canSubmit) return false
@@ -308,10 +418,7 @@ export function useConversation(): ConversationController {
       const source = active.messages.find((item) => item.id === run.userId && item.role === 'user')
       if (!source) return false
       if (run.scope.kind === 'project') {
-        return (
-          projectSelection?.snapshotId === run.scope.snapshotId &&
-          chatMode === 'project-live'
-        )
+        return projectSelection?.snapshotId === run.scope.snapshotId && chatMode === 'project-live'
       }
       return chatMode === 'tool-live'
     },
@@ -456,6 +563,7 @@ export function useConversation(): ConversationController {
   async function create(): Promise<boolean> {
     if (!canChange() || snapshot.conversations.length >= 100) return false
     if (!(await revokeSelectionForChange())) return false
+    if (active) invalidateTitle(active.id)
     const id = crypto.randomUUID()
     setSnapshot((previous) => {
       if (previous.conversations.length >= 100) return previous
@@ -492,6 +600,7 @@ export function useConversation(): ConversationController {
     }
     if (id === active?.id) return true
     if (!(await revokeSelectionForChange())) return false
+    if (active) invalidateTitle(active.id)
     setSnapshot((previous) =>
       previous.activeConversationId === id
         ? previous
@@ -523,6 +632,8 @@ export function useConversation(): ConversationController {
       return false
     }
     if (!snapshot.conversations.some((item) => item.id === id)) return false
+    manuallyRenamedRef.current.add(id)
+    invalidateTitle(id)
     updateConversation(id, (conversation) => ({ ...conversation, title }))
     setConversationError(null)
     return true
@@ -547,6 +658,7 @@ export function useConversation(): ConversationController {
     const target = snapshot.conversations.find((item) => item.id === id)
     if (!target || target.archived) return false
     if (id === active?.id && !(await revokeSelectionForChange())) return false
+    invalidateTitle(id)
     setSnapshot((previous) => {
       const nextActive =
         previous.activeConversationId === id
@@ -574,6 +686,7 @@ export function useConversation(): ConversationController {
     }
     if (!snapshot.conversations.some((item) => item.id === id && item.archived)) return false
     if (id !== active?.id && !(await revokeSelectionForChange())) return false
+    invalidateTitle(id)
     setSnapshot((previous) => ({
       ...previous,
       activeConversationId: id,
@@ -591,6 +704,7 @@ export function useConversation(): ConversationController {
   async function clear(): Promise<boolean> {
     if (!canChange() || !active) return false
     if (!(await revokeSelectionForChange())) return false
+    invalidateTitle(active.id)
     updateConversation(active.id, (previous) => ({
       ...previous,
       messages: [],
@@ -656,7 +770,10 @@ export function useConversation(): ConversationController {
     setSearch: (value) => setSearch(value),
     visibleConversations,
     clear,
-    stop: request.stop,
+    stop: async () => {
+      if (active) invalidateTitle(active.id)
+      await request.stop()
+    },
     selectProjectFiles: async () => {
       if (!canChange()) return false
       request.clearError()
@@ -702,19 +819,30 @@ export function useConversation(): ConversationController {
       }
       preparation.cancel()
       if (!active) setSnapshot(nextSnapshot)
-      const accepted = request.send(content, target.messages, target.toolRuns, target.id)
+      const hadUserMessage = target.messages.some((message) => message.role === 'user')
+      const fallbackTitle =
+        !hadUserMessage && isPlaceholderConversationTitle(target.title)
+          ? createConversationTitle(content)
+          : ''
+      const accepted = request.send(
+        content,
+        target.messages,
+        target.toolRuns,
+        target.id,
+        undefined,
+        undefined,
+        fallbackTitle
+          ? (acceptedRequest) => startTitleGeneration(acceptedRequest, fallbackTitle)
+          : undefined
+      )
       if (!accepted && !active) setSnapshot(snapshot)
       if (accepted) {
-        const hadUserMessage = target.messages.some((message) => message.role === 'user')
-        if (isPlaceholderConversationTitle(target.title) && !hadUserMessage) {
-          const generatedTitle = createConversationTitle(content)
-          if (generatedTitle) {
-            updateConversation(target.id, (conversation) =>
-              isPlaceholderConversationTitle(conversation.title)
-                ? { ...conversation, title: generatedTitle }
-                : conversation
-            )
-          }
+        if (fallbackTitle) {
+          updateConversation(target.id, (conversation) =>
+            isPlaceholderConversationTitle(conversation.title)
+              ? { ...conversation, title: fallbackTitle }
+              : conversation
+          )
         }
         commandReview.close()
         setCapacityError(null)

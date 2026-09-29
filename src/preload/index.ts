@@ -17,6 +17,10 @@ import {
   parseCommandExecutionRequest
 } from '../shared/command-preparation'
 import { isTaskId, parseTaskRecord, parseTaskRecords } from '../shared/task'
+import {
+  parseConversationTitleOutcome,
+  parseConversationTitleRequest
+} from '../shared/conversation-title'
 
 // Custom APIs for renderer
 const api: AppAPI = {
@@ -325,6 +329,21 @@ const api: AppAPI = {
     }
     ipcRenderer.on('agent:progress', handler)
     return () => ipcRenderer.removeListener('agent:progress', handler)
+  },
+  generateConversationTitle: async (request) => {
+    const checkedRequest = parseConversationTitleRequest(request)
+    if (!checkedRequest) throw new Error('标题请求格式不正确')
+    const result = parseConversationTitleOutcome(
+      await ipcRenderer.invoke('conversation-title:start', checkedRequest)
+    )
+    if (!result) throw new Error('标题结果格式不正确')
+    return result
+  },
+  cancelConversationTitle: async (requestId) => {
+    if (!isAgentId(requestId)) return false
+    const result = await ipcRenderer.invoke('conversation-title:cancel', requestId)
+    if (typeof result !== 'boolean') throw new Error('标题取消结果格式不正确')
+    return result
   }
 }
 
