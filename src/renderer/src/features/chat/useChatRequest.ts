@@ -4,7 +4,7 @@ import type { ProtocolItem, ToolRun } from '../../../../shared/agent-history'
 import type { AgentContext, ProjectSelection, ToolScope } from '../../../../shared/project'
 import type { ChatMessage } from '../../../../shared/conversation'
 import type { Conversation } from '../../../../shared/conversation-library'
-import { maxTaskRecords } from '../../../../shared/task'
+import { isTerminalTaskStatus, maxTaskRecords } from '../../../../shared/task'
 import type { OperationControl } from '../conversation/useOperation'
 import { isProjectChatMode, resolveToolRequest, type ChatMode } from './chat-mode'
 
@@ -121,9 +121,18 @@ export function useChatRequest({
         const active = activeRequest.current
         const belongsToActiveRequest =
           active?.taskId === record.taskId && active.conversationId === record.conversationId
-        const belongsToKnownTask = previous.tasks.some((task) => task.taskId === record.taskId)
+        const existing = previous.tasks.find((task) => task.taskId === record.taskId)
+        const belongsToKnownTask = existing !== undefined
         // Ignore late events for tasks already removed from this conversation.
         if (!belongsToActiveRequest && !belongsToKnownTask) return previous
+        // Reconciliation can close an orphaned task as `interrupted` while an
+        // event queued before refresh is still in flight. Persisted terminal
+        // records are immutable from the renderer's point of view; accepting a
+        // stale running event here would reopen work that no longer has a
+        // runtime handle.
+        if (existing && isTerminalTaskStatus(existing.status)) {
+          return previous
+        }
         const known = previous.tasks.some((task) => task.taskId === record.taskId)
         const tasks = known
           ? previous.tasks.map((task) => (task.taskId === record.taskId ? record : task))

@@ -22,7 +22,6 @@ import { useProjectSelection } from '../project/useProjectSelection'
 import { getCapacityError } from './capacity'
 import type { ProjectSelection } from '../../../../shared/project'
 import { isTerminalTaskStatus, maxTaskRecords } from '../../../../shared/task'
-import type { TaskRecord } from '../../../../shared/task'
 import { useConversationStorage, ConversationStorage } from './useConversationStorage'
 import { useOperation, Operation } from './useOperation'
 import { useChangePreview, type ChangePreviewController } from '../review/useChangePreview'
@@ -40,9 +39,6 @@ export type ConversationController = {
   visibleConversations: Conversation[]
   activeConversationId: string | null
   messages: ChatMessage[]
-  tasks: TaskRecord[]
-  canRetryTask: (taskId: string) => boolean
-  retryTask: (taskId: string) => boolean
   canRetryMessage: (messageId: string) => boolean
   retryMessage: (messageId: string) => boolean
   operation: Operation
@@ -408,36 +404,6 @@ export function useConversation(): ConversationController {
       })
   }
 
-  const canRetryTask = useCallback(
-    (taskId: string): boolean => {
-      if (!active || !canSubmit) return false
-      const task = active.tasks.find((item) => item.taskId === taskId)
-      if (!task || !isTerminalTaskStatus(task.status) || task.kind !== 'agent') return false
-      const run = active.toolRuns.find((item) => item.requestId === task.requestId)
-      if (!run) return false
-      const source = active.messages.find((item) => item.id === run.userId && item.role === 'user')
-      if (!source) return false
-      if (run.scope.kind === 'project') {
-        return projectSelection?.snapshotId === run.scope.snapshotId && chatMode === 'project-live'
-      }
-      return chatMode === 'tool-live'
-    },
-    [active, canSubmit, chatMode, projectSelection]
-  )
-
-  const retryTask = useCallback(
-    (taskId: string): boolean => {
-      if (!canRetryTask(taskId) || !active) return false
-      const task = active.tasks.find((item) => item.taskId === taskId)
-      if (!task) return false
-      const run = active.toolRuns.find((item) => item.requestId === task.requestId)
-      const source =
-        run && active.messages.find((item) => item.id === run.userId && item.role === 'user')
-      return source ? request.send(source.content) : false
-    },
-    [active, canRetryTask, request]
-  )
-
   const canRetryMessage = useCallback(
     (messageId: string): boolean => {
       if (!active || !canSubmit) return false
@@ -749,9 +715,6 @@ export function useConversation(): ConversationController {
     conversations: snapshot.conversations,
     activeConversationId: snapshot.activeConversationId,
     messages,
-    tasks: active?.tasks ?? [],
-    canRetryTask,
-    retryTask,
     canRetryMessage,
     retryMessage,
     operation: operations.operation,

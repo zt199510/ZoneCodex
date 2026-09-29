@@ -95,9 +95,6 @@ export function ChatWorkspace({
         selection={conversation.contextSelection}
         operation={operation}
         waitingApproval={conversation.commandReview.proposal !== null}
-        tasks={conversation.tasks}
-        canRetryTask={conversation.canRetryTask}
-        onRetryTask={conversation.retryTask}
       />
       {errors.length > 0 && (
         <div className="error-banner" role="alert">
