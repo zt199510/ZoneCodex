@@ -1,4 +1,6 @@
-export type ToolScope = { kind: 'time' } | { kind: 'project'; snapshotId: string }
+export type ToolScope =
+  | { kind: 'time'; workspaceId?: string }
+  | { kind: 'project'; snapshotId: string; workspaceId?: string }
 
 /** 当前窗口的项目上下文。目录授权和文件快照仍由主进程单独维护。 */
 export type Workspace = {
@@ -204,11 +206,15 @@ function cloneWorkspace(workspace: Workspace): Workspace {
 export function parseToolScope(value: unknown): ToolScope | null {
   try {
     if (!isPlainRecord(value) || typeof value.kind !== 'string') return null
+    if (hasOwn(value, 'workspaceId') && !isAgentId(value.workspaceId)) return null
+    const workspace = hasOwn(value, 'workspaceId')
+      ? { workspaceId: value.workspaceId as string }
+      : {}
     if (value.kind === 'time') {
-      return hasOwn(value, 'snapshotId') ? null : { kind: 'time' }
+      return hasOwn(value, 'snapshotId') ? null : { kind: 'time', ...workspace }
     }
     if (value.kind === 'project' && isAgentId(value.snapshotId)) {
-      return { kind: 'project', snapshotId: value.snapshotId }
+      return { kind: 'project', snapshotId: value.snapshotId, ...workspace }
     }
     return null
   } catch {
@@ -246,12 +252,14 @@ export function parseAgentRequestContext(value: unknown): AgentRequestContext | 
 }
 
 export function toolScopeForAgentRequest(context: AgentRequestContext): ToolScope {
+  const workspace = context.workspaceId ? { workspaceId: context.workspaceId } : {}
   return context.attachment
-    ? { kind: 'project', snapshotId: context.attachment.snapshotId }
-    : { kind: 'time' }
+    ? { kind: 'project', snapshotId: context.attachment.snapshotId, ...workspace }
+    : { kind: 'time', ...workspace }
 }
 
 export function sameToolScope(a: ToolScope, b: ToolScope): boolean {
+  if (a.workspaceId !== b.workspaceId) return false
   if (a.kind === 'time') return b.kind === 'time'
   return b.kind === 'project' && a.snapshotId === b.snapshotId
 }
@@ -401,6 +409,13 @@ export function parseWorkspaceSelectionResult(value: unknown): WorkspaceSelectio
 export function isToolAllowed(name: unknown, scope: ToolScope): name is string {
   return (
     name === 'get_current_time' ||
+    (scope.workspaceId !== undefined &&
+      (name === 'list_workspace_files' ||
+        name === 'search_workspace_text' ||
+        name === 'read_workspace_file' ||
+        name === 'create_workspace_file' ||
+        name === 'edit_workspace_file' ||
+        name === 'run_workspace_command')) ||
     (scope.kind === 'project' &&
       (name === 'search_project_text' ||
         name === 'read_project_file' ||

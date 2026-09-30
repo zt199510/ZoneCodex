@@ -278,7 +278,7 @@ export async function selectWorkspace(
   workspaceSelections.set(windowId, state)
   try {
     const picked = await dialog.showOpenDialog(window, {
-      title: '选择工作区文件夹',
+      title: '选择供 Agent 搜索和读取的工作区（修改与命令另行确认）',
       properties: ['openDirectory', 'dontAddToRecent']
     })
     if (!isWorkspaceCurrent(windowId, state, window)) return { status: 'cancelled' }

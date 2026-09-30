@@ -1,4 +1,4 @@
-import { BrowserWindow, ipcMain } from 'electron'
+import { BrowserWindow, dialog, ipcMain } from 'electron'
 import type { IpcMainInvokeEvent } from 'electron'
 import type { AgentResult } from '../../shared/agent'
 import { isAgentId } from '../../shared/agent'
@@ -17,6 +17,12 @@ import {
 import { createChangeProposalExecutor } from '../tools/change-proposal'
 import { createCommandProposalExecutor } from '../tools/command-proposal'
 import { executeTimeTool } from '../tools/current-time'
+import { createWorkspaceReadExecutor, workspaceReadTools } from '../tools/workspace-files'
+import {
+  createWorkspaceActionExecutor,
+  workspaceActionTools,
+  type WorkspaceApprovalRequest
+} from '../tools/workspace-actions'
 import type { ProjectSnapshot } from '../tools/project-snapshot'
 import { createTask, newTaskId, updateTask } from './task-registry'
 import { isTaskId } from '../../shared/task'
@@ -140,11 +146,13 @@ export function registerAgentRequest(
       const cancel = (): void => {
         controller.abort()
       }
-      const timer = setTimeout(() => {
-        if (controller.signal.aborted) return
-        timedOut = true
-        cancel()
-      }, 90_000)
+      const armTimeout = (): NodeJS.Timeout =>
+        setTimeout(() => {
+          if (controller.signal.aborted) return
+          timedOut = true
+          cancel()
+        }, 90_000)
+      let timer = armTimeout()
       sender.once('did-start-loading', cancel)
       sender.once('render-process-gone', cancel)
       sender.once('destroyed', cancel)
@@ -152,8 +160,62 @@ export function registerAgentRequest(
         trace.push('模式：真实模型 SSE')
         const agentRequest = buildAgentRequest({
           snapshot: projectSnapshot,
-          workspaceInstruction
+          workspaceInstruction,
+          workspaceId
         })
+        const assertWorkspaceAccess = (): boolean => {
+          if (!workspace || controller.signal.aborted) return false
+          const current = captureWorkspaceAccess(windowId, checkedContext.conversationId)
+          return current?.workspaceId === workspace.workspaceId && current.root === workspace.root
+        }
+        const approveWorkspaceAction = async (
+          request: WorkspaceApprovalRequest,
+          signal: AbortSignal
+        ): Promise<boolean> => {
+          signal.throwIfAborted()
+          if (!assertWorkspaceAccess()) return false
+          const owner = BrowserWindow.fromWebContents(sender)
+          if (!owner || owner.isDestroyed()) return false
+          const detail =
+            request.kind === 'edit'
+              ? `工作区：${request.cwd}\n文件：${request.path}\n\n当前内容：\n${request.before}\n\n修改后内容：\n${request.after}`
+              : `工作目录：${request.cwd}\n程序：${request.program}\n参数：${JSON.stringify(request.args)}\n\n当前版本没有命令沙箱；此程序可能访问工作区以外的文件、网络或启动子进程。`
+          clearTimeout(timer)
+          updateTask(windowId, lifecycleId, 'waiting_approval')
+          try {
+            const answer = await dialog.showMessageBox(owner, {
+              type: 'question',
+              title: request.kind === 'edit' ? '确认修改工作区文件' : '确认运行工作区命令',
+              message:
+                request.kind === 'edit'
+                  ? '请核对完整原文和修改后内容'
+                  : '请核对程序、参数和工作目录',
+              detail,
+              buttons: ['拒绝', '允许本次'],
+              defaultId: 0,
+              cancelId: 0,
+              noLink: true
+            })
+            signal.throwIfAborted()
+            return answer.response === 1 && assertWorkspaceAccess()
+          } finally {
+            if (!controller.signal.aborted) {
+              updateTask(windowId, lifecycleId, 'running')
+              timer = armTimeout()
+            }
+          }
+        }
+        const readWorkspace = workspace
+          ? createWorkspaceReadExecutor(workspace.root, assertWorkspaceAccess)
+          : null
+        const actInWorkspace = workspace
+          ? createWorkspaceActionExecutor(
+              workspace.root,
+              assertWorkspaceAccess,
+              approveWorkspaceAction
+            )
+          : null
+        const completeReads = new Map<string, string>()
         const completed = await runToolLoop(
           prompt.trim(),
           createLiveResponse(agentRequest.tools, agentRequest.instructions),
@@ -164,17 +226,76 @@ export function registerAgentRequest(
             sender.send('agent:progress', { requestId: id, message })
           },
           checkedHistory,
-          projectSnapshot
-            ? ((executeFile) => {
-                return async (name: string, args: string, signal: AbortSignal): Promise<string> => {
-                  signal.throwIfAborted()
-                  if (name === 'propose_command') return executeCommandProposal(name, args, signal)
-                  return name === 'get_current_time'
-                    ? executeTimeTool(name, args)
-                    : executeFile(name, args, signal)
+          async (name: string, args: string, signal: AbortSignal): Promise<string> => {
+            signal.throwIfAborted()
+            if (name === 'get_current_time') return executeTimeTool(name, args)
+            if (readWorkspace && workspaceReadTools.some((tool) => tool.name === name)) {
+              const output = await readWorkspace(name, args, signal)
+              if (name === 'read_workspace_file') {
+                try {
+                  const request = JSON.parse(args) as { path?: unknown; startLine?: unknown }
+                  const read = JSON.parse(output) as {
+                    ok?: unknown
+                    path?: unknown
+                    sha256?: unknown
+                    totalLines?: unknown
+                    truncated?: unknown
+                    lines?: Array<{ line?: unknown; truncated?: unknown }>
+                  }
+                  if (
+                    read.ok === true &&
+                    request.startLine === 1 &&
+                    request.path === read.path &&
+                    typeof read.path === 'string' &&
+                    typeof read.sha256 === 'string' &&
+                    typeof read.totalLines === 'number' &&
+                    read.truncated === false &&
+                    Array.isArray(read.lines) &&
+                    read.lines.length === read.totalLines &&
+                    read.lines.every((line, index) => line.line === index + 1 && !line.truncated)
+                  ) {
+                    completeReads.set(read.path, read.sha256)
+                  }
+                } catch {
+                  // The executor reports malformed requests; they do not count as a full read.
                 }
-              })(projectExecutor!)
-            : undefined,
+              }
+              return output
+            }
+            if (actInWorkspace && workspaceActionTools.some((tool) => tool.name === name)) {
+              let output: string
+              if (name === 'edit_workspace_file') {
+                try {
+                  const edit = JSON.parse(args) as { path?: unknown; expectedSha256?: unknown }
+                  output =
+                    typeof edit.path === 'string' &&
+                    completeReads.get(edit.path) === edit.expectedSha256
+                      ? await actInWorkspace(name, args, signal)
+                      : JSON.stringify({ status: 'error', error: '请先完整读取目标文件' })
+                } catch {
+                  output = JSON.stringify({ status: 'error', error: '编辑参数无效' })
+                }
+              } else {
+                output = await actInWorkspace(name, args, signal)
+              }
+              const parsed: unknown = JSON.parse(output)
+              const status =
+                parsed && typeof parsed === 'object' && 'status' in parsed
+                  ? (parsed as { status: unknown }).status
+                  : null
+              if (typeof status === 'string' && /^[a-z_]+$/.test(status)) {
+                const message = `工作区结果：${name}：${status}`
+                trace.push(message)
+                if (!sender.isDestroyed()) sender.send('agent:progress', { requestId: id, message })
+              }
+              return output
+            }
+            if (name === 'propose_command' && projectSnapshot) {
+              return executeCommandProposal(name, args, signal)
+            }
+            if (projectExecutor) return projectExecutor(name, args, signal)
+            throw new AgentError('工具不在当前授权范围内')
+          },
           checkedScope,
           (delta) => {
             if (controller.signal.aborted || sender.isDestroyed()) return

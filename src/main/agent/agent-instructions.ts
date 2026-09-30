@@ -3,10 +3,13 @@ import { timeTool } from '../tools/current-time'
 import { projectTools } from '../tools/project-snapshot'
 import { changeProposalTool } from '../tools/change-proposal'
 import { commandProposalTool } from '../tools/command-proposal'
+import { workspaceReadTools } from '../tools/workspace-files'
+import { workspaceActionTools } from '../tools/workspace-actions'
 
 type AgentCapabilities = {
   snapshot?: ProjectSnapshot | null
   workspaceInstruction?: string | null
+  workspaceId?: string | null
 }
 
 const commonRules =
@@ -14,18 +17,25 @@ const commonRules =
 
 const timeRules = '需要当前时间时可调用 get_current_time，默认使用 Asia/Hong_Kong 时区。'
 
+const workspaceRules =
+  '本轮已授权一个工作区目录。使用工作区工具时只能传相对于该目录的路径；先按需列出、搜索和读取文件，不要猜测内容。create_workspace_file 只在已有目录中新建小型文本文件，不覆盖现有文件。edit_workspace_file 只适用于本轮已完整读取的小型文本文件，提交完整新内容前保留用户未要求修改的部分。新建或修改前会展示完整内容并询问用户，拒绝或文件变化后不得声称写入成功。run_workspace_command 在选定工作区目录下启动指定程序和参数；它可能启动 Shell 或访问工作区外资源，执行前会展示完整命令并询问用户。只有实际工具结果支持时才声称操作完成，不要把工具失败描述为成功。'
+
 const snapshotRules =
   '附件工具只处理本轮已授权的只读快照清单，不代表可以浏览工作区或读取其他磁盘文件。path 是附件标识，不是可推测的磁盘路径。需要附件信息时按需搜索或读取清单内文件；引用内容时标注文件名和行号，同名文件同时注明完整附件标识。用户要求修改附件时，先完整读取目标小文件，再提交该文件完整的新内容，保留未要求改变的内容和末尾换行；每轮最多一份修改建议。建议只供审查，不能声称已写入磁盘。文件超限或无法确定时说明原因。仅当用户请求检查建议时，才可用 propose_command 提出固定 npm_typecheck，每轮最多一份；工作目录未绑定，不得传入目录或声称已经运行。若提及附件中的脚本配置，必须先读取，并说明它只是快照信息。命令提案不代表执行许可。'
 
 export function buildAgentRequest({
   snapshot = null,
-  workspaceInstruction = null
+  workspaceInstruction = null,
+  workspaceId = null
 }: AgentCapabilities = {}): { tools: readonly unknown[]; instructions: string } {
-  const tools = snapshot
-    ? [timeTool, ...projectTools, changeProposalTool, commandProposalTool]
-    : [timeTool]
+  const tools = [
+    timeTool,
+    ...(workspaceId ? [...workspaceReadTools, ...workspaceActionTools] : []),
+    ...(snapshot ? [...projectTools, changeProposalTool, commandProposalTool] : [])
+  ]
   const sections = [commonRules, timeRules]
 
+  if (workspaceId) sections.push(workspaceRules)
   if (snapshot) {
     sections.push(snapshotRules)
     sections.push(

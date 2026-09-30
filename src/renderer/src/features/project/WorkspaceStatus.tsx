@@ -2,10 +2,7 @@ import type { ProjectSelection } from '../../../../shared/project'
 import type { Operation } from '../conversation/useOperation'
 import type { WorkspaceController } from './useWorkspace'
 
-function currentTaskLabel(
-  waitingApproval: boolean,
-  operation: Operation
-): string {
+function currentTaskLabel(waitingApproval: boolean, operation: Operation): string {
   if (waitingApproval) return '等待批准'
   switch (operation) {
     case 'loading':
@@ -42,14 +39,14 @@ export function WorkspaceStatus({
     saved && !workspace.runtime
       ? '需重新选择工作区后读取 AGENTS.md'
       : workspace.instructionState === 'read'
-      ? workspace.instruction?.truncated
-        ? '已读取 AGENTS.md（内容已截断）'
-        : '已读取 AGENTS.md'
-      : workspace.instructionState === 'absent'
-        ? '未找到 AGENTS.md'
-        : workspace.instructionState === 'error'
-          ? 'AGENTS.md 读取失败'
-          : '未读取 AGENTS.md'
+        ? workspace.instruction?.truncated
+          ? '已读取 AGENTS.md（内容已截断）'
+          : '已读取 AGENTS.md'
+        : workspace.instructionState === 'absent'
+          ? '未找到 AGENTS.md'
+          : workspace.instructionState === 'error'
+            ? 'AGENTS.md 读取失败'
+            : '未读取 AGENTS.md'
   return (
     <div className="workspace-status" role="status" aria-label="工作区状态">
       <span>
@@ -58,17 +55,23 @@ export function WorkspaceStatus({
       <span>
         状态：<strong>{task}</strong>
       </span>
-      <span>项目文件：{selection ? '已限定' : '未选择'}</span>
+      <span>
+        文件访问：
+        {workspace.runtime
+          ? selection
+            ? '工作区与附件'
+            : '工作区内'
+          : selection
+            ? '仅附件'
+            : '未授权'}
+      </span>
       <span>{instructionLabel}</span>
       <span className="workspace-status-actions">
         <button
           type="button"
           className="quiet-button"
           disabled={
-            !workspace.canSelect ||
-            !workspace.saved ||
-            workspace.selecting ||
-            operation !== 'idle'
+            !workspace.canSelect || !workspace.saved || workspace.selecting || operation !== 'idle'
           }
           onClick={() => void workspace.readInstruction()}
         >
