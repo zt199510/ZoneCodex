@@ -54,14 +54,11 @@ export type ProjectSelectionResult =
   | { status: 'cleared' }
   | { status: 'error'; error: string }
 
-export type AgentContext =
-  | { kind: 'time' }
-  | {
-      kind: 'project'
-      snapshotId: string
-      conversationId: string
-      allowUpload: boolean
-    }
+export type AgentRequestContext = {
+  conversationId: string
+  workspaceId?: string
+  attachment?: { snapshotId: string; allowUpload: true }
+}
 
 type PlainRecord = Record<string, unknown>
 
@@ -219,30 +216,39 @@ export function parseToolScope(value: unknown): ToolScope | null {
   }
 }
 
-export function parseAgentContext(value: unknown): AgentContext | null {
+export function parseAgentRequestContext(value: unknown): AgentRequestContext | null {
   try {
-    if (!isPlainRecord(value) || typeof value.kind !== 'string') return null
-    if (value.kind === 'time') {
-      return Object.keys(value).length === 1 ? { kind: 'time' } : null
-    }
+    if (!isPlainRecord(value) || !isAgentId(value.conversationId)) return null
     if (
-      value.kind === 'project' &&
-      Object.keys(value).length === 4 &&
-      isAgentId(value.snapshotId) &&
-      isAgentId(value.conversationId) &&
-      typeof value.allowUpload === 'boolean'
-    ) {
-      return {
-        kind: 'project',
-        snapshotId: value.snapshotId,
-        conversationId: value.conversationId,
-        allowUpload: value.allowUpload
-      }
+      Object.keys(value).some(
+        (key) => key !== 'conversationId' && key !== 'workspaceId' && key !== 'attachment'
+      ) ||
+      (hasOwn(value, 'workspaceId') && !isAgentId(value.workspaceId))
+    )
+      return null
+    const context: AgentRequestContext = { conversationId: value.conversationId }
+    if (hasOwn(value, 'workspaceId')) context.workspaceId = value.workspaceId as string
+    if (hasOwn(value, 'attachment')) {
+      const attachment = value.attachment
+      if (
+        !isPlainRecord(attachment) ||
+        Object.keys(attachment).length !== 2 ||
+        !isAgentId(attachment.snapshotId) ||
+        attachment.allowUpload !== true
+      )
+        return null
+      context.attachment = { snapshotId: attachment.snapshotId, allowUpload: true }
     }
-    return null
+    return context
   } catch {
     return null
   }
+}
+
+export function toolScopeForAgentRequest(context: AgentRequestContext): ToolScope {
+  return context.attachment
+    ? { kind: 'project', snapshotId: context.attachment.snapshotId }
+    : { kind: 'time' }
 }
 
 export function sameToolScope(a: ToolScope, b: ToolScope): boolean {

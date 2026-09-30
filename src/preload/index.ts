@@ -10,9 +10,10 @@ import { parseTerminalEvent, parseTerminalResult } from '../shared/terminal'
 import { isAgentId, parseAgentDelta, parseAgentProgress, parseAgentResult } from '../shared/agent'
 import { parseToolHistory } from '../shared/agent-history'
 import {
-  parseAgentContext,
+  parseAgentRequestContext,
   parseProjectSelectionResult,
   parseToolScope,
+  toolScopeForAgentRequest,
   parseWorkspaceInstructionResult,
   parseWorkspaceSelectionResult
 } from '../shared/project'
@@ -200,28 +201,13 @@ const api: AppAPI = {
     return () => ipcRenderer.removeListener('terminal:event', handler)
   },
   // 真实 Agent 请求接口
-  startAgentRequest: async (
-    requestId,
-    prompt,
-    history = [],
-    context = { kind: 'time' },
-    taskId,
-    conversationId,
-    workspaceId
-  ) => {
-    const checkedContext = parseAgentContext(context)
+  startAgentRequest: async (requestId, prompt, history, context, taskId) => {
+    const checkedContext = parseAgentRequestContext(context)
     if (!checkedContext) throw new Error('工具上下文格式不正确')
-    const checkedScope = parseToolScope(
-      checkedContext.kind === 'time'
-        ? checkedContext
-        : { kind: 'project', snapshotId: checkedContext.snapshotId }
-    )
+    const checkedScope = parseToolScope(toolScopeForAgentRequest(checkedContext))
     if (!checkedScope) throw new Error('工具范围格式不正确')
     const checkedHistory = parseToolHistory(history, checkedScope)
     if (!checkedHistory) throw new Error('工具历史参数格式不正确')
-    if (workspaceId !== undefined && !isAgentId(workspaceId)) {
-      throw new Error('工作区 ID 格式不正确')
-    }
     return parseAgentResult(
       await ipcRenderer.invoke(
         'agent:start',
@@ -229,9 +215,7 @@ const api: AppAPI = {
         prompt,
         checkedHistory,
         checkedContext,
-        taskId,
-        conversationId,
-        workspaceId
+        taskId
       ),
       checkedScope
     )
@@ -270,8 +254,7 @@ const api: AppAPI = {
     return result
   },
   selectWorkspace: async (conversationId, operationId) => {
-    if (!isAgentId(conversationId) || !isAgentId(operationId))
-      throw new Error('工作区选择参数无效')
+    if (!isAgentId(conversationId) || !isAgentId(operationId)) throw new Error('工作区选择参数无效')
     const result = parseWorkspaceSelectionResult(
       await ipcRenderer.invoke('workspace:select', conversationId, operationId)
     )

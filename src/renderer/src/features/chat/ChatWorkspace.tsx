@@ -210,12 +210,7 @@ export function ChatWorkspace({
           disabled={!conversation.canSend}
           isSending={operation === 'generating'}
           maxLength={2000}
-          tools={
-            <ComposerAttachments
-              conversation={conversation}
-              previewTriggerRef={previewTriggerRef}
-            />
-          }
+          tools={<ComposerAttachments conversation={conversation} />}
           attachments={
             <AttachmentCards
               selection={conversation.projectSelection}

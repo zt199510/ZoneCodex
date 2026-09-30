@@ -17,7 +17,6 @@ import {
 } from '../../../../shared/conversation-library'
 import type { Conversation, ConversationLibrary } from '../../../../shared/conversation-library'
 import { useChatRequest, type AcceptedChatRequest, type ToolActivity } from '../chat/useChatRequest'
-import { type ChatMode, resolveChatMode } from '../chat/chat-mode'
 import { useProjectSelection } from '../project/useProjectSelection'
 import { getCapacityError } from './capacity'
 import type { ProjectSelection, SavedWorkspace } from '../../../../shared/project'
@@ -67,7 +66,6 @@ export type ConversationController = {
   stop: () => Promise<void>
   setClosePending: (value: boolean) => void
   getOperation: () => Operation
-  chatMode: ChatMode
   toolActivity: ToolActivity
   removeFile: (path: string) => Promise<boolean>
   commit: CommitController
@@ -342,8 +340,6 @@ export function useConversation(): ConversationController {
     }
   )
 
-  const chatMode = resolveChatMode(projectSelection !== null)
-
   const request = useChatRequest({
     conversationId: active?.id ?? null,
     messages,
@@ -351,7 +347,6 @@ export function useConversation(): ConversationController {
     updateConversation,
     toolRuns: active?.toolRuns ?? [],
     operations,
-    mode: chatMode,
     projectSelection,
     workspace: workspace.runtime
   })
@@ -489,7 +484,6 @@ export function useConversation(): ConversationController {
         trimmedToolRuns,
         undefined,
         undefined,
-        undefined,
         workspace.runtime,
         undefined,
         messageAttachments
@@ -497,7 +491,17 @@ export function useConversation(): ConversationController {
       if (accepted) markSent()
       return accepted
     },
-    [active, canSubmit, commandReview, markSent, pendingSelection, preparation, request, snapshot, workspace]
+    [
+      active,
+      canSubmit,
+      commandReview,
+      markSent,
+      pendingSelection,
+      preparation,
+      request,
+      snapshot,
+      workspace
+    ]
   )
 
   async function openProposal(proposal: MessageChangeProposal): Promise<boolean> {
@@ -835,7 +839,6 @@ export function useConversation(): ConversationController {
         target.toolRuns,
         target.id,
         undefined,
-        undefined,
         workspace.runtime,
         fallbackTitle
           ? (acceptedRequest) => startTitleGeneration(acceptedRequest, fallbackTitle)
@@ -859,20 +862,11 @@ export function useConversation(): ConversationController {
       return accepted
     },
     editAndSend,
-    chatMode,
     toolActivity: visibleActivity,
     removeFile,
     preparation,
     commit,
-    changePreview: {
-      ...changePreview,
-      requestPreview: async (path, proposedText) => {
-        if (!canChange()) return false
-        preparation.cancel()
-        setOpenedProposal(null)
-        return changePreview.requestPreview(path, proposedText)
-      }
-    },
+    changePreview,
     changeProposals,
     changeProposalStatus,
     openProposal,

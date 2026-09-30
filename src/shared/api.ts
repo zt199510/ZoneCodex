@@ -8,7 +8,7 @@ import type { AgentDelta, AgentResult, AgentProgress } from './agent'
 import type { ConversationTitleOutcome, ConversationTitleRequest } from './conversation-title'
 import type { ProtocolItem } from './agent-history'
 import type {
-  AgentContext,
+  AgentRequestContext,
   ProjectSelectionResult,
   WorkspaceInstructionResult,
   WorkspaceSelectionResult
@@ -78,11 +78,9 @@ export interface AppAPI {
   startAgentRequest: (
     requestId: string,
     prompt: string,
-    history?: ProtocolItem[],
-    context?: AgentContext,
-    taskId?: string,
-    conversationId?: string,
-    workspaceId?: string
+    history: ProtocolItem[],
+    context: AgentRequestContext,
+    taskId?: string
   ) => Promise<AgentResult>
   // 由主进程校验并在系统外部浏览器中打开 http/https 地址。
   openExternal: (url: string) => Promise<boolean>
@@ -97,7 +95,10 @@ export interface AppAPI {
     path: string
   ) => Promise<ProjectSelectionResult>
   // 选择、清除和读取当前会话的工作区；运行时目录授权只存在于主进程。
-  selectWorkspace: (conversationId: string, operationId: string) => Promise<WorkspaceSelectionResult>
+  selectWorkspace: (
+    conversationId: string,
+    operationId: string
+  ) => Promise<WorkspaceSelectionResult>
   clearWorkspace: (conversationId: string) => Promise<boolean>
   readWorkspaceInstruction: (conversationId: string) => Promise<WorkspaceInstructionResult>
   // 从当前已授权快照生成只读修改预览

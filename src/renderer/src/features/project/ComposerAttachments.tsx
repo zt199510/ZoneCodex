@@ -1,13 +1,10 @@
 import { useEffect, useId, useLayoutEffect, useRef, useState } from 'react'
 import type { ConversationController } from '../conversation/useConversation'
-import { Icon } from '../../components/ui/Icon'
 
 export function ComposerAttachments({
-  conversation: c,
-  previewTriggerRef
+  conversation: c
 }: {
   conversation: ConversationController
-  previewTriggerRef: React.RefObject<HTMLButtonElement | null>
 }): React.JSX.Element {
   const id = useId()
   const trigger = useRef<HTMLButtonElement>(null)
@@ -17,11 +14,6 @@ export function ComposerAttachments({
   const selection = c.contextSelection
   const count = selection?.files.length ?? 0
   const busy = c.operation === 'selecting'
-  const [practicePath, setPracticePath] = useState('')
-  const [proposedText, setProposedText] = useState('')
-  const activePracticePath = selection?.files.some((file) => file.path === practicePath)
-    ? practicePath
-    : (selection?.files[0]?.path ?? '')
 
   useLayoutEffect(() => {
     if (!open) return
@@ -88,7 +80,7 @@ export function ComposerAttachments({
         popover="auto"
         className="attachment-popover"
         role="dialog"
-        aria-label="附件与调试设置"
+        aria-label="附件"
         onToggle={(event) => {
           const nextOpen = (event.nativeEvent as ToggleEvent).newState === 'open'
           setOpen(nextOpen)
@@ -157,70 +149,6 @@ export function ComposerAttachments({
             </span>
           </button>
         )}
-        <details className="composer-debug">
-          <summary>开发调试</summary>
-          <p>所有请求使用真实模型流式响应；工具调用受当前附件授权范围限制。</p>
-          <section className="change-preview-practice" aria-labelledby={`${id}-preview-title`}>
-            <div className="change-preview-practice-heading">
-              <Icon name="code" size={15} />
-              <strong id={`${id}-preview-title`}>修改预览练习</strong>
-            </div>
-            {!selection ? (
-              <p className="change-preview-practice-empty">先添加文本或代码文件。</p>
-            ) : (
-              <>
-                <label>
-                  文件别名
-                  <select
-                    value={activePracticePath}
-                    disabled={!c.canEdit || busy || c.changePreview.state.status === 'loading'}
-                    onChange={(event) => setPracticePath(event.target.value)}
-                  >
-                    {selection.files.map((file) => (
-                      <option value={file.path} key={file.path}>
-                        {file.path}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <label>
-                  候选内容
-                  <textarea
-                    value={proposedText}
-                    disabled={!c.canEdit || busy || c.changePreview.state.status === 'loading'}
-                    rows={5}
-                    spellCheck={false}
-                    placeholder="输入修改后的完整文件内容"
-                    onChange={(event) => setProposedText(event.currentTarget.value)}
-                  />
-                </label>
-                <button
-                  type="button"
-                  className="change-preview-practice-submit"
-                  disabled={
-                    !c.canEdit ||
-                    busy ||
-                    !activePracticePath ||
-                    c.changePreview.state.status === 'loading'
-                  }
-                  onClick={() => {
-                    void (async () => {
-                      previewTriggerRef.current = trigger.current
-                      const accepted = await c.changePreview.requestPreview(
-                        activePracticePath,
-                        proposedText
-                      )
-                      if (accepted) close()
-                    })()
-                  }}
-                >
-                  <Icon name="code" size={14} />
-                  预览修改
-                </button>
-              </>
-            )}
-          </section>
-        </details>
       </div>
     </div>
   )

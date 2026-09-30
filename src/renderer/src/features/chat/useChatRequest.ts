@@ -1,12 +1,12 @@
 import { useEffect, useRef, useState } from 'react'
 import { selectToolHistory } from '../../../../shared/agent-history'
 import type { ProtocolItem, ToolRun } from '../../../../shared/agent-history'
-import type { AgentContext, ProjectSelection, ToolScope, Workspace } from '../../../../shared/project'
+import type { AgentRequestContext, ProjectSelection, Workspace } from '../../../../shared/project'
 import type { ChatAttachment, ChatMessage } from '../../../../shared/conversation'
 import type { Conversation } from '../../../../shared/conversation-library'
 import { isTerminalTaskStatus, maxTaskRecords } from '../../../../shared/task'
 import type { OperationControl } from '../conversation/useOperation'
-import { isProjectChatMode, resolveToolRequest, type ChatMode } from './chat-mode'
+import { resolveAgentRequest } from './agent-request'
 
 export type ToolActivity = Record<string, string[]>
 
@@ -18,11 +18,8 @@ type ActiveRequest = {
   requestId: string
   userId: string
   assistantId: string
-  mode: ChatMode
   prompt: string
-  scope: ToolScope | null
-  context: AgentContext | null
-  workspaceId: string | null
+  context: AgentRequestContext
   history: ProtocolItem[]
   trace: string[]
   attachments: ChatAttachment[]
@@ -33,8 +30,7 @@ type ChatRetrySource = {
   prompt: string
   sourceMessages: readonly ChatMessage[]
   sourceToolRuns: readonly ToolRun[]
-  mode: ChatMode
-  projectSelection: ProjectSelection | null
+  snapshotId: string | null
   attachments: ChatAttachment[]
   workspaceId: string | null
 }
@@ -53,7 +49,6 @@ type ChatRequestOptions = {
   updateConversation: UpdateConversation
   toolRuns: readonly ToolRun[]
   operations: OperationControl
-  mode: ChatMode
   projectSelection: ProjectSelection | null
   workspace: Workspace | null
 }
@@ -65,7 +60,6 @@ type ChatRequest = {
     sourceMessages?: readonly ChatMessage[],
     sourceToolRuns?: readonly ToolRun[],
     targetConversationId?: string | null,
-    sourceMode?: ChatMode,
     sourceProjectSelection?: ProjectSelection | null,
     sourceWorkspace?: Workspace | null,
     onAccepted?: (accepted: AcceptedChatRequest) => void,
@@ -92,7 +86,6 @@ export function useChatRequest({
   updateConversation,
   toolRuns,
   operations,
-  mode,
   projectSelection,
   workspace
 }: ChatRequestOptions): ChatRequest {
@@ -201,10 +194,8 @@ export function useChatRequest({
         active.requestId,
         active.prompt,
         active.history,
-        active.context ?? { kind: 'time' },
-        active.taskId,
-        active.conversationId,
-        active.workspaceId ?? undefined
+        active.context,
+        active.taskId
       )
       if (activeRequest.current?.requestId !== active.requestId) return
       if (result.status === 'done') {
@@ -233,7 +224,6 @@ export function useChatRequest({
     sourceMessages: readonly ChatMessage[] = messages,
     sourceToolRuns: readonly ToolRun[] = toolRuns,
     targetConversationId: string | null = conversationId,
-    sourceMode: ChatMode = mode,
     sourceProjectSelection: ProjectSelection | null = projectSelection,
     sourceWorkspace: Workspace | null = workspace,
     onAccepted?: (accepted: AcceptedChatRequest) => void,
@@ -251,20 +241,13 @@ export function useChatRequest({
     )
       return false
     if (rawContent.length > maxPromptLength || content.length > maxPromptLength) {
-      setError(`当前模式请输入不超过 ${maxPromptLength} 个字符的消息。`)
+      setError(`请输入不超过 ${maxPromptLength} 个字符的消息。`)
       return false
     }
     let history: ProtocolItem[]
-    let scope: ToolScope
-    let context: AgentContext
+    let request: ReturnType<typeof resolveAgentRequest>
     try {
-      const request = resolveToolRequest(sourceMode, targetConversationId, sourceProjectSelection)
-      if (!request) {
-        setError('附件已失效，请重新添加文件。')
-        return false
-      }
-      scope = request.scope
-      context = request.context
+      request = resolveAgentRequest(targetConversationId, sourceWorkspace, sourceProjectSelection)
       history = selectToolHistory(sourceMessages, sourceToolRuns, 'live', request.scope)
     } catch (error) {
       setError(error instanceof Error ? error.message : '工具上下文无效，请重新说明问题。')
@@ -281,11 +264,8 @@ export function useChatRequest({
       requestId: crypto.randomUUID(),
       userId: crypto.randomUUID(),
       assistantId: crypto.randomUUID(),
-      mode: sourceMode,
       prompt: content,
-      scope,
-      context,
-      workspaceId: sourceWorkspace?.workspaceId ?? null,
+      context: request.context,
       history,
       trace: [],
       attachments,
@@ -314,7 +294,7 @@ export function useChatRequest({
           userId: active.userId,
           assistantId: active.assistantId,
           mode: 'live',
-          scope,
+          scope: request.scope,
           trace: [],
           items: []
         }
@@ -330,8 +310,7 @@ export function useChatRequest({
       prompt: content,
       sourceMessages: [...sourceMessages],
       sourceToolRuns: [...sourceToolRuns],
-      mode: sourceMode,
-      projectSelection: sourceProjectSelection,
+      snapshotId: sourceProjectSelection?.snapshotId ?? null,
       attachments,
       workspaceId: sourceWorkspace?.workspaceId ?? null
     })
@@ -344,9 +323,7 @@ export function useChatRequest({
     return Boolean(
       source &&
       source.conversationId === conversationId &&
-      source.mode === mode &&
-      (!isProjectChatMode(source.mode) ||
-        source.projectSelection?.snapshotId === projectSelection?.snapshotId) &&
+      source.snapshotId === (projectSelection?.snapshotId ?? null) &&
       source.workspaceId === (workspace?.workspaceId ?? null) &&
       operations.isIdle() &&
       !activeRequest.current
@@ -361,8 +338,7 @@ export function useChatRequest({
       source.sourceMessages,
       source.sourceToolRuns,
       source.conversationId,
-      source.mode,
-      source.projectSelection,
+      projectSelection,
       workspace,
       undefined,
       source.attachments
