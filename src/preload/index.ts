@@ -236,6 +236,15 @@ const api: AppAPI = {
       checkedScope
     )
   },
+  // 外部链接必须经过主进程协议校验后交给系统浏览器。
+  openExternal: async (url) => {
+    if (typeof url !== 'string' || url.length === 0 || url.length > 8192) {
+      return false
+    }
+    const result: unknown = await ipcRenderer.invoke('external:open', url)
+    if (typeof result !== 'boolean') throw new Error('外部链接结果格式不正确')
+    return result
+  },
   // 选择当前窗口与会话绑定的项目快照
   selectProjectFiles: async (conversationId, replaceExisting = false) => {
     if (!isAgentId(conversationId)) throw new Error('会话 ID 格式不正确')

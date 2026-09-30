@@ -10,7 +10,11 @@ import {
   hasChangePreparation,
   cleanupChangePreparation
 } from './agent/change-preparation-ipc'
-import { hasProjectSelection, hasProjectSnapshot, hasWorkspaceSelection } from './agent/project-access'
+import {
+  hasProjectSelection,
+  hasProjectSnapshot,
+  hasWorkspaceSelection
+} from './agent/project-access'
 import { app, shell, BrowserWindow, ipcMain } from 'electron'
 import { join } from 'path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
@@ -41,6 +45,32 @@ import {
   discardTaskWindow,
   registerTaskLifecycle
 } from './agent/task-registry'
+
+function safeExternalUrl(value: unknown): string | null {
+  if (typeof value !== 'string' || value.length === 0 || value.length > 8192) return null
+  try {
+    const url = new URL(value)
+    return (url.protocol === 'http:' || url.protocol === 'https:') &&
+      url.hostname.length > 0 &&
+      url.username.length === 0 &&
+      url.password.length === 0
+      ? url.href
+      : null
+  } catch {
+    return null
+  }
+}
+
+async function openExternalUrl(value: unknown): Promise<boolean> {
+  const url = safeExternalUrl(value)
+  if (!url) return false
+  try {
+    await shell.openExternal(url)
+    return true
+  } catch {
+    return false
+  }
+}
 
 // Handle creating/removing shortcuts on Windows when installing/uninstalling.
 // 创建/删除 Windows 快捷方式
@@ -90,7 +120,7 @@ function createWindow(): void {
   })
 
   mainWindow.webContents.setWindowOpenHandler((details) => {
-    shell.openExternal(details.url)
+    void openExternalUrl(details.url)
     return { action: 'deny' }
   })
 
@@ -197,6 +227,15 @@ app.whenReady().then(() => {
     )
       throw new Error('不支持的保存来源')
     return conversationStore.save(snapshot)
+  })
+  ipcMain.handle('external:open', (event, url: unknown) => {
+    if (
+      !BrowserWindow.fromWebContents(event.sender) ||
+      event.senderFrame !== event.sender.mainFrame
+    ) {
+      throw new Error('不支持的打开来源')
+    }
+    return openExternalUrl(url)
   })
 
   // Create the application window when the app is ready.

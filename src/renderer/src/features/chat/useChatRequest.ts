@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { selectToolHistory } from '../../../../shared/agent-history'
 import type { ProtocolItem, ToolRun } from '../../../../shared/agent-history'
 import type { AgentContext, ProjectSelection, ToolScope, Workspace } from '../../../../shared/project'
-import type { ChatMessage } from '../../../../shared/conversation'
+import type { ChatAttachment, ChatMessage } from '../../../../shared/conversation'
 import type { Conversation } from '../../../../shared/conversation-library'
 import { isTerminalTaskStatus, maxTaskRecords } from '../../../../shared/task'
 import type { OperationControl } from '../conversation/useOperation'
@@ -25,6 +25,7 @@ type ActiveRequest = {
   workspaceId: string | null
   history: ProtocolItem[]
   trace: string[]
+  attachments: ChatAttachment[]
   taskId: string
 }
 type ChatRetrySource = {
@@ -34,6 +35,7 @@ type ChatRetrySource = {
   sourceToolRuns: readonly ToolRun[]
   mode: ChatMode
   projectSelection: ProjectSelection | null
+  attachments: ChatAttachment[]
   workspaceId: string | null
 }
 type UpdateMessages = (
@@ -66,7 +68,8 @@ type ChatRequest = {
     sourceMode?: ChatMode,
     sourceProjectSelection?: ProjectSelection | null,
     sourceWorkspace?: Workspace | null,
-    onAccepted?: (accepted: AcceptedChatRequest) => void
+    onAccepted?: (accepted: AcceptedChatRequest) => void,
+    messageAttachments?: readonly ChatAttachment[]
   ) => boolean
   canRetry: (assistantId: string) => boolean
   retry: (assistantId: string) => boolean
@@ -233,7 +236,8 @@ export function useChatRequest({
     sourceMode: ChatMode = mode,
     sourceProjectSelection: ProjectSelection | null = projectSelection,
     sourceWorkspace: Workspace | null = workspace,
-    onAccepted?: (accepted: AcceptedChatRequest) => void
+    onAccepted?: (accepted: AcceptedChatRequest) => void,
+    messageAttachments: readonly ChatAttachment[] = []
   ): boolean {
     const content = rawContent.trim()
     // `begin` 仍是最终的原子互斥点；这里的同步检查让保存、选文件或生成期间
@@ -267,6 +271,11 @@ export function useChatRequest({
       return false
     }
     if (!begin('generating')) return false
+    const attachments: ChatAttachment[] = messageAttachments.map((file) => ({
+      path: file.path,
+      bytes: file.bytes,
+      lines: file.lines
+    }))
     const active: ActiveRequest = {
       conversationId: targetConversationId,
       requestId: crypto.randomUUID(),
@@ -279,6 +288,7 @@ export function useChatRequest({
       workspaceId: sourceWorkspace?.workspaceId ?? null,
       history,
       trace: [],
+      attachments,
       taskId: crypto.randomUUID()
     }
     activeRequest.current = active
@@ -288,7 +298,13 @@ export function useChatRequest({
       ...previous,
       messages: [
         ...previous.messages,
-        { id: active.userId, role: 'user', content, status: 'pending' },
+        {
+          id: active.userId,
+          role: 'user',
+          content,
+          status: 'pending',
+          ...(active.attachments.length > 0 ? { attachments: active.attachments } : {})
+        },
         { id: active.assistantId, role: 'assistant', content: '', status: 'pending' }
       ],
       toolRuns: [
@@ -316,6 +332,7 @@ export function useChatRequest({
       sourceToolRuns: [...sourceToolRuns],
       mode: sourceMode,
       projectSelection: sourceProjectSelection,
+      attachments,
       workspaceId: sourceWorkspace?.workspaceId ?? null
     })
     void run(active)
@@ -346,7 +363,9 @@ export function useChatRequest({
       source.conversationId,
       source.mode,
       source.projectSelection,
-      workspace
+      workspace,
+      undefined,
+      source.attachments
     )
   }
 

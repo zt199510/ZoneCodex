@@ -460,6 +460,8 @@ export function useConversation(): ConversationController {
       ) {
         return false
       }
+      const editedMessage = active.messages[index]
+      const messageAttachments = editedMessage.attachments ?? pendingSelection?.files ?? []
       const trimmedMessages = active.messages.slice(0, index)
       const keptIds = new Set(trimmedMessages.map((message) => message.id))
       const trimmedToolRuns = active.toolRuns.filter(
@@ -481,11 +483,21 @@ export function useConversation(): ConversationController {
       commandReview.close()
       setCapacityError(null)
       setSnapshot(nextSnapshot)
-      const accepted = request.send(content, trimmedMessages, trimmedToolRuns, undefined, undefined, undefined, workspace.runtime)
+      const accepted = request.send(
+        content,
+        trimmedMessages,
+        trimmedToolRuns,
+        undefined,
+        undefined,
+        undefined,
+        workspace.runtime,
+        undefined,
+        messageAttachments
+      )
       if (accepted) markSent()
       return accepted
     },
-    [active, canSubmit, commandReview, markSent, preparation, request, snapshot, workspace]
+    [active, canSubmit, commandReview, markSent, pendingSelection, preparation, request, snapshot, workspace]
   )
 
   async function openProposal(proposal: MessageChangeProposal): Promise<boolean> {
@@ -728,7 +740,11 @@ export function useConversation(): ConversationController {
       })
     : snapshot.conversations
   const savedActivity = Object.fromEntries(
-    (active?.toolRuns ?? []).map((run) => [run.assistantId, run.trace])
+    (active?.toolRuns ?? []).map((run) => [
+      run.assistantId,
+      // 旧版本 trace 可能包含协议 call_id；展示层清理它，历史协议本身保持不变。
+      run.trace.map((line) => line.replace(/(?:；|;)\s*call_id\s*=\s*[^\s；;]+/giu, ''))
+    ])
   )
   const visibleActivity: ToolActivity = {
     ...savedActivity,
@@ -823,7 +839,8 @@ export function useConversation(): ConversationController {
         workspace.runtime,
         fallbackTitle
           ? (acceptedRequest) => startTitleGeneration(acceptedRequest, fallbackTitle)
-          : undefined
+          : undefined,
+        pendingSelection?.files ?? []
       )
       if (!accepted && !active) setSnapshot(snapshot)
       if (accepted) {

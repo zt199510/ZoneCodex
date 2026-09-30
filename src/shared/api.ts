@@ -84,6 +84,8 @@ export interface AppAPI {
     conversationId?: string,
     workspaceId?: string
   ) => Promise<AgentResult>
+  // 由主进程校验并在系统外部浏览器中打开 http/https 地址。
+  openExternal: (url: string) => Promise<boolean>
   // 选择当前窗口与会话绑定的项目文件快照
   selectProjectFiles: (
     conversationId: string,

@@ -142,7 +142,8 @@ export async function runToolLoop(
     if (typeof output !== 'string') throw new AgentError('工具结果格式不正确，任务已停止')
     if (output.length > 12000) throw new AgentError('工具结果过长，任务已停止')
     toolCount++
-    record(`执行工具：${call.name}；call_id=${call.callId}`)
+    // 展示步骤只保留工具名称；call_id 属于协议内部标识，不应出现在聊天记录中。
+    record(`执行工具：${call.name}`)
     record(`工具结果已生成（${output.length} 字符）`)
     input.push({ type: 'function_call_output', call_id: call.callId, output })
     checkInputSize()

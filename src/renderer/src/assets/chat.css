@@ -306,21 +306,30 @@
   gap: 8px;
   font-size: 11px;
   color: var(--muted);
-  margin-bottom: 10px;
+  margin-bottom: 8px;
 }
 
-.message-author strong {
-  font-weight: 550;
+.message-tool-activity {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  list-style: none;
+  margin: 0 0 14px;
+  padding: 0;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.5;
 }
 
-.assistant-avatar {
-  display: grid;
-  place-items: center;
-  width: 23px;
-  height: 23px;
-  border-radius: 7px;
-  color: #53674c;
-  background: #edf1e8;
+.message-tool-activity li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 18px;
+}
+
+.message-tool-activity svg {
+  flex: 0 0 auto;
 }
 
 .message-content {
@@ -329,6 +338,63 @@
   white-space: pre-wrap;
   overflow-wrap: anywhere;
   user-select: text;
+}
+
+.message-answer {
+  max-width: 760px;
+  line-height: 1.78;
+}
+
+.message-attachments {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  list-style: none;
+  margin: 0 0 10px;
+  padding: 0;
+}
+
+.message-attachment {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  max-width: 100%;
+  padding: 6px 8px;
+  border: 1px solid #dfe4d9;
+  border-radius: 8px;
+  background: #fbfcfa;
+  line-height: 1.35;
+}
+
+.message-attachment-icon {
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+  color: #68775e;
+}
+
+.message-attachment-copy {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.message-attachment-copy strong,
+.message-attachment-copy small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.message-attachment-copy strong {
+  font-size: 10px;
+  font-weight: 550;
+}
+
+.message-attachment-copy small {
+  color: var(--soft-text);
+  font-size: 9px;
 }
 
 .message-actions {
@@ -343,6 +409,10 @@
 
 .message:hover .message-actions,
 .message:focus-within .message-actions {
+  opacity: 1;
+}
+
+.message-actions:focus-within {
   opacity: 1;
 }
 
@@ -402,15 +472,15 @@
 }
 
 .message-action {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  padding: 3px 6px;
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
   border: 0;
   border-radius: 5px;
   background: transparent;
   color: var(--soft-text);
-  font-size: 10px;
 }
 
 .message-action:hover {
@@ -422,10 +492,6 @@
   margin-left: auto;
   max-width: 85%;
   width: fit-content;
-}
-
-.message-user .message-author {
-  justify-content: flex-end;
 }
 
 .message-user .message-content {
@@ -458,5 +524,11 @@
 @keyframes breathe {
   50% {
     opacity: 0.3;
+  }
+}
+
+@media (hover: none) {
+  .message-actions {
+    opacity: 1;
   }
 }

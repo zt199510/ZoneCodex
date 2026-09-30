@@ -8,12 +8,6 @@ import type { ToolActivity } from './useChatRequest'
 import { Icon } from '../../components/ui/Icon'
 import { MarkdownContent } from './MarkdownContent'
 
-const roleLabels: Record<ChatMessage['role'], string> = {
-  user: '你',
-  assistant: 'ZoneCodex',
-  system: '系统'
-}
-
 function InlineMessageEditor({
   initialValue,
   maxLength,
@@ -89,6 +83,38 @@ function InlineMessageEditor({
   )
 }
 
+const toolLabels: Record<string, string> = {
+  get_current_time: '读取当前时间',
+  search_project_text: '搜索项目文本',
+  read_project_file: '读取项目文件',
+  propose_file_change: '准备文件修改建议',
+  propose_command: '准备命令提案'
+}
+
+function ToolActivity({
+  messageId,
+  entries
+}: {
+  messageId: string
+  entries: readonly string[]
+}): React.JSX.Element | null {
+  const tools = entries.flatMap((line, index) => {
+    const name = /^执行工具：([a-z_]+)(?:$|[；;])/.exec(line)?.[1]
+    return name ? [{ name, index }] : []
+  })
+  if (tools.length === 0) return null
+  return (
+    <ul className="message-tool-activity" aria-label="工具活动">
+      {tools.map(({ name, index }) => (
+        <li key={`${messageId}-tool-${index}`}>
+          <Icon name="check" size={13} />
+          <span>{toolLabels[name] ?? name}</span>
+        </li>
+      ))}
+    </ul>
+  )
+}
+
 export function MessageList({
   messages,
   commandProposals = {},
@@ -138,28 +164,16 @@ export function MessageList({
           <li
             className={`message message-${message.role}${editingId === message.id ? ' message-editing' : ''}`}
             key={message.id}
+            aria-label={
+              message.role === 'user'
+                ? '你的消息'
+                : message.role === 'assistant'
+                  ? '助手回复'
+                  : '系统消息'
+            }
           >
-            <div className="message-author">
-              {message.role === 'assistant' && (
-                <span className="assistant-avatar">
-                  <Icon name="code" size={15} />
-                </span>
-              )}
-              <strong>{roleLabels[message.role]}</strong>
-            </div>
-            {activity && (
-              <details
-                open={message.status === 'pending'}
-                style={{ marginBottom: 8, overflowWrap: 'anywhere' }}
-              >
-                <summary>处理记录</summary>
-                <ol>
-                  {activity.map((line, index) => (
-                    <li key={index}>{line}</li>
-                  ))}
-                </ol>
-              </details>
-            )}
+            {message.role === 'system' && <div className="message-author">系统</div>}
+            {activity && <ToolActivity messageId={message.id} entries={activity} />}
             {editingId === message.id && onSendEditedMessage ? (
               <InlineMessageEditor
                 initialValue={message.content}
@@ -169,7 +183,35 @@ export function MessageList({
                 onSend={(content) => onSendEditedMessage(message.id, content)}
               />
             ) : (
-              <div className="message-content">
+              <div
+                className={`message-content${message.role === 'assistant' ? ' message-answer' : ''}`}
+              >
+                {message.role === 'user' &&
+                  message.attachments &&
+                  message.attachments.length > 0 && (
+                    <ul className="message-attachments" aria-label="本轮附件">
+                      {message.attachments.map((attachment) => {
+                        const name = attachment.path.split('/').at(-1) ?? attachment.path
+                        return (
+                          <li
+                            className="message-attachment"
+                            key={`${message.id}-${attachment.path}`}
+                          >
+                            <span className="message-attachment-icon" aria-hidden="true">
+                              <Icon name="file" size={14} />
+                            </span>
+                            <span className="message-attachment-copy">
+                              <strong title={attachment.path}>{name}</strong>
+                              <small title={attachment.path}>{attachment.path}</small>
+                              <small>
+                                {attachment.bytes} 字节 · {attachment.lines} 行
+                              </small>
+                            </span>
+                          </li>
+                        )
+                      })}
+                    </ul>
+                  )}
                 {message.content ? (
                   message.role === 'assistant' ? (
                     <MarkdownContent content={message.content} />
@@ -177,70 +219,13 @@ export function MessageList({
                     message.content
                   )
                 ) : message.status === 'pending' ? (
-                  activity ? (
-                    '正在处理请求…'
-                  ) : (
-                    '正在思考…'
-                  )
-                ) : (
+                  '正在生成回复…'
+                ) : message.status === 'failed' || message.status === 'cancelled' ? null : (
                   '未收到回复文字'
                 )}
               </div>
             )}
-            {(message.content ||
-              (message.role === 'assistant' &&
-                (message.status === 'cancelled' || message.status === 'failed'))) &&
-              message.status !== 'pending' &&
-              editingId !== message.id && (
-              <div className="message-actions" aria-label="消息操作">
-                {message.role === 'user' &&
-                  message.id === lastUserMessageId &&
-                  onSendEditedMessage &&
-                  !editDisabled && (
-                  <button
-                    type="button"
-                    className="message-action"
-                    onClick={() => setEditingId(message.id)}
-                    title="编辑消息"
-                  >
-                    <Icon name="edit" size={13} />
-                    编辑
-                  </button>
-                )}
-                {message.content && onCopyMessage && (
-                  <button
-                    type="button"
-                    className="message-action"
-                    onClick={() => {
-                      void Promise.resolve(onCopyMessage(message)).then((copied) => {
-                        if (copied) {
-                          setCopiedId(message.id)
-                          window.setTimeout(() => setCopiedId(null), 1400)
-                        }
-                      })
-                    }}
-                    title="复制消息"
-                  >
-                    <Icon name="copy" size={13} />
-                    {copiedId === message.id ? '已复制' : '复制'}
-                  </button>
-                )}
-                {message.role === 'assistant' &&
-                  (message.status === 'cancelled' || message.status === 'failed') &&
-                  onRetryAssistant &&
-                  (!canRetryAssistant || canRetryAssistant(message)) && (
-                    <button
-                      type="button"
-                      className="message-action"
-                      onClick={() => onRetryAssistant(message)}
-                      title="重新生成回复"
-                    >
-                      重新生成
-                    </button>
-                  )}
-              </div>
-            )}
-            {message.status === 'pending' && message.role === 'assistant' && (
+            {message.status === 'pending' && message.role === 'assistant' && message.content && (
               <span className="message-note">
                 正在生成
                 <span className="typing-dot" />
@@ -297,6 +282,60 @@ export function MessageList({
                 )}
               </aside>
             )}
+            {(message.content ||
+              (message.role === 'assistant' &&
+                (message.status === 'cancelled' || message.status === 'failed'))) &&
+              message.status !== 'pending' &&
+              editingId !== message.id && (
+                <div className="message-actions" aria-label="消息操作">
+                  {message.role === 'user' &&
+                    message.id === lastUserMessageId &&
+                    onSendEditedMessage &&
+                    !editDisabled && (
+                      <button
+                        type="button"
+                        className="message-action"
+                        onClick={() => setEditingId(message.id)}
+                        title="编辑消息"
+                        aria-label="编辑消息"
+                      >
+                        <Icon name="edit" size={14} />
+                      </button>
+                    )}
+                  {message.content && onCopyMessage && (
+                    <button
+                      type="button"
+                      className="message-action"
+                      onClick={() => {
+                        void Promise.resolve(onCopyMessage(message)).then((copied) => {
+                          if (copied) {
+                            setCopiedId(message.id)
+                            window.setTimeout(() => setCopiedId(null), 1400)
+                          }
+                        })
+                      }}
+                      title={copiedId === message.id ? '已复制' : '复制消息'}
+                      aria-label={copiedId === message.id ? '已复制' : '复制消息'}
+                    >
+                      <Icon name={copiedId === message.id ? 'check' : 'copy'} size={14} />
+                    </button>
+                  )}
+                  {message.role === 'assistant' &&
+                    (message.status === 'cancelled' || message.status === 'failed') &&
+                    onRetryAssistant &&
+                    (!canRetryAssistant || canRetryAssistant(message)) && (
+                      <button
+                        type="button"
+                        className="message-action"
+                        onClick={() => onRetryAssistant(message)}
+                        title="重新生成回复"
+                        aria-label="重新生成回复"
+                      >
+                        <Icon name="restore" size={14} />
+                      </button>
+                    )}
+                </div>
+              )}
           </li>
         )
       })}
