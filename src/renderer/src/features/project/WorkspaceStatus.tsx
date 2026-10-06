@@ -2,12 +2,7 @@ import type { ProjectSelection } from '../../../../shared/project'
 import type { Operation } from '../conversation/useOperation'
 import type { WorkspaceController } from './useWorkspace'
 import type { PermissionsState } from '../../../../shared/execution'
-
-const permissionModeTitles = {
-  default: '请求批准',
-  'auto-approve': '帮我批准',
-  'full-access': '完全访问权限'
-} as const
+import { permissionModeTitles } from '../execution/permissionPresentation'
 
 function currentTaskLabel(waitingApproval: boolean, operation: Operation): string {
   if (waitingApproval) return '等待批准'

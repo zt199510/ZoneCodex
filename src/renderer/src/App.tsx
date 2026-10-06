@@ -3,12 +3,10 @@ import { Sidebar } from './components/layout/Sidebar'
 import { TitleBar } from './components/layout/TitleBar'
 import { ChatWorkspace } from './features/chat/ChatWorkspace'
 import { useConversation } from './features/conversation/useConversation'
-// import { TerminalPanel } from './features/terminal/TerminalPanel'
 
 function App(): React.JSX.Element {
   const conversation = useConversation()
   const [sidebarOpen, setSidebarOpen] = useState(() => window.innerWidth > 760)
-  // const [terminalOpen, setTerminalOpen] = useState(false)
 
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent): void {
@@ -53,18 +51,7 @@ function App(): React.JSX.Element {
         />
       )}
       <div className="workspace-body">
-        <ChatWorkspace
-          conversation={conversation}
-        />
-        {/* {terminalOpen ? (
-          <TerminalPanel onClose={() => setTerminalOpen(false)} />
-        ) : (
-          <div className="terminal-launcher">
-            <button type="button" onClick={() => setTerminalOpen(true)}>
-              打开本地终端
-            </button>
-          </div>
-        )} */}
+        <ChatWorkspace conversation={conversation} />
       </div>
     </div>
   )

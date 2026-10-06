@@ -1,7 +1,7 @@
 import { clearTimeout, setTimeout } from 'node:timers'
 import { parseExecutionApproval } from '../../shared/execution'
 import type { ExecutionApprovalInput } from '../../shared/execution'
-import { createLiveResponse } from '../model/tool-response'
+import { createLiveResponse } from '../model/response-client'
 
 const REVIEW_TIMEOUT_MS = 30_000
 const MAX_REVIEW_BYTES = 128 * 1024

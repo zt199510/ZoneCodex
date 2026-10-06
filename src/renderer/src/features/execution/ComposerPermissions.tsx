@@ -2,18 +2,28 @@ import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from
 import type { KeyboardEvent } from 'react'
 import type { PermissionMode } from '../../../../shared/execution'
 import type { ExecutionPermissionsController } from './useExecutionPermissions'
+import { useAnchoredPosition } from '../../components/ui/useAnchoredPosition'
+import type {
+  AnchorMeasurement,
+  AnchorPositionStyle
+} from '../../components/ui/useAnchoredPosition'
+import { permissionModeOptions, permissionModeTitles } from './permissionPresentation'
 
-const permissionModeTitles: Record<PermissionMode, string> = {
-  default: '请求批准',
-  'auto-approve': '帮我批准',
-  'full-access': '完全访问权限'
+function permissionMenuStyle({
+  anchor,
+  rect,
+  viewportWidth,
+  viewportHeight
+}: AnchorMeasurement): AnchorPositionStyle {
+  const composer = anchor.closest('.composer')?.getBoundingClientRect()
+  const width = Math.min(344, composer?.width ?? 344, viewportWidth - 24)
+  return {
+    width: `${width}px`,
+    left: `${Math.max(12, Math.min(rect.left, viewportWidth - width - 12))}px`,
+    bottom: `${viewportHeight - rect.top + 8}px`,
+    maxHeight: `${Math.max(100, Math.min(360, rect.top - 20))}px`
+  }
 }
-
-const options: Array<{ mode: PermissionMode; description: string }> = [
-  { mode: 'default', description: '编辑外部文件和使用互联网时始终询问' },
-  { mode: 'auto-approve', description: '仅对检测到的风险操作请求批准' },
-  { mode: 'full-access', description: '可不受限制地访问互联网和你电脑上的任何文件' }
-]
 
 function PermissionIcon({ mode }: { mode: PermissionMode }): React.JSX.Element {
   return (
@@ -81,20 +91,21 @@ export function ComposerPermissions({
 
   useEffect(() => close(false), [close, conversationId])
 
+  const getAnchor = useCallback(() => trigger.current, [])
+  const getResizeTargets = useCallback(() => {
+    const composer = trigger.current?.closest('.composer')
+    return [composer, composer?.parentElement?.parentElement]
+  }, [])
+  const position = useAnchoredPosition({
+    active: open,
+    panelRef: panel,
+    getAnchor,
+    getStyle: permissionMenuStyle,
+    getResizeTargets
+  })
+
   useLayoutEffect(() => {
     if (!open) return
-    function position(): void {
-      if (!trigger.current || !panel.current) return
-      const rect = trigger.current.getBoundingClientRect()
-      const composer = trigger.current.closest('.composer')?.getBoundingClientRect()
-      const width = Math.min(344, composer?.width ?? 344, window.innerWidth - 24)
-      Object.assign(panel.current.style, {
-        width: `${width}px`,
-        left: `${Math.max(12, Math.min(rect.left, window.innerWidth - width - 12))}px`,
-        bottom: `${window.innerHeight - rect.top + 8}px`,
-        maxHeight: `${Math.max(100, Math.min(360, rect.top - 20))}px`
-      })
-    }
     position()
     const items = panel.current?.querySelectorAll<HTMLButtonElement>('[role="menuitemradio"]')
     const focused =
@@ -105,19 +116,7 @@ export function ComposerPermissions({
           : panel.current?.querySelector<HTMLButtonElement>('[aria-checked="true"]')
     focused?.focus({ preventScroll: true })
     initialFocus.current = 'selected'
-    const observer = new ResizeObserver(position)
-    const composer = trigger.current?.closest('.composer')
-    if (composer) observer.observe(composer)
-    if (composer?.parentElement?.parentElement)
-      observer.observe(composer.parentElement.parentElement)
-    window.addEventListener('resize', position)
-    window.addEventListener('scroll', position, true)
-    return () => {
-      observer.disconnect()
-      window.removeEventListener('resize', position)
-      window.removeEventListener('scroll', position, true)
-    }
-  }, [open])
+  }, [open, position])
 
   function navigate(event: KeyboardEvent<HTMLDivElement>): void {
     if (event.key === 'Escape') {
@@ -208,7 +207,7 @@ export function ComposerPermissions({
         <p id={titleId} className="permissions-heading">
           应如何批准 ZoneCodex 操作？
         </p>
-        {options.map((option) => (
+        {permissionModeOptions.map((option) => (
           <button
             key={option.mode}
             type="button"

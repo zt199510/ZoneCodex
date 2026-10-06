@@ -1,86 +1,43 @@
-import { useLayoutEffect, useRef, useState } from 'react'
 import { ChatHeader } from '../../components/layout/ChatHeader'
 import type { ConversationController } from '../conversation/useConversation'
-import { ChatInput } from './ChatInput'
 import { ClearConversationDialog } from './ClearConversationDialog'
-import { ExecutionApproval } from './ExecutionApproval'
 import { EmptyState } from './EmptyState'
 import { MessageList } from './MessageList'
+import { ChatComposer } from './ChatComposer'
+import { useChatWorkspace } from './useChatWorkspace'
 import { CloseGuard } from '../conversation/CloseGuard'
-import { ComposerAttachments } from '../project/ComposerAttachments'
-import { ComposerPermissions } from '../project/ComposerPermissions'
-import { AttachmentCards } from '../project/AttachmentCards'
 import { ChangePreviewPanel } from '../review/ChangePreviewPanel'
 import { CommandReviewPanel } from '../review/CommandReviewPanel'
+import { CommitReceipt } from '../review/CommitReceipt'
 import { WorkspaceStatus } from '../project/WorkspaceStatus'
-import type { ChatMessage } from '../../../../shared/conversation'
 
 export function ChatWorkspace({
   conversation
 }: {
   conversation: ConversationController
 }): React.JSX.Element {
-  const [draft, setDraftState] = useState('')
-  const drafts = useRef(new Map<string | null, string>())
-  const currentDraft = useRef('')
-  const currentConversationId = useRef<string | null>(conversation.activeConversationId)
-  const [confirmClear, setConfirmClear] = useState(false)
-  const [executionApprovalPending, setExecutionApprovalPending] = useState(false)
-  const composerRegionRef = useRef<HTMLDivElement>(null)
-  const scrollArea = useRef<HTMLDivElement>(null)
-  const previewTriggerRef = useRef<HTMLButtonElement>(null)
-  const commandTriggerRef = useRef<HTMLButtonElement>(null)
-  const followBottom = useRef(true)
+  const {
+    draft,
+    setDraft,
+    confirmClear,
+    requestClear,
+    cancelClear,
+    clear,
+    executionApprovalPending,
+    setExecutionApprovalPending,
+    composerRegionRef,
+    scrollArea,
+    previewTriggerRef,
+    commandTriggerRef,
+    onScroll,
+    send,
+    suggest,
+    copyMessage,
+    openProposal,
+    openCommand
+  } = useChatWorkspace(conversation)
   const { storage, messages, operation } = conversation
   const errors = [storage.error, conversation.chatError].filter(Boolean)
-
-  useLayoutEffect(() => {
-    const nextConversationId = conversation.activeConversationId
-    const previousConversationId = currentConversationId.current
-    if (nextConversationId === previousConversationId) return
-    drafts.current.set(previousConversationId, currentDraft.current)
-    const nextDraft = drafts.current.get(nextConversationId) ?? ''
-    currentConversationId.current = nextConversationId
-    currentDraft.current = nextDraft
-    followBottom.current = true
-    setConfirmClear(false)
-    setDraftState(nextDraft)
-  }, [conversation.activeConversationId])
-
-  function setDraft(value: string): void {
-    currentDraft.current = value
-    drafts.current.set(currentConversationId.current, value)
-    setDraftState(value)
-  }
-
-  useLayoutEffect(() => {
-    const area = scrollArea.current
-    if (area && followBottom.current) {
-      area.scrollTop = area.scrollHeight
-    }
-  }, [messages, conversation.toolActivity])
-
-  function send(content: string): boolean {
-    const accepted = conversation.send(content)
-    if (accepted) {
-      setDraft('')
-      followBottom.current = true
-    }
-    return accepted
-  }
-  function suggest(prompt: string): void {
-    setDraft(prompt)
-    document.getElementById('chat-input')?.focus()
-  }
-  async function copyMessage(message: ChatMessage): Promise<boolean> {
-    if (!navigator.clipboard) return false
-    try {
-      await navigator.clipboard.writeText(message.content)
-      return true
-    } catch {
-      return false
-    }
-  }
   return (
     <main className="chat-workspace" id="conversation">
       <ChatHeader
@@ -93,7 +50,7 @@ export function ChatWorkspace({
         onSave={() => {
           void storage.save()
         }}
-        onClear={() => setConfirmClear(true)}
+        onClear={requestClear}
       />
       <WorkspaceStatus
         selection={conversation.contextSelection}
@@ -109,14 +66,7 @@ export function ChatWorkspace({
           ))}
         </div>
       )}
-      <div
-        className="chat-scroll-area"
-        ref={scrollArea}
-        onScroll={(event) => {
-          const area = event.currentTarget
-          followBottom.current = area.scrollHeight - area.scrollTop - area.clientHeight < 80
-        }}
-      >
+      <div className="chat-scroll-area" ref={scrollArea} onScroll={onScroll}>
         {conversation.activeConversationId === null ? (
           <div className="empty-state">
             <p>还没有会话，先新建一个。</p>
@@ -137,10 +87,7 @@ export function ChatWorkspace({
             key={conversation.activeConversationId}
             commandProposals={conversation.commandProposals}
             commandSnapshotId={conversation.contextSelection?.snapshotId ?? null}
-            onOpenCommand={(proposal, trigger) => {
-              commandTriggerRef.current = trigger
-              conversation.commandReview.open(proposal)
-            }}
+            onOpenCommand={openCommand}
             messages={messages}
             toolActivity={conversation.toolActivity}
             changeProposals={conversation.changeProposals}
@@ -149,10 +96,7 @@ export function ChatWorkspace({
               conversation.operation !== 'idle' ||
               conversation.changePreview.state.status === 'loading'
             }
-            onOpenProposal={(proposal, trigger) => {
-              previewTriggerRef.current = trigger
-              void conversation.openProposal(proposal)
-            }}
+            onOpenProposal={openProposal}
             onSendEditedMessage={conversation.editAndSend}
             editDisabled={!conversation.canSend}
             editMaxLength={2000}
@@ -180,88 +124,21 @@ export function ChatWorkspace({
           returnFocusRef={commandTriggerRef}
         />
       )}
-      {conversation.commit.receipt && (
-        <section className="commit-receipt" role="status">
-          <p>{conversation.commit.receipt.message}</p>
-          {conversation.commit.receipt.recovery && (
-            <p>
-              备份：{conversation.commit.receipt.recovery.name}{' '}
-              <button
-                type="button"
-                className="quiet-button"
-                onClick={() => void conversation.commit.reveal()}
-              >
-                定位备份
-              </button>
-            </p>
-          )}
-          {conversation.commit.receipt.cleanupWarning && (
-            <p>请检查同目录中的备份与临时文件；未执行自动回滚。</p>
-          )}
-          {conversation.commit.notice && <p>{conversation.commit.notice}</p>}
-          <button type="button" className="quiet-button" onClick={conversation.commit.dismiss}>
-            关闭结果
-          </button>
-        </section>
-      )}
-      <div className="composer-region" ref={composerRegionRef}>
-        <ExecutionApproval
-          anchorRef={composerRegionRef}
-          onPendingChange={setExecutionApprovalPending}
-        />
-        <ChatInput
-          value={draft}
-          onChange={setDraft}
-          onSend={send}
-          onStop={() => {
-            void conversation.stop()
-          }}
-          disabled={!conversation.canSend}
-          isSending={operation === 'generating'}
-          maxLength={2000}
-          tools={
-            <div className="composer-tools">
-              <ComposerAttachments conversation={conversation} />
-              <ComposerPermissions
-                permissions={conversation.executionPermissions}
-                conversationId={conversation.activeConversationId}
-                disabled={
-                  operation !== 'idle' ||
-                  !conversation.canNavigate ||
-                  executionApprovalPending ||
-                  conversation.executionPermissions.loading ||
-                  !conversation.executionPermissions.state
-                }
-              />
-            </div>
-          }
-          attachments={
-            <AttachmentCards
-              selection={conversation.projectSelection}
-              disabled={!conversation.canEdit}
-              onRemove={conversation.removeFile}
-            />
-          }
-        />
-        <p className="composer-footnote">
-          {storage.paused
-            ? '自动保存已暂停，请重试保存后再关闭。'
-            : storage.dirty
-              ? '修改尚未保存，关闭前请等待保存完成。'
-              : '回复可能存在疏漏，请核实重要信息。'}
-        </p>
-      </div>
+      <CommitReceipt commit={conversation.commit} />
+      <ChatComposer
+        conversation={conversation}
+        draft={draft}
+        onChange={setDraft}
+        onSend={send}
+        executionApprovalPending={executionApprovalPending}
+        onPendingChange={setExecutionApprovalPending}
+        anchorRef={composerRegionRef}
+      />
       <ClearConversationDialog
         open={confirmClear}
         disabled={!conversation.canEdit}
-        onCancel={() => setConfirmClear(false)}
-        onConfirm={async () => {
-          if (await conversation.clear()) {
-            setDraft('')
-            followBottom.current = true
-            setConfirmClear(false)
-          }
-        }}
+        onCancel={cancelClear}
+        onConfirm={clear}
       />
       <CloseGuard conversation={conversation} />
     </main>

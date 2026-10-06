@@ -1,5 +1,5 @@
+import { getIpcWindow } from '../ipc-source'
 import { BrowserWindow, ipcMain } from 'electron'
-import type { IpcMainInvokeEvent } from 'electron'
 import { randomUUID } from 'node:crypto'
 import { isAgentId } from '../../shared/agent'
 import {
@@ -7,7 +7,7 @@ import {
   type PreparationRequest,
   type PreparationResult
 } from '../../shared/change-preparation'
-import { captureProjectAccess } from './project-access'
+import { captureProjectAccess } from '../project/attachment-access'
 import { prepareChange, type PreparedContent } from '../tools/change-preparation'
 import type { CommitRequest } from '../../shared/change-commit'
 import type { ProjectSnapshot } from '../tools/project-snapshot'
@@ -78,11 +78,8 @@ export function cleanupChangePreparation(windowId: number, checkId?: string): bo
   return cleared
 }
 
-function ownerOf(event: IpcMainInvokeEvent): BrowserWindow {
-  const owner = BrowserWindow.fromWebContents(event.sender)
-  if (!owner || owner.isDestroyed() || event.senderFrame !== event.sender.mainFrame)
-    throw new Error('不支持的准备来源')
-  return owner
+function ownerOf(event: Electron.IpcMainInvokeEvent): BrowserWindow {
+  return getIpcWindow(event, '不支持的准备来源', { windowMustBeLive: true })
 }
 
 export function registerChangePreparation(isBusy: (windowId: number) => boolean): void {

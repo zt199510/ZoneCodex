@@ -1,81 +1,10 @@
-import {
-  registerChangeCommit,
-  hasChangeCommit,
-  cancelChangeCommit,
-  attachCommitCleanup
-} from './agent/change-commit-ipc'
-import { registerChangePreview } from './agent/change-preview-ipc'
-import {
-  registerChangePreparation,
-  hasChangePreparation,
-  cleanupChangePreparation
-} from './agent/change-preparation-ipc'
-import {
-  hasProjectSelection,
-  hasProjectSnapshot,
-  hasWorkspaceSelection
-} from './agent/project-access'
-import { app, shell, BrowserWindow, ipcMain } from 'electron'
-import { join } from 'path'
+import { app, BrowserWindow } from 'electron'
+import { join } from 'node:path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
-import { createConversationStore } from './storage/conversation-store'
-import { registerWindowControls, observeWindowState } from './window/window-controls'
-import { registerCloseGuard, attachCloseGuard } from './window/close-guard'
-import { registerLocalTerminal, attachTerminalCleanup } from './terminal/local-terminal'
-import { abortProjectJob, hasAgentJob, registerAgentRequest } from './agent/agent-ipc'
-import {
-  cancelConversationTitleJob,
-  registerConversationTitleRequest
-} from './agent/conversation-title-ipc'
-import { attachProjectAccessCleanup, registerProjectAccess } from './agent/project-access'
-import {
-  cleanupCommandPreparation,
-  registerCommandPreparation
-} from './agent/command-preparation-ipc'
-import {
-  cleanupCommandExecution,
-  hasCommandExecution,
-  registerCommandExecution
-} from './agent/command-execution-ipc'
-import { decideCommandPermission } from '../shared/permission-policy'
-import { approveStandaloneCommand, clearExecutionPermissionState } from './agent/execution-context'
-import { clearExecutionApproval, registerExecutionApproval } from './agent/execution-approval'
-import {
-  cleanupTaskWindow,
-  cleanupTasksForSnapshot,
-  discardTaskWindow,
-  registerTaskLifecycle
-} from './agent/task-registry'
+import { attachWindowRuntime, registerAppRuntime } from './app-runtime'
+import { openExternalUrl } from './window/external-links'
 
-function safeExternalUrl(value: unknown): string | null {
-  if (typeof value !== 'string' || value.length === 0 || value.length > 8192) return null
-  try {
-    const url = new URL(value)
-    return (url.protocol === 'http:' || url.protocol === 'https:') &&
-      url.hostname.length > 0 &&
-      url.username.length === 0 &&
-      url.password.length === 0
-      ? url.href
-      : null
-  } catch {
-    return null
-  }
-}
-
-async function openExternalUrl(value: unknown): Promise<boolean> {
-  const url = safeExternalUrl(value)
-  if (!url) return false
-  try {
-    await shell.openExternal(url)
-    return true
-  } catch {
-    return false
-  }
-}
-
-// Handle creating/removing shortcuts on Windows when installing/uninstalling.
-// 创建/删除 Windows 快捷方式
 function createWindow(): void {
   // Create the browser window.
   // 创建浏览器窗口
@@ -95,30 +24,7 @@ function createWindow(): void {
       sandbox: false
     }
   })
-  // 观察窗口状态变化
-  observeWindowState(mainWindow)
-  // 注册关闭确认处理器
-  attachCloseGuard(mainWindow)
-  // 注册终端清理处理器
-  attachTerminalCleanup(mainWindow)
-  // 注册项目快照授权清理处理器
-  attachProjectAccessCleanup(mainWindow)
-  mainWindow.webContents.on('did-start-loading', () => {
-    clearExecutionApproval(mainWindow.id)
-    cancelConversationTitleJob(mainWindow.id)
-    cleanupTaskWindow(mainWindow.id)
-    cleanupCommandExecution(mainWindow.id)
-    cleanupCommandPreparation(mainWindow.id)
-  })
-  mainWindow.on('closed', () => {
-    clearExecutionApproval(mainWindow.id)
-    clearExecutionPermissionState(mainWindow.id)
-    cancelConversationTitleJob(mainWindow.id)
-    discardTaskWindow(mainWindow.id)
-    cleanupCommandExecution(mainWindow.id)
-    cleanupCommandPreparation(mainWindow.id)
-  })
-  attachCommitCleanup(mainWindow)
+  attachWindowRuntime(mainWindow)
   // 注册窗口控件
   mainWindow.on('ready-to-show', () => {
     mainWindow.show()
@@ -152,97 +58,7 @@ app.whenReady().then(() => {
     optimizer.watchWindowShortcuts(window)
   })
 
-  // 注册窗口控件
-  registerWindowControls()
-  registerTaskLifecycle()
-  registerExecutionApproval()
-  // 注册关闭确认处理器
-  registerCloseGuard(hasChangeCommit)
-  // 注册本地终端接口
-  registerLocalTerminal()
-  // 注册真实 Agent 请求接口
-  registerAgentRequest(
-    (id) =>
-      hasChangePreparation(id) ||
-      hasChangeCommit(id) ||
-      hasCommandExecution(id) ||
-      hasWorkspaceSelection(id)
-  )
-  registerConversationTitleRequest()
-  registerCommandPreparation((windowId, source) => {
-    const snapshotId = hasProjectSnapshot(windowId, source.snapshotId) ? source.snapshotId : ''
-    return decideCommandPermission(
-      { template: source.template, reason: '已通过提案解析' },
-      { kind: 'project', snapshotId }
-    ).allowed
-  })
-  registerCommandExecution((windowId, source) => {
-    const snapshotId = hasProjectSnapshot(windowId, source.snapshotId) ? source.snapshotId : ''
-    return decideCommandPermission(
-      { template: source.template, reason: '已通过提案解析' },
-      { kind: 'project', snapshotId }
-    ).allowed
-  }, approveStandaloneCommand)
-  // 注册项目文件选择与撤销接口
-  registerProjectAccess({
-    isAgentJobActive: (id) =>
-      hasAgentJob(id) || hasChangePreparation(id) || hasChangeCommit(id) || hasCommandExecution(id),
-    abortProjectJob,
-    onAccessChanged: (id, snapshotId) => {
-      cleanupChangePreparation(id)
-      cleanupCommandPreparation(id)
-      cleanupCommandExecution(id)
-      cancelChangeCommit(id)
-      if (snapshotId) cleanupTasksForSnapshot(id, snapshotId)
-    }
-  })
-  registerChangePreview(hasChangeCommit)
-  registerChangePreparation(
-    (id) =>
-      hasAgentJob(id) ||
-      hasProjectSelection(id) ||
-      hasWorkspaceSelection(id) ||
-      hasChangeCommit(id) ||
-      hasCommandExecution(id)
-  )
-  registerChangeCommit(
-    (id) =>
-      hasAgentJob(id) ||
-      hasProjectSelection(id) ||
-      hasWorkspaceSelection(id) ||
-      hasChangePreparation(id) ||
-      hasCommandExecution(id)
-  )
-
-  // 创建会话存储器
-  const conversationStore = createConversationStore(app.getPath('userData'))
-  // 注册会话存储接口
-  ipcMain.handle('conversation:load', (event) => {
-    if (
-      !BrowserWindow.fromWebContents(event.sender) ||
-      event.senderFrame !== event.sender.mainFrame
-    )
-      throw new Error('不支持的读取来源')
-    return conversationStore.load()
-  })
-  // 注册会话存储接口
-  ipcMain.handle('conversation:save', (event, snapshot: unknown) => {
-    if (
-      !BrowserWindow.fromWebContents(event.sender) ||
-      event.senderFrame !== event.sender.mainFrame
-    )
-      throw new Error('不支持的保存来源')
-    return conversationStore.save(snapshot)
-  })
-  ipcMain.handle('external:open', (event, url: unknown) => {
-    if (
-      !BrowserWindow.fromWebContents(event.sender) ||
-      event.senderFrame !== event.sender.mainFrame
-    ) {
-      throw new Error('不支持的打开来源')
-    }
-    return openExternalUrl(url)
-  })
+  registerAppRuntime()
 
   // Create the application window when the app is ready.
   createWindow()

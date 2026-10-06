@@ -1,0 +1,109 @@
+.composer-region {
+  width: min(100%, var(--content-width));
+  padding: 16px 24px 20px;
+  margin: 0 auto;
+  flex-shrink: 0;
+  max-height: 65%;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.composer {
+  padding: 16px 17px 12px;
+  border: 1px solid #dfe2d9;
+  background: #fff;
+  border-radius: 16px;
+  box-shadow: 0 3px 16px #232a2410;
+}
+
+.composer:focus-within {
+  border-color: #a6b69e;
+  box-shadow:
+    0 3px 16px #232a2410,
+    0 0 0 2px #a6b69e15;
+}
+
+.composer textarea {
+  display: block;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  resize: none;
+  outline: none;
+  background: transparent;
+  color: var(--text);
+  min-height: 62px;
+  max-height: 180px;
+  font-size: 14px;
+  line-height: 1.8;
+}
+
+.composer textarea::placeholder {
+  color: #a2a69c;
+}
+
+.composer textarea:disabled {
+  cursor: not-allowed;
+}
+
+.composer-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 11px;
+  min-width: 0;
+}
+
+.composer-submit {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 13px;
+}
+
+.keyboard-hint {
+  font-size: 10px;
+  color: #9a9d95;
+  white-space: nowrap;
+}
+
+.send-button {
+  display: grid;
+  place-items: center;
+  background: #303a30;
+  border: 0;
+  color: #fff;
+  width: 33px;
+  height: 33px;
+  border-radius: 10px;
+}
+
+.send-button:hover:not(:disabled) {
+  background: #4a5e46;
+}
+
+.send-button:disabled {
+  background: #eceee8;
+  color: #a6ad9e;
+  opacity: 1;
+}
+
+.composer-footnote {
+  font-size: 10px;
+  color: var(--soft-text);
+  text-align: center;
+  margin-top: 12px;
+}
+
+.composer-tools {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+
+@media (max-width: 760px) {
+  .composer-toolbar .keyboard-hint {
+    display: none;
+  }
+}

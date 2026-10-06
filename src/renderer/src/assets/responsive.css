@@ -103,10 +103,6 @@
   .keyboard-hint {
     display: none;
   }
-
-  .composer-mode {
-    font-size: 9px;
-  }
 }
 
 @media (max-height: 640px) {

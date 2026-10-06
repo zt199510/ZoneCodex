@@ -1,6 +1,6 @@
 import { buildChangePreview } from './change-preview'
-import { createProjectExecutor } from './project-snapshot'
-import type { ProjectSnapshot, ProjectExecutor } from './project-snapshot'
+import { createProjectExecutor, type ProjectExecutor } from './project-file-tools'
+import type { ProjectSnapshot } from './project-snapshot'
 import { parseChangeProposalArgs } from '../../shared/change-proposal'
 
 export const changeProposalTool = {

@@ -1,18 +1,11 @@
+import { AgentError } from '../errors'
+import type { SendResponse } from '../model/response-client'
 import { executeTimeTool } from '../tools/current-time'
 import { parseProtocolTurn } from '../../shared/agent-history'
 import type { ProtocolItem } from '../../shared/agent-history'
 import { parseToolScope, isToolAllowed } from '../../shared/project'
 import type { ToolScope } from '../../shared/project'
 
-export class AgentError extends Error {}
-export type SendResponseOptions = {
-  onTextDelta?: (delta: string) => void
-}
-export type SendResponse = (
-  input: unknown[],
-  signal: AbortSignal,
-  options?: SendResponseOptions
-) => Promise<unknown>
 export type ExecuteTool = (
   name: string,
   argumentsText: string,

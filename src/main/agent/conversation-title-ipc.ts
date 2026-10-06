@@ -1,24 +1,15 @@
-import { BrowserWindow, ipcMain } from 'electron'
-import type { IpcMainInvokeEvent } from 'electron'
+import { getIpcWindow } from '../ipc-source'
+import { ipcMain } from 'electron'
 import {
   parseConversationTitleRequest,
   type ConversationTitleOutcome
 } from '../../shared/conversation-title'
 import { isAgentId } from '../../shared/agent'
-import { AgentError } from './tool-loop'
+import { AgentError } from '../errors'
 import { requestConversationTitle } from '../model/title-response'
 
 type TitleJob = { requestId: string; controller: AbortController }
 const jobs = new Map<number, Map<string, TitleJob>>()
-
-function checkSource(event: IpcMainInvokeEvent): void {
-  if (
-    !BrowserWindow.fromWebContents(event.sender) ||
-    event.senderFrame !== event.sender.mainFrame
-  ) {
-    throw new Error('不支持的标题请求来源')
-  }
-}
 
 export function hasConversationTitleJob(windowId: number): boolean {
   return (jobs.get(windowId)?.size ?? 0) > 0
@@ -35,8 +26,7 @@ export function registerConversationTitleRequest(): void {
   ipcMain.handle(
     'conversation-title:start',
     async (event, rawRequest: unknown): Promise<ConversationTitleOutcome> => {
-      checkSource(event)
-      const windowId = BrowserWindow.fromWebContents(event.sender)!.id
+      const windowId = getIpcWindow(event, '不支持的标题请求来源').id
       const request = parseConversationTitleRequest(rawRequest)
       if (!request) {
         return { status: 'error', requestId: 'invalid', error: '标题请求参数无效' }
@@ -87,9 +77,8 @@ export function registerConversationTitleRequest(): void {
     }
   )
   ipcMain.handle('conversation-title:cancel', (event, requestId: unknown): boolean => {
-    checkSource(event)
+    const windowId = getIpcWindow(event, '不支持的标题请求来源').id
     if (!isAgentId(requestId)) return false
-    const windowId = BrowserWindow.fromWebContents(event.sender)!.id
     const windowJobs = jobs.get(windowId)
     const job = windowJobs?.get(requestId)
     if (!job) return false

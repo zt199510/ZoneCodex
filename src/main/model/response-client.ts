@@ -1,6 +1,14 @@
-import { AgentError } from '../agent/tool-loop'
-import type { SendResponse } from '../agent/tool-loop'
+import { AgentError } from '../errors'
 import { readResponseStreamResult, StreamError } from './sse'
+
+export type SendResponseOptions = {
+  onTextDelta?: (delta: string) => void
+}
+export type SendResponse = (
+  input: unknown[],
+  signal: AbortSignal,
+  options?: SendResponseOptions
+) => Promise<unknown>
 
 export function createLiveResponse(tools: readonly unknown[], instructions: string): SendResponse {
   return async (input, signal, options = {}) => {

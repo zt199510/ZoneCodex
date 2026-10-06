@@ -414,8 +414,115 @@ async function main() {
       ]
     )
 
+    // Exercise real subprocess boundaries after both command entries share their runner.
+    let effects = 0
+    let commandAccess = true
+    let onCommandEffect = () => {}
+    const executeCommand = createWorkspaceActionExecutor(
+      workspace,
+      () => commandAccess,
+      async () => true,
+      {
+        onEffect: () => {
+          effects++
+          onCommandEffect()
+        }
+      }
+    )
+    const nodeCommand = async (code, commandSignal = signal) =>
+      JSON.parse(
+        await call(
+          executeCommand,
+          'run_workspace_command',
+          { program: process.execPath, args: ['-e', code], cwd: null },
+          commandSignal
+        )
+      )
+    const normalCommand = await nodeCommand(
+      "process.stdout.write('output'); process.stderr.write('diagnostic')"
+    )
+    assert.equal(normalCommand.status, 'completed')
+    assert.equal(normalCommand.exitCode, 0)
+    assert.equal(normalCommand.stdout, 'output')
+    assert.equal(normalCommand.stderr, 'diagnostic')
+    assert.equal(normalCommand.truncated, false)
+    const failedCommand = await nodeCommand('process.exitCode = 7')
+    assert.equal(failedCommand.status, 'failed')
+    assert.equal(failedCommand.exitCode, 7)
+    const clippedCommand = await nodeCommand("process.stdout.write('x'.repeat(1900))")
+    assert.equal(clippedCommand.status, 'completed')
+    assert.equal(Buffer.byteLength(clippedCommand.stdout), 1800)
+    assert.equal(clippedCommand.truncated, true)
+    const environmentKey = 'ZONECODEX_COMMAND_CHECK'
+    const previousEnvironment = process.env[environmentKey]
+    try {
+      process.env[environmentKey] = 'must-not-reach-general-tool'
+      const environmentCommand = await nodeCommand(
+        "process.stdout.write(process.env.ZONECODEX_COMMAND_CHECK || 'absent')"
+      )
+      assert.equal(environmentCommand.stdout, 'absent')
+    } finally {
+      if (previousEnvironment === undefined) delete process.env[environmentKey]
+      else process.env[environmentKey] = previousEnvironment
+    }
+    const beforeMissing = effects
+    const missingCommand = JSON.parse(
+      await call(
+        executeCommand,
+        'run_workspace_command',
+        {
+          program: path.join(workspace, 'nonexistent-program'),
+          args: [],
+          cwd: null
+        },
+        signal
+      )
+    )
+    assert.equal(missingCommand.status, 'error')
+    assert.equal(effects, beforeMissing + 1, 'spawn failure is still a side-effect attempt')
+    const commandAbort = new AbortController()
+    const abortReason = new Error('cancel-command-check')
+    onCommandEffect = () => setTimeout(() => commandAbort.abort(abortReason), 100)
+    await assert.rejects(
+      nodeCommand('setInterval(() => {}, 1000)', commandAbort.signal),
+      (error) => error === abortReason
+    )
+    onCommandEffect = () =>
+      setTimeout(() => {
+        commandAccess = false
+      }, 100)
+    const revokedCommand = await nodeCommand('setInterval(() => {}, 1000)')
+    assert.equal(revokedCommand.status, 'error')
+    assert.match(revokedCommand.error, /进程是否退出未确认/)
+    const beforeDenied = effects
+    assert.equal((await nodeCommand("process.stdout.write('should-not-run')")).status, 'error')
+    assert.equal(effects, beforeDenied, 'revoked access cannot launch another process')
+    commandAccess = true
+    onCommandEffect = () => {}
+    const { startCommandProcess } = loadBundled('src/main/execution/command-runner.ts')
+    let terminalEvents = 0
+    await new Promise((resolve, reject) => {
+      startCommandProcess({
+        program: process.execPath,
+        args: ['-e', 'setInterval(() => {}, 1000)'],
+        cwd: workspace,
+        outputMode: 'bytes',
+        outputLimit: 1800,
+        timeoutMs: 25,
+        onError: reject,
+        onClose: () => reject(new Error('timeout command closed before its timer')),
+        onTimeout: (process) => {
+          terminalEvents++
+          process.stop()
+          resolve()
+        }
+      })
+    })
+    await new Promise((resolve) => setTimeout(resolve, 50))
+    assert.equal(terminalEvents, 1, 'timeout requests termination once and suppresses a late close')
+
     console.log(
-      'Workspace tools passed: read/search/list, boundary, authorization, scope, loop, create, hash-checked edit, denied command.'
+      'Workspace tools passed: read/search/list, boundary, authorization, scope, loop, create, hash-checked edit; real command exit/output/truncation/environment/spawn failure/cancellation/revocation/timeout.'
     )
   } finally {
     const cleanupRoot = path.resolve(temporaryRoot)

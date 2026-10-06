@@ -11,7 +11,7 @@ export type ExecutionPermissionsController = {
   select: (mode: PermissionMode) => Promise<boolean>
 }
 
-/** The window has one permission setting; changing chats does not create another copy. */
+/** One permission setting belongs to the window; changing chats keeps the same state. */
 export function useExecutionPermissions(
   operations: OperationControl,
   canChange: () => boolean

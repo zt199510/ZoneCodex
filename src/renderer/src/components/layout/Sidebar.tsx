@@ -264,7 +264,7 @@ export function Sidebar({
             使用说明
           </summary>
           <p>各会话独立保留消息，生成结束后自动保存。</p>
-          <p>切换会清空未发送草稿；生成或保存期间请等待。</p>
+          <p>未发送草稿按会话暂存，刷新后清空；生成或保存期间请等待。</p>
         </details>
         <div className="local-profile">
           <span className="profile-avatar">Z</span>

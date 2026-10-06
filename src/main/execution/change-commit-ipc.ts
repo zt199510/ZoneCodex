@@ -1,9 +1,9 @@
+import { getIpcWindow } from '../ipc-source'
 import { BrowserWindow, ipcMain, shell } from 'electron'
-import type { IpcMainInvokeEvent } from 'electron'
 import { basename } from 'node:path'
 import { isAgentId } from '../../shared/agent'
 import { parseCommitRequest, type CommitResult } from '../../shared/change-commit'
-import { captureProjectAccess, revokeProjectFiles } from './project-access'
+import { captureProjectAccess, revokeProjectFiles } from '../project/attachment-access'
 import { claimPreparation, preparationLockKeys } from './change-preparation-ipc'
 import {
   commitChange,
@@ -42,11 +42,8 @@ export function attachCommitCleanup(window: BrowserWindow): void {
   window.webContents.once('destroyed', cleanup)
   window.once('closed', cleanup)
 }
-function ownerOf(event: IpcMainInvokeEvent): BrowserWindow {
-  const owner = BrowserWindow.fromWebContents(event.sender)
-  if (!owner || owner.isDestroyed() || event.senderFrame !== event.sender.mainFrame)
-    throw new Error('不支持的提交来源')
-  return owner
+function ownerOf(event: Electron.IpcMainInvokeEvent): BrowserWindow {
+  return getIpcWindow(event, '不支持的提交来源', { windowMustBeLive: true })
 }
 export function registerChangeCommit(isBusy: (windowId: number) => boolean): void {
   ipcMain.handle('commit:cancel', (event, id: unknown) => {

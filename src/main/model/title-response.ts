@@ -1,5 +1,5 @@
-import { AgentError } from '../agent/tool-loop'
-import { createLiveResponse } from './tool-response'
+import { AgentError } from '../errors'
+import { createLiveResponse } from './response-client'
 import {
   parseConversationTitleResult,
   type ConversationTitleRequest,

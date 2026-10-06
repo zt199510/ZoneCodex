@@ -1,5 +1,24 @@
-import { useEffect, useId, useLayoutEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from 'react'
 import type { ConversationController } from '../conversation/useConversation'
+import { useAnchoredPosition } from '../../components/ui/useAnchoredPosition'
+import type {
+  AnchorMeasurement,
+  AnchorPositionStyle
+} from '../../components/ui/useAnchoredPosition'
+
+function attachmentMenuStyle({
+  rect,
+  viewportWidth,
+  viewportHeight
+}: AnchorMeasurement): AnchorPositionStyle {
+  const width = Math.min(rect.width, viewportWidth - 24)
+  return {
+    width: `${width}px`,
+    left: `${Math.max(12, Math.min(rect.left, viewportWidth - width - 12))}px`,
+    bottom: `${viewportHeight - rect.top + 8}px`,
+    maxHeight: `${Math.max(80, Math.min(320, rect.top - 52))}px`
+  }
+}
 
 export function ComposerAttachments({
   conversation: c
@@ -15,47 +34,38 @@ export function ComposerAttachments({
   const count = selection?.files.length ?? 0
   const busy = c.operation === 'selecting'
 
+  const getAnchor = useCallback(
+    () => trigger.current?.closest<HTMLElement>('.composer') ?? null,
+    []
+  )
+  const getResizeTargets = useCallback(() => {
+    const composer = getAnchor()
+    return [composer, composer?.parentElement?.parentElement]
+  }, [getAnchor])
+  const position = useAnchoredPosition({
+    active: open,
+    panelRef: panel,
+    getAnchor,
+    getStyle: attachmentMenuStyle,
+    getResizeTargets
+  })
+
   useLayoutEffect(() => {
     if (!open) return
-    function position(): void {
-      if (!trigger.current || !panel.current) return
-      const composer = trigger.current.closest('.composer')
-      if (!composer) return
-      const rect = composer.getBoundingClientRect()
-      const width = Math.min(rect.width, window.innerWidth - 24)
-      Object.assign(panel.current.style, {
-        width: `${width}px`,
-        left: `${Math.max(12, Math.min(rect.left, window.innerWidth - width - 12))}px`,
-        bottom: `${window.innerHeight - rect.top + 8}px`,
-        maxHeight: `${Math.max(80, Math.min(320, rect.top - 52))}px`
-      })
-    }
     position()
-    const observer = new ResizeObserver(position)
-    const composer = trigger.current?.closest('.composer')
-    if (composer) observer.observe(composer)
-    if (composer?.parentElement?.parentElement)
-      observer.observe(composer.parentElement.parentElement)
-    window.addEventListener('resize', position)
-    window.addEventListener('scroll', position, true)
-    return () => {
-      observer.disconnect()
-      window.removeEventListener('resize', position)
-      window.removeEventListener('scroll', position, true)
-    }
-  }, [open, count, c.chatError])
+  }, [open, count, c.chatError, position])
 
-  function close(restoreFocus = true): void {
+  const close = useCallback((restoreFocus = true): void => {
     // Native popover dismissal does not submit the surrounding composer form.
     // Restore focus only for dismissals initiated from inside the panel; an
     // outside click should leave focus on the element the user clicked.
     restoreFocusOnClose.current = restoreFocus
     panel.current?.hidePopover()
-  }
+  }, [])
 
   useEffect(() => {
-    if (open) close(false)
-  }, [c.activeConversationId])
+    close(false)
+  }, [c.activeConversationId, close])
 
   return (
     <div className="composer-attachments">

@@ -28,7 +28,7 @@ function toolNames(config) {
 
 async function main() {
   const { buildAgentRequest } = loadBundled('src/main/agent/agent-instructions.ts')
-  const { createLiveResponse } = loadBundled('src/main/model/tool-response.ts')
+  const { createLiveResponse } = loadBundled('src/main/model/response-client.ts')
   const { parseAgentRequestContext, toolScopeForAgentRequest } =
     loadBundled('src/shared/project.ts')
   const { parseToolHistory, selectToolHistory } = loadBundled('src/shared/agent-history.ts')

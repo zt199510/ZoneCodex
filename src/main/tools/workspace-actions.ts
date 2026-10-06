@@ -1,11 +1,11 @@
-import { spawn } from 'node:child_process'
+import { startCommandProcess, type CommandOutput } from '../execution/command-runner'
 import { createHash } from 'node:crypto'
 import { lstat, open, realpath } from 'node:fs/promises'
 import { basename, dirname, isAbsolute, join, parse, relative, sep, win32 } from 'node:path'
 import { commitChange } from './change-commit'
 import { prepareChange } from './change-preparation'
 import { createProjectSnapshot } from './project-snapshot'
-import type { ProjectExecutor } from './project-snapshot'
+import type { ProjectExecutor } from './project-file-tools'
 import { canonicalLocalPath, insideLocalPath, localPathParts, sameLocalPath } from './local-path'
 
 export type WorkspaceActionOptions = {
@@ -283,103 +283,78 @@ async function runCommand(
     }
   }
   if (!hasAccess()) return result('error', { error: '工作区授权已失效' })
+  const capturedOutput = (output: CommandOutput): Record<string, unknown> => ({
+    cwd,
+    stdout: output.stdout,
+    stderr: output.stderr,
+    truncated: output.truncated
+  })
   return new Promise<string>((resolveResult, rejectResult) => {
-    let child: ReturnType<typeof spawn>
     try {
-      signal.throwIfAborted()
-      if (!hasAccess()) throw new Error('运行权限已失效')
-      onEffect?.()
-      child = spawn(program, args, {
+      startCommandProcess({
+        program,
+        args,
         cwd,
-        shell: false,
-        windowsHide: true,
-        env: commandEnvironment(),
-        stdio: ['ignore', 'pipe', 'pipe']
+        environment: commandEnvironment(),
+        outputLimit: MAX_OUTPUT_BYTES,
+        outputMode: 'bytes',
+        timeoutMs: COMMAND_TIMEOUT_MS,
+        beforeSpawn: () => {
+          signal.throwIfAborted()
+          if (!hasAccess()) throw new Error('运行权限已失效')
+          onEffect?.()
+        },
+        signal,
+        access: { check: hasAccess, intervalMs: 250 },
+        onError: (error, output) => {
+          resolveResult(
+            result('error', { error: error.message.slice(0, 500), ...capturedOutput(output) })
+          )
+        },
+        onClose: (code, closedSignal, output) => {
+          if (!hasAccess()) {
+            resolveResult(result('error', { error: '工作区授权已失效', ...capturedOutput(output) }))
+            return
+          }
+          resolveResult(
+            result(code === 0 ? 'completed' : 'failed', {
+              exitCode: code,
+              signal: closedSignal,
+              ...capturedOutput(output)
+            })
+          )
+        },
+        onTimeout: (process, output) => {
+          process.stop()
+          resolveResult(
+            result('timed_out', {
+              error: '命令执行超过 30 秒，已请求终止；进程是否退出未确认',
+              ...capturedOutput(output)
+            })
+          )
+        },
+        onAccessLost: (process, output) => {
+          process.stop()
+          resolveResult(
+            result('error', {
+              error: '工作区授权已失效，已请求终止命令；进程是否退出未确认',
+              ...capturedOutput(output)
+            })
+          )
+        },
+        onAbort: (process) => {
+          process.stop()
+          rejectResult(signal.reason ?? new Error('命令已取消'))
+        }
       })
     } catch (error) {
       resolveResult(
-        result('error', { cwd, error: error instanceof Error ? error.message : '命令启动失败' })
-      )
-      return
-    }
-
-    const stdout: Buffer[] = []
-    const stderr: Buffer[] = []
-    let bytes = 0
-    let truncated = false
-    let finished = false
-
-    function collect(target: Buffer[], chunk: Buffer | string): void {
-      const value = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)
-      const remaining = MAX_OUTPUT_BYTES - bytes
-      if (remaining > 0) target.push(value.subarray(0, remaining))
-      bytes += Math.min(remaining, value.length)
-      if (value.length > remaining) truncated = true
-    }
-
-    function capturedOutput(): { cwd: string; stdout: string; stderr: string; truncated: boolean } {
-      return {
-        cwd,
-        stdout: Buffer.concat(stdout).toString('utf8'),
-        stderr: Buffer.concat(stderr).toString('utf8'),
-        truncated
-      }
-    }
-
-    function complete(output: string, aborted = false): void {
-      if (finished) return
-      finished = true
-      clearTimeout(timer)
-      clearInterval(accessTimer)
-      signal.removeEventListener('abort', abort)
-      if (aborted) rejectResult(signal.reason ?? new Error('命令已取消'))
-      else resolveResult(output)
-    }
-
-    function abort(): void {
-      child.kill()
-      complete('', true)
-    }
-
-    child.stdout?.on('data', (chunk: Buffer | string) => collect(stdout, chunk))
-    child.stderr?.on('data', (chunk: Buffer | string) => collect(stderr, chunk))
-    child.once('error', (error) => {
-      complete(result('error', { error: error.message.slice(0, 500), ...capturedOutput() }))
-    })
-    child.once('close', (code, closedSignal) => {
-      if (!hasAccess()) {
-        complete(result('error', { error: '工作区授权已失效', ...capturedOutput() }))
-        return
-      }
-      complete(
-        result(code === 0 ? 'completed' : 'failed', {
-          exitCode: code,
-          signal: closedSignal,
-          ...capturedOutput()
-        })
-      )
-    })
-    const timer = setTimeout(() => {
-      child.kill()
-      complete(
-        result('timed_out', {
-          error: '命令执行超过 30 秒，已请求终止；进程是否退出未确认',
-          ...capturedOutput()
-        })
-      )
-    }, COMMAND_TIMEOUT_MS)
-    const accessTimer = setInterval(() => {
-      if (hasAccess()) return
-      child.kill()
-      complete(
         result('error', {
-          error: '工作区授权已失效，已请求终止命令；进程是否退出未确认',
-          ...capturedOutput()
+          cwd,
+          error: error instanceof Error ? error.message : '命令启动失败'
         })
       )
-    }, 250)
-    signal.addEventListener('abort', abort, { once: true })
-    if (signal.aborted) abort()
+    }
   })
 }
 

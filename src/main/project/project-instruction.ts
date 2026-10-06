@@ -15,11 +15,13 @@ export async function readProjectInstruction(root: string): Promise<WorkspaceIns
   if (typeof root !== 'string' || !root.trim()) return { status: 'error', error: '工作区目录无效' }
   try {
     const canonicalRoot = await realpath(resolve(root))
-    if (!(await stat(canonicalRoot)).isDirectory()) return { status: 'error', error: '工作区目录无效' }
+    if (!(await stat(canonicalRoot)).isDirectory())
+      return { status: 'error', error: '工作区目录无效' }
     const candidate = join(canonicalRoot, instructionName)
     const info = await lstat(candidate).catch(() => null)
     if (!info) return { status: 'absent' }
-    if (!info.isFile() || info.nlink !== 1) return { status: 'error', error: 'AGENTS.md 不是普通文件' }
+    if (!info.isFile() || info.nlink !== 1)
+      return { status: 'error', error: 'AGENTS.md 不是普通文件' }
     const candidateReal = await realpath(candidate)
     if (candidateReal !== candidate) return { status: 'error', error: 'AGENTS.md 不得是符号链接' }
     const bytes = await readFile(candidate)

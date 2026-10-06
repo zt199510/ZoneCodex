@@ -2,8 +2,8 @@ import { lstat, open, opendir, realpath } from 'node:fs/promises'
 import { createHash } from 'node:crypto'
 import { isAbsolute, join, relative, resolve, sep } from 'node:path'
 import type { Stats } from 'node:fs'
-import type { ProjectExecutor } from './project-snapshot'
-import { AgentError } from '../agent/tool-loop'
+import type { ProjectExecutor } from './project-file-tools'
+import { AgentError } from '../errors'
 import { canonicalLocalPath, insideLocalPath, localPathParts } from './local-path'
 
 export type WorkspaceReadOptions = { isPathAllowed?: (target: string) => boolean }

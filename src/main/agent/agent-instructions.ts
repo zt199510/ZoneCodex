@@ -1,6 +1,6 @@
 import type { ProjectSnapshot } from '../tools/project-snapshot'
 import { timeTool } from '../tools/current-time'
-import { projectTools } from '../tools/project-snapshot'
+import { projectTools } from '../tools/project-file-tools'
 import { changeProposalTool } from '../tools/change-proposal'
 import { commandProposalTool } from '../tools/command-proposal'
 import { workspaceReadTools } from '../tools/workspace-files'

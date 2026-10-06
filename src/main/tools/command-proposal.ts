@@ -1,5 +1,5 @@
 import { parseCommandJson, parseCommandProposalArgs } from '../../shared/command-proposal'
-import type { ProjectExecutor } from './project-snapshot'
+import type { ProjectExecutor } from './project-file-tools'
 
 export const commandProposalTool = {
   type: 'function',

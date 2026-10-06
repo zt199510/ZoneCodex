@@ -1,3 +1,4 @@
+import { getIpcWindow } from '../ipc-source'
 import { BrowserWindow, dialog, ipcMain } from 'electron'
 import { randomUUID } from 'node:crypto'
 import {
@@ -33,10 +34,7 @@ const err = (error: string): { status: 'error'; error: string } => ({
   error: error.slice(0, 500)
 })
 function owner(event: Electron.IpcMainInvokeEvent): BrowserWindow {
-  const w = BrowserWindow.fromWebContents(event.sender)
-  if (!w || w.isDestroyed() || event.senderFrame !== event.sender.mainFrame)
-    throw new Error('不支持的目录操作来源')
-  return w
+  return getIpcWindow(event, '不支持的目录操作来源', { windowMustBeLive: true })
 }
 function validSource(source: CommandSource): boolean {
   return !!parseCommandSource(source)

@@ -3,32 +3,12 @@ import { createHash } from 'node:crypto'
 import { lstat, mkdir, realpath } from 'node:fs/promises'
 import { isAbsolute, join, relative, resolve, sep } from 'node:path'
 import type { AgentRequestContext } from '../../shared/project'
-import type { ExecutionInfo, PermissionMode, PermissionsState } from '../../shared/execution'
+import type { ExecutionInfo } from '../../shared/execution'
 import { decideLocalPermission, type LocalPermissionDecision } from '../../shared/permission-policy'
-import { captureProjectAccess, captureWorkspaceAccess } from './project-access'
+import { captureProjectAccess } from '../project/attachment-access'
+import { captureWorkspaceAccess } from '../project/workspace-access'
 import { isAgentId } from '../../shared/agent'
-import { requestExecutionApproval } from './execution-approval'
-
-const settings = new Map<number, PermissionsState>()
-
-export function getExecutionPermissionState(windowId: number): PermissionsState {
-  return { ...(settings.get(windowId) ?? { mode: 'default', revision: 0 }) }
-}
-
-export function setExecutionPermissionMode(
-  windowId: number,
-  mode: PermissionMode
-): PermissionsState {
-  const current = getExecutionPermissionState(windowId)
-  if (current.mode !== mode) {
-    settings.set(windowId, { mode, revision: current.revision + 1 })
-  }
-  return getExecutionPermissionState(windowId)
-}
-
-export function clearExecutionPermissionState(windowId: number): void {
-  settings.delete(windowId)
-}
+import { getExecutionPermissionState } from './permission-state'
 
 export function pathWithin(root: string, candidate: string): boolean {
   const offset = relative(resolve(root), resolve(candidate))
@@ -139,38 +119,4 @@ export function localPermission(
     withinWritableRoots: execution.writableRoots.some((root) => pathWithin(root, target)),
     sandboxAvailable: false
   })
-}
-
-/** Legacy npm execution shares the same setting, without treating old preparation as approval. */
-export async function approveStandaloneCommand(
-  windowId: number,
-  request: {
-    requestId: string
-    conversationId: string
-    cwd: string
-    program: string
-    args: string[]
-  },
-  signal: AbortSignal
-): Promise<boolean> {
-  signal.throwIfAborted()
-  const state = getExecutionPermissionState(windowId)
-  const decision = decideLocalPermission({
-    operation: 'command',
-    mode: state.mode,
-    withinWritableRoots: true,
-    sandboxAvailable: false
-  })
-  if (decision === 'allow') return true
-  if (decision === 'deny') return false
-  // Legacy proposals have no verified user request for risk review. Missing
-  // context follows the same manual-approval fallback as an unknown verdict.
-  const approved = await requestExecutionApproval(windowId, { ...request, kind: 'command' }, signal)
-  const current = getExecutionPermissionState(windowId)
-  return (
-    !signal.aborted &&
-    current.mode === state.mode &&
-    current.revision === state.revision &&
-    approved
-  )
 }

@@ -1,5 +1,6 @@
+import { getIpcWindow } from '../ipc-source'
 import { BrowserWindow, ipcMain } from 'electron'
-import type { IpcMainInvokeEvent, WebContents, WebFrameMain } from 'electron'
+import type { WebContents, WebFrameMain } from 'electron'
 import { randomUUID } from 'node:crypto'
 import { parseExecutionApproval } from '../../shared/execution'
 import type { ExecutionApproval, ExecutionApprovalInput } from '../../shared/execution'
@@ -20,17 +21,8 @@ function cloneApproval(approval: ExecutionApproval): ExecutionApproval {
   return approval.kind === 'command' ? { ...approval, args: [...approval.args] } : { ...approval }
 }
 
-function ownerOf(event: IpcMainInvokeEvent): BrowserWindow {
-  const owner = BrowserWindow.fromWebContents(event.sender)
-  if (
-    !owner ||
-    owner.isDestroyed() ||
-    event.sender.isDestroyed() ||
-    event.senderFrame !== event.sender.mainFrame
-  ) {
-    throw new Error('不支持的审批来源')
-  }
-  return owner
+function ownerOf(event: Electron.IpcMainInvokeEvent): BrowserWindow {
+  return getIpcWindow(event, '不支持的审批来源', { windowMustBeLive: true, senderMustBeLive: true })
 }
 
 function emit(item: PendingApproval, approval: ExecutionApproval | null): boolean {

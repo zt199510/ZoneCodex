@@ -11,7 +11,7 @@ import {
   type ExecutionInfo,
   type PermissionsState
 } from '../../../../shared/execution'
-import { isTerminalTaskStatus, maxTaskRecords } from '../../../../shared/task'
+import { applyConversationTaskEvent } from '../conversation/useConversationTasks'
 import type { OperationControl } from '../conversation/useOperation'
 import { resolveAgentRequest } from './agent-request'
 
@@ -148,28 +148,11 @@ export function useChatRequest({
     const offTask = window.api.onTaskState((record) => {
       updateConversation(record.conversationId, (previous) => {
         const active = activeRequest.current
-        const belongsToActiveRequest =
-          active?.taskId === record.taskId && active.conversationId === record.conversationId
-        const existing = previous.tasks.find((task) => task.taskId === record.taskId)
-        const belongsToKnownTask = existing !== undefined
-        // Ignore late events for tasks already removed from this conversation.
-        if (!belongsToActiveRequest && !belongsToKnownTask) return previous
-        // Reconciliation can close an orphaned task as `interrupted` while an
-        // event queued before refresh is still in flight. Persisted terminal
-        // records are immutable from the renderer's point of view; accepting a
-        // stale running event here would reopen work that no longer has a
-        // runtime handle.
-        if (existing && isTerminalTaskStatus(existing.status)) {
-          return previous
-        }
-        const known = previous.tasks.some((task) => task.taskId === record.taskId)
-        const tasks = known
-          ? previous.tasks.map((task) => (task.taskId === record.taskId ? record : task))
-          : [...previous.tasks, record].slice(-maxTaskRecords)
-        return {
-          ...previous,
-          tasks
-        }
+        return applyConversationTaskEvent(
+          previous,
+          record,
+          active?.conversationId === record.conversationId ? active.taskId : null
+        )
       })
     })
     subscribed.current = true

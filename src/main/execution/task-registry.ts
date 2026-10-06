@@ -1,3 +1,4 @@
+import { getIpcWindow } from '../ipc-source'
 import { BrowserWindow, ipcMain } from 'electron'
 import { randomUUID } from 'node:crypto'
 import { isTerminalTaskStatus, maxTaskRecords, parseTaskRecord } from '../../shared/task'
@@ -241,17 +242,11 @@ export function discardTaskWindow(windowId: number): void {
 
 export function registerTaskLifecycle(): void {
   ipcMain.handle('task:list', (event): TaskRecord[] => {
-    const owner = BrowserWindow.fromWebContents(event.sender)
-    if (!owner || owner.isDestroyed() || event.senderFrame !== event.sender.mainFrame) {
-      throw new Error('不支持的任务来源')
-    }
+    const owner = getIpcWindow(event, '不支持的任务来源', { windowMustBeLive: true })
     return listTasks(owner.id)
   })
   ipcMain.handle('task:cancel', (event, taskId: unknown): boolean => {
-    const owner = BrowserWindow.fromWebContents(event.sender)
-    if (!owner || owner.isDestroyed() || event.senderFrame !== event.sender.mainFrame) {
-      throw new Error('不支持的任务来源')
-    }
+    const owner = getIpcWindow(event, '不支持的任务来源', { windowMustBeLive: true })
     return typeof taskId === 'string' && cancelTask(owner.id, taskId)
   })
 }

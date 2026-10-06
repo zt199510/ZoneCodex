@@ -1,9 +1,3 @@
-.terminal-launcher {
-  flex: 0 0 auto;
-  padding: 5px 14px;
-  border-top: 1px solid var(--border);
-}
-
 .terminal-panel {
   display: flex;
   flex-direction: column;
@@ -24,8 +18,7 @@
   font-size: 12px;
 }
 
-.terminal-toolbar button,
-.terminal-launcher button {
+.terminal-toolbar button {
   padding: 3px 8px;
   border: 1px solid #77847b;
   border-radius: 4px;

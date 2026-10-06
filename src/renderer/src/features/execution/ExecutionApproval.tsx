@@ -1,6 +1,26 @@
 import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from 'react'
 import type { RefObject } from 'react'
 import type { ExecutionApproval as ApprovalRequest } from '../../../../shared/execution'
+import { useAnchoredPosition } from '../../components/ui/useAnchoredPosition'
+import type {
+  AnchorMeasurement,
+  AnchorPositionStyle
+} from '../../components/ui/useAnchoredPosition'
+
+function approvalPanelStyle({
+  rect,
+  viewportWidth,
+  viewportHeight
+}: AnchorMeasurement): AnchorPositionStyle {
+  const width = Math.min(rect.width, viewportWidth - 24)
+  const bottom = Math.min(viewportHeight - rect.top + 8, Math.max(12, viewportHeight - 172))
+  return {
+    width: `${width}px`,
+    left: `${Math.max(12, Math.min(rect.left, viewportWidth - width - 12))}px`,
+    bottom: `${Math.max(12, bottom)}px`,
+    maxHeight: `${Math.max(160, Math.min(560, viewportHeight - bottom - 12))}px`
+  }
+}
 
 const approvalTitles = {
   create: '允许新建此文件吗？',
@@ -131,6 +151,17 @@ export function ExecutionApproval({
     [applyPending, readPending]
   )
 
+  const getAnchor = useCallback(
+    () => anchorRef.current?.querySelector<HTMLElement>('.composer') ?? null,
+    [anchorRef]
+  )
+  const position = useAnchoredPosition({
+    active: pending !== null,
+    panelRef: dialogRef,
+    getAnchor,
+    getStyle: approvalPanelStyle
+  })
+
   useLayoutEffect(() => {
     const panel = dialogRef.current
     if (!panel) return
@@ -138,38 +169,13 @@ export function ExecutionApproval({
       if (panel.open) panel.close()
       return
     }
-    const composer = anchorRef.current?.querySelector<HTMLElement>('.composer')
-    function position(): void {
-      if (!panel || !composer) return
-      const rect = composer.getBoundingClientRect()
-      const width = Math.min(rect.width, window.innerWidth - 24)
-      const bottom = Math.min(
-        window.innerHeight - rect.top + 8,
-        Math.max(12, window.innerHeight - 172)
-      )
-      Object.assign(panel.style, {
-        width: `${width}px`,
-        left: `${Math.max(12, Math.min(rect.left, window.innerWidth - width - 12))}px`,
-        bottom: `${Math.max(12, bottom)}px`,
-        maxHeight: `${Math.max(160, Math.min(560, window.innerHeight - bottom - 12))}px`
-      })
-    }
     document.querySelectorAll<HTMLElement>('[popover]:popover-open').forEach((popover) => {
       popover.hidePopover()
     })
     position()
     if (!panel.open) panel.showModal()
     cancelRef.current?.focus({ preventScroll: true })
-    const observer = new ResizeObserver(position)
-    if (composer) observer.observe(composer)
-    window.addEventListener('resize', position)
-    window.addEventListener('scroll', position, true)
-    return () => {
-      observer.disconnect()
-      window.removeEventListener('resize', position)
-      window.removeEventListener('scroll', position, true)
-    }
-  }, [anchorRef, pending])
+  }, [pending, position])
 
   return (
     <>

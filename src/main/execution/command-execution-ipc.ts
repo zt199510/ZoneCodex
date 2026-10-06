@@ -1,5 +1,6 @@
 import { BrowserWindow, ipcMain } from 'electron'
-import { spawn, type ChildProcess } from 'node:child_process'
+import { startCommandProcess, type CommandProcess } from './command-runner'
+import { getIpcWindow } from '../ipc-source'
 import { randomUUID } from 'node:crypto'
 import {
   parseCommandExecutionRequest,
@@ -7,7 +8,7 @@ import {
   type CommandSource
 } from '../../shared/command-preparation'
 import { claimCommandPreparation } from './command-preparation-ipc'
-import { getExecutionPermissionState } from './execution-context'
+import { getExecutionPermissionState } from './permission-state'
 import { getCommandTemplate } from '../../shared/permission-policy'
 import { inspectCommandDirectory, sameCommandDirectory } from '../tools/command-directory'
 import {
@@ -20,11 +21,8 @@ import {
 
 type Running = {
   windowId: number
-  child: ChildProcess | null
-  timer: NodeJS.Timeout | null
+  process: CommandProcess | null
   controller: AbortController
-  bytes: number
-  truncated: boolean
   taskId: string
 }
 const running = new Map<string, Running>()
@@ -68,10 +66,7 @@ function waitForAuthorization(approval: Promise<boolean>, signal: AbortSignal): 
 }
 
 function owner(event: Electron.IpcMainInvokeEvent): BrowserWindow {
-  const w = BrowserWindow.fromWebContents(event.sender)
-  if (!w || w.isDestroyed() || event.senderFrame !== event.sender.mainFrame)
-    throw new Error('不支持的执行来源')
-  return w
+  return getIpcWindow(event, '不支持的执行来源', { windowMustBeLive: true })
 }
 function emit(windowId: number, event: CommandExecutionEvent): void {
   const w = BrowserWindow.fromId(windowId)
@@ -80,10 +75,9 @@ function emit(windowId: number, event: CommandExecutionEvent): void {
 function stop(executionId: string, status: 'cancelled' | 'timed_out', error: string): boolean {
   const item = running.get(executionId)
   if (!item) return false
-  if (item.timer) clearTimeout(item.timer)
   running.delete(executionId)
   item.controller.abort()
-  item.child?.kill()
+  item.process?.stop()
   updateTask(item.windowId, item.taskId, status, { error })
   emit(item.windowId, { status, executionId, error })
   return true
@@ -133,11 +127,8 @@ export function registerCommandExecution(
     if (!task) return { status: 'error' as const, error: '任务创建失败，请重新发起' }
     const item: Running = {
       windowId: w.id,
-      child: null,
-      timer: null,
+      process: null,
       controller,
-      bytes: 0,
-      truncated: false,
       taskId
     }
     // Reserve the window before awaiting approval so a second request cannot spawn again.
@@ -212,52 +203,41 @@ export function registerCommandExecution(
         stop(executionId, 'cancelled', '任务已结束，请重新发起')
         return { status: 'error' as const, error: '任务已结束，请重新发起' }
       }
-      const child = spawn(program, [...template.args], {
+      item.process = startCommandProcess({
+        program,
+        args: [...template.args],
         cwd: claimed.directory,
-        shell: false,
-        windowsHide: true,
-        stdio: ['ignore', 'pipe', 'pipe']
-      })
-      item.child = child
-      item.timer = setTimeout(() => stop(executionId, 'timed_out', '执行超过 60 秒'), TIMEOUT)
-      const output = (stream: 'stdout' | 'stderr') => (chunk: Buffer | string) => {
-        if (item.truncated || !running.has(executionId)) return
-        const value = Buffer.isBuffer(chunk) ? chunk.toString('utf8') : chunk
-        const remaining = MAX_OUTPUT - item.bytes
-        if (Buffer.byteLength(value, 'utf8') > remaining) {
-          const clipped = Buffer.from(value).subarray(0, Math.max(0, remaining)).toString('utf8')
-          item.bytes = MAX_OUTPUT
-          item.truncated = true
+        timeoutMs: TIMEOUT,
+        outputLimit: MAX_OUTPUT,
+        outputMode: 'text',
+        onTimeout: () => {
+          stop(executionId, 'timed_out', '执行超过 60 秒')
+        },
+        onOutput: (stream, text, output) => {
+          if (!running.has(executionId)) return
           emit(w.id, {
             status: 'output',
             executionId,
             stream,
-            text: clipped,
-            totalBytes: item.bytes,
-            truncated: true
+            text,
+            totalBytes: output.totalBytes,
+            ...(output.truncated ? { truncated: true } : {})
           })
-          return
+        },
+        onError: (error) => {
+          if (!running.has(executionId)) return
+          running.delete(executionId)
+          updateTask(w.id, taskId, 'failed', { error: textError(error) })
+          emit(w.id, { status: 'error', executionId, error: textError(error) })
+        },
+        onClose: (code) => {
+          if (!running.has(executionId)) return
+          running.delete(executionId)
+          const exitCode = typeof code === 'number' ? code : -1
+          if (exitCode === 0) updateTask(w.id, taskId, 'completed', { result: '命令执行完成' })
+          else updateTask(w.id, taskId, 'failed', { error: `进程退出码：${exitCode}` })
+          emit(w.id, { status: 'finished', executionId, exitCode })
         }
-        item.bytes += Buffer.byteLength(value, 'utf8')
-        emit(w.id, { status: 'output', executionId, stream, text: value, totalBytes: item.bytes })
-      }
-      child.stdout?.on('data', output('stdout'))
-      child.stderr?.on('data', output('stderr'))
-      child.once('error', (error) => {
-        if (!running.has(executionId)) return
-        if (item.timer) clearTimeout(item.timer)
-        running.delete(executionId)
-        updateTask(w.id, taskId, 'failed', { error: textError(error) })
-        emit(w.id, { status: 'error', executionId, error: textError(error) })
-      })
-      child.once('close', (code) => {
-        if (!running.has(executionId)) return
-        if (item.timer) clearTimeout(item.timer)
-        running.delete(executionId)
-        const exitCode = typeof code === 'number' ? code : -1
-        if (exitCode === 0) updateTask(w.id, taskId, 'completed', { result: '命令执行完成' })
-        else updateTask(w.id, taskId, 'failed', { error: `进程退出码：${exitCode}` })
-        emit(w.id, { status: 'finished', executionId, exitCode })
       })
       emit(w.id, { status: 'started', executionId })
       return { status: 'started' as const, executionId }
@@ -267,9 +247,8 @@ export function registerCommandExecution(
         return { status: 'error' as const, error: '执行已取消' }
       }
       running.delete(executionId)
-      if (item.timer) clearTimeout(item.timer)
       controller.abort()
-      item.child?.kill()
+      item.process?.stop()
       updateTask(w.id, taskId, 'failed', { error: textError(error) })
       emit(w.id, { status: 'error', executionId, error: textError(error) })
       return { status: 'error' as const, error: textError(error) }

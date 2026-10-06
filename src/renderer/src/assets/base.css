@@ -114,3 +114,40 @@ ol {
     scroll-behavior: auto !important;
   }
 }
+.icon-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--muted);
+  flex-shrink: 0;
+}
+.icon-button:hover:not(:disabled) {
+  background: var(--hover);
+  color: var(--text);
+}
+.quiet-button {
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  padding: 5px 10px;
+  font-size: 11px;
+  white-space: nowrap;
+}
+.quiet-button:hover:not(:disabled) {
+  background: var(--sidebar);
+  border-color: #cbcdc5;
+}
+.danger-button {
+  border: 0;
+  border-radius: 7px;
+  color: #fff;
+  background: var(--danger);
+}
+.danger-button:hover:not(:disabled) {
+  background: #8e332c;
+}
