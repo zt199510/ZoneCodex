@@ -257,9 +257,12 @@ body,
 
 .conversation-nav {
   margin-top: 24px;
+  margin-right: -14px;
+  padding-right: 14px;
   flex: 1;
   min-height: 60px;
-  overflow: auto;
+  overflow-x: hidden;
+  overflow-y: auto;
 }
 
 .conversation-item {
@@ -400,6 +403,7 @@ button.conversation-item:disabled {
 
 .workspace-status {
   display: flex;
+  align-items: center;
   flex-wrap: wrap;
   gap: 8px 16px;
   padding: 6px 18px;
@@ -410,8 +414,19 @@ button.conversation-item:disabled {
 
 .workspace-status-actions {
   display: inline-flex;
+  align-items: center;
   flex-wrap: wrap;
   gap: 4px;
+  margin-left: auto;
+}
+
+.workspace-status-actions .quiet-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 28px;
+  padding: 0 10px;
+  line-height: 16px;
 }
 
 .workspace-status-error {

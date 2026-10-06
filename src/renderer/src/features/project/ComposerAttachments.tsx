@@ -72,7 +72,14 @@ export function ComposerAttachments({
         disabled={!c.canEdit}
         title="添加附件"
       >
-        <span aria-hidden="true">＋</span>
+        <svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none">
+          <path
+            d="M12 3v18M3 12h18"
+            stroke="currentColor"
+            strokeWidth="1.5"
+            strokeLinecap="round"
+          />
+        </svg>
       </button>
       <div
         ref={panel}
