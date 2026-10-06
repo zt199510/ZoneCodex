@@ -4,6 +4,12 @@ import { parsePreparationRequest, parsePreparationResult } from '../shared/chang
 import { contextBridge, ipcRenderer, IpcRendererEvent } from 'electron'
 import { electronAPI } from '@electron-toolkit/preload'
 import type { AppAPI } from '../shared/api'
+import {
+  parseExecutionApproval,
+  parseExecutionInfo,
+  parsePermissionMode,
+  parsePermissionsState
+} from '../shared/execution'
 import { parseWindowState } from '../shared/window'
 import { parseLibrary } from '../shared/conversation-library'
 import { parseTerminalEvent, parseTerminalResult } from '../shared/terminal'
@@ -201,6 +207,59 @@ const api: AppAPI = {
     return () => ipcRenderer.removeListener('terminal:event', handler)
   },
   // 真实 Agent 请求接口
+  resolveAgentExecution: async (context) => {
+    const checkedContext = parseAgentRequestContext(context)
+    if (!checkedContext) throw new Error('工具上下文格式不正确')
+    const result = parseExecutionInfo(
+      await ipcRenderer.invoke('agent:resolve-execution', checkedContext)
+    )
+    if (!result) throw new Error('运行信息格式不正确')
+    return result
+  },
+  getExecutionPermissions: async () => {
+    const result = parsePermissionsState(await ipcRenderer.invoke('execution:permissions-get'))
+    if (!result) throw new Error('权限设置格式不正确')
+    return result
+  },
+  setExecutionPermissions: async (mode) => {
+    const checkedMode = parsePermissionMode(mode)
+    if (!checkedMode) throw new Error('权限选项无效')
+    const result = parsePermissionsState(
+      await ipcRenderer.invoke('execution:permissions-set', checkedMode)
+    )
+    if (!result) throw new Error('权限设置格式不正确')
+    return result
+  },
+  getPendingExecutionApproval: async () => {
+    const value: unknown = await ipcRenderer.invoke('execution:approval-get')
+    if (value === null) return null
+    const approval = parseExecutionApproval(value)
+    if (!approval) throw new Error('确认请求格式不正确')
+    return approval
+  },
+  respondToExecutionApproval: async (approvalId, approved) => {
+    if (!isAgentId(approvalId) || typeof approved !== 'boolean') {
+      throw new Error('确认操作参数无效')
+    }
+    const result: unknown = await ipcRenderer.invoke('execution:approval-respond', {
+      approvalId,
+      approved
+    })
+    if (typeof result !== 'boolean') throw new Error('确认操作结果格式不正确')
+    return result
+  },
+  onExecutionApprovalChange: (listener) => {
+    const handler = (_event: IpcRendererEvent, value: unknown): void => {
+      if (value === null) {
+        listener(null)
+        return
+      }
+      const approval = parseExecutionApproval(value)
+      if (approval) listener(approval)
+    }
+    ipcRenderer.on('execution:approval-change', handler)
+    return () => ipcRenderer.removeListener('execution:approval-change', handler)
+  },
   startAgentRequest: async (requestId, prompt, history, context, taskId) => {
     const checkedContext = parseAgentRequestContext(context)
     if (!checkedContext) throw new Error('工具上下文格式不正确')

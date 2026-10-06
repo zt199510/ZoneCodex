@@ -1,9 +1,12 @@
-import { lstat, open, readdir, realpath } from 'node:fs/promises'
+import { lstat, open, opendir, realpath } from 'node:fs/promises'
 import { createHash } from 'node:crypto'
 import { isAbsolute, join, relative, resolve, sep } from 'node:path'
 import type { Stats } from 'node:fs'
 import type { ProjectExecutor } from './project-snapshot'
 import { AgentError } from '../agent/tool-loop'
+import { canonicalLocalPath, insideLocalPath, localPathParts } from './local-path'
+
+export type WorkspaceReadOptions = { isPathAllowed?: (target: string) => boolean }
 
 const maxFileBytes = 128 * 1024
 const maxSearchBytes = 2 * 1024 * 1024
@@ -86,11 +89,6 @@ function isSkippedPath(parts: readonly string[]): boolean {
   )
 }
 
-function inside(root: string, candidate: string): boolean {
-  const path = relative(root, candidate)
-  return !isAbsolute(path) && path !== '..' && !path.startsWith(`..${sep}`)
-}
-
 function sameIdentity(left: Stats, right: Stats): boolean {
   return left.dev === right.dev && left.ino === right.ino
 }
@@ -124,7 +122,7 @@ export const workspaceReadTools = [
     type: 'function',
     name: 'list_workspace_files',
     description:
-      '列出已授权工作区内的文件和目录。path 用工作区相对路径，根目录传空字符串；recursive 控制是否递归。结果有数量和深度上限。',
+      '列出运行权限允许的本地文件和目录。path 接受相对于默认运行目录的路径或本地绝对路径，默认目录传空字符串；recursive 控制是否递归。结果有数量和深度上限。',
     strict: true,
     parameters: {
       type: 'object',
@@ -140,7 +138,7 @@ export const workspaceReadTools = [
     type: 'function',
     name: 'search_workspace_text',
     description:
-      '在已授权工作区的 UTF-8 小文本文件中搜索区分大小写的字面量；path 是相对目录，根目录传空字符串。结果有扫描和数量上限。',
+      '在运行权限允许的本地 UTF-8 小文本文件中搜索区分大小写的字面量；path 接受相对目录或本地绝对目录，默认目录传空字符串。结果有扫描和数量上限。',
     strict: true,
     parameters: {
       type: 'object',
@@ -156,7 +154,7 @@ export const workspaceReadTools = [
     type: 'function',
     name: 'read_workspace_file',
     description:
-      '按行读取已授权工作区内的 UTF-8 文本文件；path 是工作区相对文件路径，每次最多 100 行。',
+      '按行读取运行权限允许的本地 UTF-8 文本文件；path 接受相对于默认运行目录的路径或本地绝对路径，每次最多 100 行，结果返回实际目标路径。',
     strict: true,
     parameters: {
       type: 'object',
@@ -173,9 +171,24 @@ export const workspaceReadTools = [
 
 export function createWorkspaceReadExecutor(
   root: string,
-  assertAccess: () => boolean
+  assertAccess: () => boolean,
+  options: WorkspaceReadOptions = {}
 ): ProjectExecutor {
   const canonicalRoot = resolve(root)
+  const genericPaths = options.isPathAllowed !== undefined
+
+  function outputPath(target: string): string {
+    return genericPaths ? target : relative(canonicalRoot, target).split(sep).join('/')
+  }
+
+  function checkedInput(value: unknown, allowRoot = false): string | null {
+    if (typeof value !== 'string' || value.length > 512 || (!value && !allowRoot)) return null
+    if (!genericPaths) {
+      const parts = relativeParts(value, allowRoot)
+      if (!parts || isSkippedPath(parts)) return null
+    }
+    return value
+  }
 
   function checkAccess(signal: AbortSignal): void {
     signal.throwIfAborted()
@@ -183,32 +196,32 @@ export function createWorkspaceReadExecutor(
   }
 
   async function checkedPath(
-    parts: string[],
+    input: string,
     signal: AbortSignal
   ): Promise<{ path: string; info: Stats }> {
     checkAccess(signal)
-    let candidate = canonicalRoot
-    for (const part of parts) {
-      candidate = join(candidate, part)
-      const info = await lstat(candidate)
-      checkAccess(signal)
-      if (info.isSymbolicLink()) throw new AgentError('不读取符号链接或目录联接')
+    const candidate = await canonicalLocalPath(canonicalRoot, input, true)
+    checkAccess(signal)
+    if (
+      genericPaths
+        ? !options.isPathAllowed!(candidate) || isSkippedPath(localPathParts(candidate))
+        : !insideLocalPath(canonicalRoot, candidate)
+    ) {
+      throw new AgentError('路径超出允许的文件范围')
     }
     const info = await lstat(candidate)
     if (info.isSymbolicLink()) throw new AgentError('不读取符号链接或目录联接')
     const actual = await realpath(candidate)
     checkAccess(signal)
-    if (!inside(canonicalRoot, actual) || !inside(canonicalRoot, candidate)) {
-      throw new AgentError('路径超出已授权工作区')
-    }
+    if (actual !== candidate) throw new AgentError('目标的实际路径已变化')
     return { path: candidate, info }
   }
 
   async function readText(
-    parts: string[],
+    path: string,
     signal: AbortSignal
-  ): Promise<{ text: string; sha256: string } | null> {
-    const before = await checkedPath(parts, signal)
+  ): Promise<{ path: string; text: string; sha256: string } | null> {
+    const before = await checkedPath(path, signal)
     if (!before.info.isFile() || before.info.nlink !== 1 || before.info.size > maxFileBytes)
       return null
     const handle = await open(before.path, 'r')
@@ -225,7 +238,7 @@ export function createWorkspaceReadExecutor(
       }
       if (length > maxFileBytes) return null
       const after = await handle.stat()
-      const pathAfter = await checkedPath(parts, signal)
+      const pathAfter = await checkedPath(before.path, signal)
       if (
         !sameIdentity(opened, after) ||
         !sameIdentity(after, pathAfter.info) ||
@@ -246,7 +259,11 @@ export function createWorkspaceReadExecutor(
         })
         return containsControlCharacter
           ? null
-          : { text, sha256: createHash('sha256').update(buffer.subarray(0, length)).digest('hex') }
+          : {
+              path: before.path,
+              text,
+              sha256: createHash('sha256').update(buffer.subarray(0, length)).digest('hex')
+            }
       } catch {
         return null
       }
@@ -257,41 +274,52 @@ export function createWorkspaceReadExecutor(
 
   type Entry = { path: string; type: 'file' | 'directory'; bytes?: number }
   async function walk(
-    start: string[],
+    start: string,
     recursive: boolean,
     signal: AbortSignal,
     onEntry: (entry: Entry) => Promise<boolean> | boolean
   ): Promise<{ truncated: boolean; visited: number }> {
-    const pending: Array<{ parts: string[]; depth: number }> = [{ parts: start, depth: 0 }]
+    const pending: Array<{ path: string; depth: number }> = [{ path: start, depth: 0 }]
     let visited = 0
     let truncated = false
     while (pending.length > 0) {
       checkAccess(signal)
       const current = pending.shift()!
-      const directory = await checkedPath(current.parts, signal)
+      const directory = await checkedPath(current.path, signal)
       if (!directory.info.isDirectory()) throw new AgentError('目标不是目录')
-      const names = (await readdir(directory.path)).sort((a, b) => a.localeCompare(b))
-      const after = await checkedPath(current.parts, signal)
+      const names: string[] = []
+      let directoryTruncated = false
+      const stream = await opendir(directory.path)
+      for await (const entry of stream) {
+        checkAccess(signal)
+        if (names.length >= maxVisitedEntries - visited) {
+          directoryTruncated = true
+          break
+        }
+        names.push(entry.name)
+      }
+      names.sort((a, b) => a.localeCompare(b))
+      const after = await checkedPath(directory.path, signal)
       if (!sameIdentity(directory.info, after.info)) throw new AgentError('目录已变化')
       for (const name of names) {
         checkAccess(signal)
         if (visited >= maxVisitedEntries) return { truncated: true, visited }
         visited += 1
         if (skippedDirectories.has(name.toLowerCase()) || skippedFiles.test(name)) continue
-        const parts = [...current.parts, name]
-        if (!relativeParts(parts.join('/'))) continue
+        if (!relativeParts(name)) continue
         let child: { path: string; info: Stats }
         try {
-          child = await checkedPath(parts, signal)
+          child = await checkedPath(join(directory.path, name), signal)
         } catch (error) {
           if (error instanceof AgentError && error.message === '工作区授权已失效') throw error
           continue
         }
-        const path = parts.join('/')
+        const path = outputPath(child.path)
         if (child.info.isDirectory()) {
           if (!(await onEntry({ path, type: 'directory' }))) return { truncated: true, visited }
           if (recursive) {
-            if (current.depth < maxDepth) pending.push({ parts, depth: current.depth + 1 })
+            if (current.depth < maxDepth)
+              pending.push({ path: child.path, depth: current.depth + 1 })
             else truncated = true
           }
         } else if (child.info.isFile() && child.info.nlink === 1) {
@@ -300,6 +328,7 @@ export function createWorkspaceReadExecutor(
           }
         }
       }
+      if (directoryTruncated) return { truncated: true, visited }
     }
     return { truncated, visited }
   }
@@ -308,13 +337,14 @@ export function createWorkspaceReadExecutor(
     checkAccess(signal)
     if (name === 'list_workspace_files') {
       const args = parseArguments(raw, ['path', 'recursive'])
-      const parts = relativeParts(args?.path, true)
-      if (!args || !parts || isSkippedPath(parts) || typeof args.recursive !== 'boolean') {
+      const path = checkedInput(args?.path, true)
+      if (!args || path === null || typeof args.recursive !== 'boolean') {
         return errorResult('参数无效')
       }
       const entries: Entry[] = []
       try {
-        const scan = await walk(parts, args.recursive, signal, (entry) => {
+        const target = await checkedPath(path, signal)
+        const scan = await walk(target.path, args.recursive, signal, (entry) => {
           if (entries.length >= maxEntries) return false
           entries.push(entry)
           return true
@@ -323,21 +353,21 @@ export function createWorkspaceReadExecutor(
         return boundedResult(
           'entries',
           entries,
-          { path: args.path, visited: scan.visited },
+          { path: outputPath(target.path), visited: scan.visited },
           scan.truncated
         )
       } catch (error) {
         if (error instanceof AgentError && error.message === '工作区授权已失效') throw error
-        return errorResult(error instanceof AgentError ? error.message : '无法列出工作区目录')
+        signal.throwIfAborted()
+        return errorResult(error instanceof Error ? error.message : '无法列出本地目录')
       }
     }
     if (name === 'search_workspace_text') {
       const args = parseArguments(raw, ['path', 'query'])
-      const parts = relativeParts(args?.path, true)
+      const path = checkedInput(args?.path, true)
       if (
         !args ||
-        !parts ||
-        isSkippedPath(parts) ||
+        path === null ||
         typeof args.query !== 'string' ||
         !args.query.trim() ||
         args.query.length > 100 ||
@@ -349,7 +379,8 @@ export function createWorkspaceReadExecutor(
       let scannedBytes = 0
       let skipped = 0
       try {
-        const scan = await walk(parts, true, signal, async (entry) => {
+        const target = await checkedPath(path, signal)
+        const scan = await walk(target.path, true, signal, async (entry) => {
           if (entry.type !== 'file') return true
           if ((entry.bytes ?? 0) > maxFileBytes) {
             skipped += 1
@@ -361,8 +392,9 @@ export function createWorkspaceReadExecutor(
           ) {
             return false
           }
-          const file = await readText(entry.path.split('/'), signal).catch((error: unknown) => {
+          const file = await readText(entry.path, signal).catch((error: unknown) => {
             if (error instanceof AgentError && error.message === '工作区授权已失效') throw error
+            signal.throwIfAborted()
             return null
           })
           if (file === null) {
@@ -389,21 +421,21 @@ export function createWorkspaceReadExecutor(
         return boundedResult(
           'matches',
           matches,
-          { path: args.path, query: args.query, scannedFiles, scannedBytes, skipped },
+          { path: outputPath(target.path), query: args.query, scannedFiles, scannedBytes, skipped },
           scan.truncated
         )
       } catch (error) {
         if (error instanceof AgentError && error.message === '工作区授权已失效') throw error
-        return errorResult(error instanceof AgentError ? error.message : '无法搜索工作区文本')
+        signal.throwIfAborted()
+        return errorResult(error instanceof Error ? error.message : '无法搜索本地文本')
       }
     }
     if (name === 'read_workspace_file') {
       const args = parseArguments(raw, ['path', 'startLine', 'endLine'])
-      const parts = relativeParts(args?.path)
+      const path = checkedInput(args?.path)
       if (
         !args ||
-        !parts ||
-        isSkippedPath(parts) ||
+        path === null ||
         !Number.isInteger(args.startLine) ||
         !Number.isInteger(args.endLine) ||
         (args.startLine as number) < 1 ||
@@ -412,7 +444,7 @@ export function createWorkspaceReadExecutor(
       )
         return errorResult('参数无效')
       try {
-        const file = await readText(parts, signal)
+        const file = await readText(path, signal)
         checkAccess(signal)
         if (file === null)
           return errorResult('文件不是可读取的 UTF-8 小文本文件，或读取期间发生变化')
@@ -431,12 +463,13 @@ export function createWorkspaceReadExecutor(
         return boundedResult(
           'lines',
           selected,
-          { path: args.path, totalLines: lines.length, sha256: file.sha256 },
+          { path: outputPath(file.path), totalLines: lines.length, sha256: file.sha256 },
           false
         )
       } catch (error) {
         if (error instanceof AgentError && error.message === '工作区授权已失效') throw error
-        return errorResult(error instanceof AgentError ? error.message : '无法读取工作区文件')
+        signal.throwIfAborted()
+        return errorResult(error instanceof Error ? error.message : '无法读取本地文件')
       }
     }
     return errorResult('未知工具')

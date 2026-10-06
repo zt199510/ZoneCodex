@@ -52,8 +52,15 @@ export type Conversation = ConversationV4 & {
   archived: boolean
 }
 
-export type ConversationLibrary = {
+/** The version 5 shape accepted only as a migration source. */
+export type ConversationLibraryV5 = {
   version: 5
+  activeConversationId: string | null
+  conversations: Conversation[]
+}
+
+export type ConversationLibrary = {
+  version: 6
   activeConversationId: string | null
   conversations: Conversation[]
 }
@@ -298,9 +305,12 @@ const conversationKeys = [
   'tasks'
 ] as const
 
-/** Parse the current strict version 5 shape. */
-export function parseLibrary(value: unknown): ConversationLibrary | null {
-  if (!isRecord(value) || !hasExactKeys(value, libraryKeys) || value.version !== 5) return null
+function parseVersionedLibrary<Version extends 5 | 6>(
+  value: unknown,
+  version: Version
+): { version: Version; activeConversationId: string | null; conversations: Conversation[] } | null {
+  if (!isRecord(value) || !hasExactKeys(value, libraryKeys) || value.version !== version)
+    return null
   if (!Array.isArray(value.conversations) || value.conversations.length > 100) return null
 
   const ids = new Set<string>()
@@ -352,8 +362,8 @@ export function parseLibrary(value: unknown): ConversationLibrary | null {
     conversations.find((conversation) => conversation.id === activeId)?.archived
   )
     return null
-  const result: ConversationLibrary = {
-    version: 5,
+  const result = {
+    version,
     activeConversationId: activeId,
     conversations
   }
@@ -361,12 +371,22 @@ export function parseLibrary(value: unknown): ConversationLibrary | null {
   return snapshotLength !== null && snapshotLength <= 8_000_000 ? result : null
 }
 
+/** Parse the version 5 shape without restoring any runtime permission. */
+export function parseLibraryV5(value: unknown): ConversationLibraryV5 | null {
+  return parseVersionedLibrary(value, 5)
+}
+
+/** Parse the current strict version 6 shape. Tool scope IDs describe history only. */
+export function parseLibrary(value: unknown): ConversationLibrary | null {
+  return parseVersionedLibrary(value, 6)
+}
+
 function migrateConversations(
   conversations: ConversationV4[],
   activeConversationId: string | null
 ): ConversationLibrary | null {
   const migrated: ConversationLibrary = {
-    version: 5,
+    version: 6,
     activeConversationId,
     conversations: conversations.map((conversation) => ({
       ...conversation,
@@ -375,6 +395,11 @@ function migrateConversations(
     }))
   }
   return parseLibrary(migrated)
+}
+
+export function migrateV5(value: unknown): ConversationLibrary | null {
+  const old = parseLibraryV5(value)
+  return old ? parseLibrary({ ...old, version: 6 }) : null
 }
 
 export function migrateV4(value: unknown): ConversationLibrary | null {
@@ -412,18 +437,30 @@ export function migrateV2(value: unknown): ConversationLibrary | null {
 export function migrateV1(value: unknown, conversationId: string): ConversationLibrary | null {
   const old = parseSnapshot(value)
   if (!old || !isId(conversationId)) return null
-  return migrateV3({
-    version: 3,
-    activeConversationId: conversationId,
-    conversations: [
+  const root = old.workspacePath
+  // A legacy path is display metadata. Runtime directory grants must be acquired again.
+  const workspace: SavedWorkspace | null = root?.trim()
+    ? {
+        workspaceId: conversationId,
+        root,
+        label: (root.split(/[\\/]/).filter(Boolean).at(-1) ?? root).slice(0, 80),
+        instructionPath: null,
+        instructionFingerprint: null
+      }
+    : null
+  return migrateConversations(
+    [
       {
         id: conversationId,
         title: '历史会话',
         messages: old.messages,
-        toolRuns: []
+        toolRuns: [],
+        workspace,
+        tasks: []
       }
-    ]
-  })
+    ],
+    conversationId
+  )
 }
 
 export function readLibrary(
@@ -431,7 +468,8 @@ export function readLibrary(
   legacyConversationId: string
 ): ConversationLibrary | null {
   if (!isRecord(value)) return null
-  if (value.version === 5) return parseLibrary(value)
+  if (value.version === 6) return parseLibrary(value)
+  if (value.version === 5) return migrateV5(value)
   if (value.version === 4) return migrateV4(value)
   if (value.version === 3) return migrateV3(value)
   if (value.version === 2) return migrateV2(value)

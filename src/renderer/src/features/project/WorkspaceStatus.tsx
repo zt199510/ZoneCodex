@@ -1,6 +1,13 @@
 import type { ProjectSelection } from '../../../../shared/project'
 import type { Operation } from '../conversation/useOperation'
 import type { WorkspaceController } from './useWorkspace'
+import type { PermissionsState } from '../../../../shared/execution'
+
+const permissionModeTitles = {
+  default: '请求批准',
+  'auto-approve': '帮我批准',
+  'full-access': '完全访问权限'
+} as const
 
 function currentTaskLabel(waitingApproval: boolean, operation: Operation): string {
   if (waitingApproval) return '等待批准'
@@ -25,19 +32,21 @@ export function WorkspaceStatus({
   selection,
   operation,
   waitingApproval,
-  workspace
+  workspace,
+  permissions
 }: {
   selection: ProjectSelection | null
   operation: Operation
   waitingApproval: boolean
   workspace: WorkspaceController
+  permissions: PermissionsState | null
 }): React.JSX.Element {
   const task = currentTaskLabel(waitingApproval, operation)
   const saved = workspace.saved
-  const label = saved?.label ?? '未选择工作区'
+  const label = workspace.runtime?.label ?? '默认目录'
   const instructionLabel =
     saved && !workspace.runtime
-      ? '需重新选择工作区后读取 AGENTS.md'
+      ? `${saved.label}：需重新选择后读取 AGENTS.md`
       : workspace.instructionState === 'read'
         ? workspace.instruction?.truncated
           ? '已读取 AGENTS.md（内容已截断）'
@@ -56,14 +65,8 @@ export function WorkspaceStatus({
         状态：<strong>{task}</strong>
       </span>
       <span>
-        文件访问：
-        {workspace.runtime
-          ? selection
-            ? '工作区与附件'
-            : '工作区内'
-          : selection
-            ? '仅附件'
-            : '未授权'}
+        权限：{permissions ? permissionModeTitles[permissions.mode] : '加载中'}
+        {selection && '，已附加文件'}
       </span>
       <span>{instructionLabel}</span>
       <span className="workspace-status-actions">

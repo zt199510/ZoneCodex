@@ -3,10 +3,12 @@ import { ChatHeader } from '../../components/layout/ChatHeader'
 import type { ConversationController } from '../conversation/useConversation'
 import { ChatInput } from './ChatInput'
 import { ClearConversationDialog } from './ClearConversationDialog'
+import { ExecutionApproval } from './ExecutionApproval'
 import { EmptyState } from './EmptyState'
 import { MessageList } from './MessageList'
 import { CloseGuard } from '../conversation/CloseGuard'
 import { ComposerAttachments } from '../project/ComposerAttachments'
+import { ComposerPermissions } from '../project/ComposerPermissions'
 import { AttachmentCards } from '../project/AttachmentCards'
 import { ChangePreviewPanel } from '../review/ChangePreviewPanel'
 import { CommandReviewPanel } from '../review/CommandReviewPanel'
@@ -23,6 +25,8 @@ export function ChatWorkspace({
   const currentDraft = useRef('')
   const currentConversationId = useRef<string | null>(conversation.activeConversationId)
   const [confirmClear, setConfirmClear] = useState(false)
+  const [executionApprovalPending, setExecutionApprovalPending] = useState(false)
+  const composerRegionRef = useRef<HTMLDivElement>(null)
   const scrollArea = useRef<HTMLDivElement>(null)
   const previewTriggerRef = useRef<HTMLButtonElement>(null)
   const commandTriggerRef = useRef<HTMLButtonElement>(null)
@@ -94,8 +98,9 @@ export function ChatWorkspace({
       <WorkspaceStatus
         selection={conversation.contextSelection}
         operation={operation}
-        waitingApproval={conversation.commandReview.proposal !== null}
+        waitingApproval={executionApprovalPending || conversation.commandReview.proposal !== null}
         workspace={conversation.workspace}
+        permissions={conversation.executionPermissions.state}
       />
       {errors.length > 0 && (
         <div className="error-banner" role="alert">
@@ -199,7 +204,11 @@ export function ChatWorkspace({
           </button>
         </section>
       )}
-      <div className="composer-region">
+      <div className="composer-region" ref={composerRegionRef}>
+        <ExecutionApproval
+          anchorRef={composerRegionRef}
+          onPendingChange={setExecutionApprovalPending}
+        />
         <ChatInput
           value={draft}
           onChange={setDraft}
@@ -210,7 +219,22 @@ export function ChatWorkspace({
           disabled={!conversation.canSend}
           isSending={operation === 'generating'}
           maxLength={2000}
-          tools={<ComposerAttachments conversation={conversation} />}
+          tools={
+            <div className="composer-tools">
+              <ComposerAttachments conversation={conversation} />
+              <ComposerPermissions
+                permissions={conversation.executionPermissions}
+                conversationId={conversation.activeConversationId}
+                disabled={
+                  operation !== 'idle' ||
+                  !conversation.canNavigate ||
+                  executionApprovalPending ||
+                  conversation.executionPermissions.loading ||
+                  !conversation.executionPermissions.state
+                }
+              />
+            </div>
+          }
           attachments={
             <AttachmentCards
               selection={conversation.projectSelection}

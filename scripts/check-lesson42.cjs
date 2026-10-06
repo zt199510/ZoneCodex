@@ -33,6 +33,35 @@ async function main() {
     loadBundled('src/shared/project.ts')
   const { parseToolHistory, selectToolHistory } = loadBundled('src/shared/agent-history.ts')
   const { resolveAgentRequest } = loadBundled('src/renderer/src/features/chat/agent-request.ts')
+  const { parsePermissionMode, parseExecutionInfo } = loadBundled('src/shared/execution.ts')
+  const { decideLocalPermission } = loadBundled('src/shared/permission-policy.ts')
+  for (const mode of ['default', 'auto-approve', 'full-access']) {
+    assert.equal(parsePermissionMode(mode), mode)
+    const execution = { cwd: 'D:/workspace', mode, revision: 1, scopeId: 'a'.repeat(64) }
+    assert.deepEqual(parseExecutionInfo(execution), execution)
+    const decision = (operation, withinWritableRoots, approvalPolicy) =>
+      decideLocalPermission({
+        operation,
+        mode,
+        withinWritableRoots,
+        approvalPolicy,
+        sandboxAvailable: false
+      })
+    const externalDecision =
+      mode === 'full-access' ? 'allow' : mode === 'auto-approve' ? 'review' : 'ask'
+    assert.equal(decision('read', false), 'allow')
+    assert.equal(decision('write', true), 'allow')
+    assert.equal(decision('write', false), externalDecision)
+    assert.equal(decision('command', true), externalDecision)
+    assert.equal(decision('command', false), externalDecision)
+    if (mode !== 'full-access') {
+      assert.equal(decision('write', false, 'never'), 'deny')
+      assert.equal(decision('command', true, 'never'), 'deny')
+      const config = buildAgentRequest({ execution })
+      assert.ok(config.instructions.includes('"writableRoots":["D:/workspace"]'))
+    }
+  }
+  assert.equal(parsePermissionMode('always-allow'), null)
   const requestContexts = [
     { conversationId: 'conversation-42' },
     { conversationId: 'conversation-42', workspaceId: 'workspace-42' },
@@ -164,6 +193,7 @@ async function main() {
     'list_workspace_files',
     'search_workspace_text',
     'read_workspace_file',
+    'create_workspace_file',
     'edit_workspace_file',
     'run_workspace_command'
   ])
@@ -191,6 +221,8 @@ async function main() {
   assert.ok(workspace.instructions.includes(workspaceText))
   assert.match(workspace.instructions, /AGENTS\.md/)
   assert.match(workspace.instructions, /不可信/)
+  assert.match(workspace.instructions, /create_workspace_file/)
+  assert.match(workspace.instructions, /当前没有命令 OS 沙箱/)
   assert.ok(!workspace.instructions.includes('file-42/example.ts'))
   assert.ok(attachment.instructions.includes('file-42/example.ts'))
   assert.match(attachment.instructions, /"lines":3/)

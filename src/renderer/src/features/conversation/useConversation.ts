@@ -25,6 +25,10 @@ import { useConversationStorage, ConversationStorage } from './useConversationSt
 import { useOperation, Operation } from './useOperation'
 import { useChangePreview, type ChangePreviewController } from '../review/useChangePreview'
 import { useWorkspace, type WorkspaceController } from '../project/useWorkspace'
+import {
+  useExecutionPermissions,
+  type ExecutionPermissionsController
+} from '../project/useExecutionPermissions'
 
 export type ChangeProposalStatus = 'available' | 'stale'
 
@@ -61,6 +65,7 @@ export type ConversationController = {
   projectSelection: ProjectSelection | null
   contextSelection: ProjectSelection | null
   workspace: WorkspaceController
+  executionPermissions: ExecutionPermissionsController
   send: (content: string) => boolean
   editAndSend: (messageId: string, content: string) => boolean
   stop: () => Promise<void>
@@ -80,7 +85,7 @@ export type ConversationController = {
 
 export function useConversation(): ConversationController {
   const [snapshot, setSnapshot] = useState<ConversationLibrary>({
-    version: 5,
+    version: 6,
     activeConversationId: null,
     conversations: []
   })
@@ -199,6 +204,7 @@ export function useConversation(): ConversationController {
     () => storage.ready && !closePendingRef.current && operations.isIdle(),
     [operations, storage.ready]
   )
+  const executionPermissions = useExecutionPermissions(operations, canChange)
   const canSubmitBase =
     storage.ready &&
     operations.operation === 'idle' &&
@@ -239,9 +245,10 @@ export function useConversation(): ConversationController {
       updateConversation(activeConversationId, (previous) => ({ ...previous, workspace: next }))
     }
   })
-  // Persisted workspace metadata is only a display record. After a reload,
-  // the directory grant must be selected again before sending with it.
-  const canSubmit = canSubmitBase && (!active?.workspace || workspace.runtime !== null)
+  // Saved project metadata does not restore a grant. Without a live project,
+  // main resolves this request against the conversation's default directory.
+  const canSubmit =
+    canSubmitBase && executionPermissions.state !== null && !executionPermissions.loading
   const {
     projectSelection,
     pendingSelection,
@@ -348,7 +355,9 @@ export function useConversation(): ConversationController {
     toolRuns: active?.toolRuns ?? [],
     operations,
     projectSelection,
-    workspace: workspace.runtime
+    workspace: workspace.runtime,
+    getPermissions: executionPermissions.getState,
+    observeExecution: executionPermissions.observe
   })
 
   function startTitleGeneration(accepted: AcceptedChatRequest, fallbackTitle: string): void {
@@ -767,7 +776,12 @@ export function useConversation(): ConversationController {
     canEdit,
     canSend,
     storage,
-    chatError: conversationError ?? capacityError ?? projectError ?? request.error,
+    chatError:
+      conversationError ??
+      capacityError ??
+      projectError ??
+      executionPermissions.error ??
+      request.error,
     create,
     select,
     rename,
@@ -791,6 +805,7 @@ export function useConversation(): ConversationController {
     projectSelection: pendingSelection,
     contextSelection: projectSelection,
     workspace,
+    executionPermissions,
     setClosePending,
     getOperation: operations.getOperation,
     send: (content) => {

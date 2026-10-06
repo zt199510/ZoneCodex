@@ -39,6 +39,8 @@ import {
   registerCommandExecution
 } from './agent/command-execution-ipc'
 import { decideCommandPermission } from '../shared/permission-policy'
+import { approveStandaloneCommand, clearExecutionPermissionState } from './agent/execution-context'
+import { clearExecutionApproval, registerExecutionApproval } from './agent/execution-approval'
 import {
   cleanupTaskWindow,
   cleanupTasksForSnapshot,
@@ -102,12 +104,15 @@ function createWindow(): void {
   // 注册项目快照授权清理处理器
   attachProjectAccessCleanup(mainWindow)
   mainWindow.webContents.on('did-start-loading', () => {
+    clearExecutionApproval(mainWindow.id)
     cancelConversationTitleJob(mainWindow.id)
     cleanupTaskWindow(mainWindow.id)
     cleanupCommandExecution(mainWindow.id)
     cleanupCommandPreparation(mainWindow.id)
   })
   mainWindow.on('closed', () => {
+    clearExecutionApproval(mainWindow.id)
+    clearExecutionPermissionState(mainWindow.id)
     cancelConversationTitleJob(mainWindow.id)
     discardTaskWindow(mainWindow.id)
     cleanupCommandExecution(mainWindow.id)
@@ -150,6 +155,7 @@ app.whenReady().then(() => {
   // 注册窗口控件
   registerWindowControls()
   registerTaskLifecycle()
+  registerExecutionApproval()
   // 注册关闭确认处理器
   registerCloseGuard(hasChangeCommit)
   // 注册本地终端接口
@@ -176,7 +182,7 @@ app.whenReady().then(() => {
       { template: source.template, reason: '已通过提案解析' },
       { kind: 'project', snapshotId }
     ).allowed
-  })
+  }, approveStandaloneCommand)
   // 注册项目文件选择与撤销接口
   registerProjectAccess({
     isAgentJobActive: (id) =>

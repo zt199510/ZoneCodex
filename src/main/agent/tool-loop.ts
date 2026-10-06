@@ -46,6 +46,7 @@ export async function runToolLoop(
   function record(message: string): void {
     const line = message.slice(0, 500)
     trace.push(line)
+    if (trace.length > 30) trace.shift()
     onProgress(line)
   }
 
@@ -62,7 +63,7 @@ export async function runToolLoop(
     if (JSON.stringify(input).length > 128000) throw new AgentError('协议历史过长，任务已停止')
   }
 
-  for (let round = 1; round <= 5; round++) {
+  for (let round = 1; round <= 9; round++) {
     signal.throwIfAborted()
     checkInputSize()
     record(`第 ${round} 次模型请求`) // trace.push(`第 ${round} 次模型请求`)
@@ -130,7 +131,7 @@ export async function runToolLoop(
     }
     // parallel_tool_calls=false 的教学约束；网关违反约束时直接拒绝。
     if (calls.length !== 1) throw new AgentError('本课每轮只允许一个工具调用')
-    if (round === 5 || toolCount >= 4) throw new AgentError('已达到调用上限，未继续执行工具')
+    if (round === 9 || toolCount >= 8) throw new AgentError('已达到调用上限，未继续执行工具')
     const call = calls[0]
     if (seenCalls.has(call.callId)) throw new AgentError('收到重复 call_id，未重复执行')
     if (!isToolAllowed(call.name, checkedScope))

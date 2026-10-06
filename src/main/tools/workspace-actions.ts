@@ -1,21 +1,22 @@
 import { spawn } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { lstat, open, realpath } from 'node:fs/promises'
-import { isAbsolute, join, relative, resolve, sep, win32 } from 'node:path'
+import { basename, dirname, isAbsolute, join, parse, relative, sep, win32 } from 'node:path'
 import { commitChange } from './change-commit'
 import { prepareChange } from './change-preparation'
 import { createProjectSnapshot } from './project-snapshot'
 import type { ProjectExecutor } from './project-snapshot'
+import { canonicalLocalPath, insideLocalPath, localPathParts, sameLocalPath } from './local-path'
 
-export type WorkspaceApprovalRequest = {
-  kind: 'edit' | 'create' | 'command'
-  path?: string
-  program?: string
-  args?: string[]
-  before?: string
-  after?: string
-  cwd: string
+export type WorkspaceActionOptions = {
+  isPathAllowed?: (target: string) => boolean
+  onEffect?: () => void
 }
+
+export type WorkspaceApprovalRequest =
+  | { kind: 'edit'; path: string; before: string; after: string; cwd: string }
+  | { kind: 'create'; path: string; after: string; cwd: string }
+  | { kind: 'command'; program: string; args: string[]; cwd: string }
 
 export type WorkspaceApprove = (
   request: WorkspaceApprovalRequest,
@@ -27,12 +28,12 @@ export const workspaceActionTools = [
     type: 'function',
     name: 'create_workspace_file',
     description:
-      'Create one new UTF-8 text file in an existing workspace directory after showing its full content and obtaining user approval. Never overwrites an existing file or creates parent directories. Limited to 80 lines and 2000 characters.',
+      'Create one new UTF-8 text file in an existing local directory under the current runtime permission and approval policy. The path may be relative to the default working directory or absolute. Never overwrites an existing file or creates parent directories. Limited to 80 lines and 2000 characters.',
     strict: true,
     parameters: {
       type: 'object',
       properties: {
-        path: { type: 'string', minLength: 1, maxLength: 240 },
+        path: { type: 'string', minLength: 1, maxLength: 512 },
         content: { type: 'string', maxLength: 2000 }
       },
       required: ['path', 'content'],
@@ -43,12 +44,12 @@ export const workspaceActionTools = [
     type: 'function',
     name: 'edit_workspace_file',
     description:
-      'Replace one existing workspace text file with complete new content after showing the full before/after text and obtaining user approval. Limited to 80 lines and 2000 characters.',
+      'Replace one fully read local text file with complete new content under the current runtime permission and approval policy. The path may be relative to the default working directory or absolute. Limited to 80 lines and 2000 characters.',
     strict: true,
     parameters: {
       type: 'object',
       properties: {
-        path: { type: 'string', minLength: 1, maxLength: 240 },
+        path: { type: 'string', minLength: 1, maxLength: 512 },
         proposedText: { type: 'string', maxLength: 2000 },
         expectedSha256: { type: 'string', pattern: '^[a-f0-9]{64}$' }
       },
@@ -60,15 +61,16 @@ export const workspaceActionTools = [
     type: 'function',
     name: 'run_workspace_command',
     description:
-      'Run a program in the selected workspace after showing its complete program, arguments and working directory and obtaining user approval. No shell is used.',
+      'Run a program only when the current runtime permission and execution backend permit it. cwd may be relative to the default working directory or absolute; use null for the default. No shell wrapper is used. Setting cwd does not sandbox the program.',
     strict: true,
     parameters: {
       type: 'object',
       properties: {
         program: { type: 'string', minLength: 1, maxLength: 500 },
-        args: { type: 'array', items: { type: 'string', maxLength: 500 }, maxItems: 20 }
+        args: { type: 'array', items: { type: 'string', maxLength: 500 }, maxItems: 20 },
+        cwd: { type: ['string', 'null'], maxLength: 512 }
       },
-      required: ['program', 'args'],
+      required: ['program', 'args', 'cwd'],
       additionalProperties: false
     }
   }
@@ -175,7 +177,7 @@ function validRelativePath(path: unknown): path is string {
 }
 
 function validNewText(value: unknown): value is string {
-  if (typeof value !== 'string' || value.length > 2000 || value.split('\n').length > 80) {
+  if (typeof value !== 'string' || value.length > 2000 || value.split(/\r\n|\r|\n/).length > 80) {
     return false
   }
   if (
@@ -203,8 +205,8 @@ async function inspectParents(root: string, path: string): Promise<DirectoryIden
   for (const part of ['', ...parts]) {
     if (part) current = join(current, part)
     const info = await lstat(current)
-    if (!info.isDirectory() || info.isSymbolicLink() || (await realpath(current)) !== current) {
-      throw new Error('父目录不是工作区内的普通目录，或包含符号链接/联接')
+    if (!info.isDirectory() || info.isSymbolicLink()) {
+      throw new Error('父目录不是普通目录，或包含符号链接/联接')
     }
     identities.push({ path: current, dev: info.dev, ino: info.ino })
   }
@@ -218,20 +220,29 @@ async function confirmParents(identities: readonly DirectoryIdentity[]): Promise
       !current.isDirectory() ||
       current.isSymbolicLink() ||
       current.dev !== original.dev ||
-      current.ino !== original.ino ||
-      (await realpath(original.path)) !== original.path
+      current.ino !== original.ino
     ) {
       throw new Error('父目录已变化')
     }
+  }
+  const last = identities.at(-1)
+  if (last && !sameLocalPath(await realpath(last.path), last.path)) {
+    throw new Error('父目录的实际路径已变化')
   }
 }
 
 function validCommand(args: Record<string, unknown>): args is {
   program: string
   args: string[]
+  cwd?: string | null
 } {
   return (
-    exactKeys(args, ['program', 'args']) &&
+    (exactKeys(args, ['program', 'args']) || exactKeys(args, ['program', 'args', 'cwd'])) &&
+    (args.cwd === undefined ||
+      args.cwd === null ||
+      (typeof args.cwd === 'string' &&
+        args.cwd.length <= 512 &&
+        !hasControlCharacters(args.cwd))) &&
     typeof args.program === 'string' &&
     !!args.program.trim() &&
     args.program.length <= 500 &&
@@ -246,10 +257,10 @@ function validCommand(args: Record<string, unknown>): args is {
 
 async function checkedRoot(root: string, assertAccess: () => boolean): Promise<string> {
   if (!assertAccess()) throw new Error('工作区授权已失效')
-  const canonical = await realpath(root)
+  const canonical = await canonicalLocalPath(root, '', true)
   const info = await lstat(canonical)
-  if (!info.isDirectory() || info.isSymbolicLink() || canonical !== root) {
-    throw new Error('工作区目录已变化')
+  if (!info.isDirectory() || info.isSymbolicLink()) {
+    throw new Error('运行目录已变化')
   }
   if (!assertAccess()) throw new Error('工作区授权已失效')
   return canonical
@@ -260,7 +271,8 @@ async function runCommand(
   program: string,
   args: string[],
   signal: AbortSignal,
-  assertAccess: () => boolean
+  assertAccess: () => boolean,
+  onEffect?: () => void
 ): Promise<string> {
   signal.throwIfAborted()
   const hasAccess = (): boolean => {
@@ -274,6 +286,9 @@ async function runCommand(
   return new Promise<string>((resolveResult, rejectResult) => {
     let child: ReturnType<typeof spawn>
     try {
+      signal.throwIfAborted()
+      if (!hasAccess()) throw new Error('运行权限已失效')
+      onEffect?.()
       child = spawn(program, args, {
         cwd,
         shell: false,
@@ -283,7 +298,7 @@ async function runCommand(
       })
     } catch (error) {
       resolveResult(
-        result('error', { error: error instanceof Error ? error.message : '命令启动失败' })
+        result('error', { cwd, error: error instanceof Error ? error.message : '命令启动失败' })
       )
       return
     }
@@ -302,8 +317,9 @@ async function runCommand(
       if (value.length > remaining) truncated = true
     }
 
-    function capturedOutput(): { stdout: string; stderr: string; truncated: boolean } {
+    function capturedOutput(): { cwd: string; stdout: string; stderr: string; truncated: boolean } {
       return {
+        cwd,
         stdout: Buffer.concat(stdout).toString('utf8'),
         stderr: Buffer.concat(stderr).toString('utf8'),
         truncated
@@ -373,70 +389,105 @@ async function createWorkspaceFile(
   content: string,
   signal: AbortSignal,
   assertAccess: () => boolean,
-  approve: WorkspaceApprove
+  approve: WorkspaceApprove,
+  options: WorkspaceActionOptions
 ): Promise<string> {
   const cwd = await checkedRoot(root, assertAccess)
-  const target = resolve(cwd, path)
-  if (relative(cwd, target).split(sep).join('/') !== path) {
-    return result('error', { error: '文件路径不在工作区内' })
+  const target = await canonicalLocalPath(cwd, path)
+  const allowed = (): boolean =>
+    assertAccess() &&
+    (options.isPathAllowed ? options.isPathAllowed(target) : insideLocalPath(cwd, target))
+  if (!allowed()) return result('error', { error: '文件路径超出允许范围' })
+  if (
+    options.isPathAllowed &&
+    localPathParts(target).some(
+      (part) => SKIPPED_DIRECTORIES.has(part.toLowerCase()) || SKIPPED_FILES.test(part)
+    )
+  ) {
+    return result('error', { error: '文件路径不在允许的文件范围内' })
   }
-  const parents = await inspectParents(cwd, path)
+  const displayPath = options.isPathAllowed ? target : path
+  const parents = await inspectParents(
+    parse(target).root,
+    relative(parse(target).root, target).split(sep).join('/')
+  )
   signal.throwIfAborted()
-  if (!assertAccess()) return result('error', { error: '工作区授权已失效' })
-  const accepted = await approve({ kind: 'create', path, after: content, cwd }, signal)
+  if (!allowed()) return result('error', { error: '运行权限已失效' })
+  const existing = await lstat(target).catch((error: NodeJS.ErrnoException) => {
+    if (error.code === 'ENOENT') return null
+    throw error
+  })
+  if (existing)
+    return result('conflict', { path: displayPath, error: '目标文件已存在，本次未覆盖' })
+  const accepted = await approve({ kind: 'create', path: displayPath, after: content, cwd }, signal)
   signal.throwIfAborted()
-  if (!assertAccess()) return result('error', { error: '工作区授权已失效' })
-  if (!accepted) return result('cancelled', { path, error: '用户未批准创建文件' })
+  if (!allowed()) return result('error', { error: '运行权限已失效' })
+  if (!accepted) return result('cancelled', { path: displayPath, error: '当前策略未允许创建文件' })
 
   await confirmParents(parents)
   signal.throwIfAborted()
-  if (!assertAccess()) return result('error', { error: '工作区授权已失效' })
+  if (!allowed()) return result('error', { error: '运行权限已失效' })
   const bytes = Buffer.from(content, 'utf8')
   let handle: Awaited<ReturnType<typeof open>>
   try {
     // The exclusive flag prevents overwriting an existing target, including a symlink.
+    options.onEffect?.()
     handle = await open(target, 'wx+', 0o600)
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'EEXIST') {
-      return result('conflict', { path, error: '目标文件已存在，本次未覆盖' })
+      return result('conflict', { path: displayPath, error: '目标文件已存在，本次未覆盖' })
     }
-    return result('error', { path, error: error instanceof Error ? error.message : '文件创建失败' })
+    return result('error', {
+      path: displayPath,
+      error: error instanceof Error ? error.message : '文件创建失败'
+    })
   }
 
   let failure: unknown = null
   try {
-    signal.throwIfAborted()
-    if (!assertAccess()) throw new Error('工作区授权已失效')
+    const checkContinue = (): void => {
+      signal.throwIfAborted()
+      if (!allowed()) throw new Error('运行权限已失效')
+    }
+    checkContinue()
     let offset = 0
     while (offset < bytes.length) {
-      signal.throwIfAborted()
-      if (!assertAccess()) throw new Error('工作区授权已失效')
+      checkContinue()
       const written = await handle.write(bytes, offset, bytes.length - offset, offset)
+      checkContinue()
       if (written.bytesWritten <= 0) throw new Error('文件写入不完整')
       offset += written.bytesWritten
     }
     await handle.sync()
+    checkContinue()
     const opened = await handle.stat()
+    checkContinue()
     if (!opened.isFile() || opened.nlink !== 1 || opened.size !== bytes.length) {
       throw new Error('创建后的文件状态不符合预期')
     }
     const readback = Buffer.alloc(bytes.length)
     offset = 0
     while (offset < readback.length) {
+      checkContinue()
       const read = await handle.read(readback, offset, readback.length - offset, offset)
+      checkContinue()
       if (read.bytesRead <= 0) throw new Error('无法完整复核新文件')
       offset += read.bytesRead
     }
     if (!readback.equals(bytes)) throw new Error('创建后的文件内容与批准内容不一致')
     await confirmParents(parents)
+    checkContinue()
     const current = await lstat(target)
+    checkContinue()
+    const resolvedTarget = await realpath(target)
+    checkContinue()
     if (
       !current.isFile() ||
       current.isSymbolicLink() ||
       current.nlink !== 1 ||
       current.dev !== opened.dev ||
       current.ino !== opened.ino ||
-      (await realpath(target)) !== target
+      !sameLocalPath(resolvedTarget, target)
     ) {
       throw new Error('创建后的文件路径已变化')
     }
@@ -450,25 +501,52 @@ async function createWorkspaceFile(
   }
   if (failure) {
     return result('uncertain', {
-      path,
+      path: displayPath,
       error: failure instanceof Error ? failure.message : '创建后无法确认文件状态',
       message: '已尝试创建文件，可能留下空文件或部分内容；请检查目标路径后再决定是否重试'
     })
   }
   let accessValid = false
   try {
-    accessValid = assertAccess()
+    accessValid = allowed()
   } catch {
     // A completed and verified create remains a create after access is revoked.
   }
-  return result('created', { path, bytes: bytes.length, accessValid })
+  return result('created', { path: displayPath, bytes: bytes.length, accessValid })
 }
 
 export function createWorkspaceActionExecutor(
   root: string,
   assertAccess: () => boolean,
-  approve: WorkspaceApprove
+  approve: WorkspaceApprove,
+  options: WorkspaceActionOptions = {}
 ): ProjectExecutor {
+  function validFilePath(path: unknown): path is string {
+    return options.isPathAllowed
+      ? typeof path === 'string' && path.length > 0 && path.length <= 512
+      : validRelativePath(path)
+  }
+
+  async function checkedTarget(cwd: string, input: string, allowRoot = false): Promise<string> {
+    const target = await canonicalLocalPath(cwd, input, allowRoot)
+    if (
+      !assertAccess() ||
+      (options.isPathAllowed ? !options.isPathAllowed(target) : !insideLocalPath(cwd, target))
+    ) {
+      throw new Error('目标路径或运行权限已失效')
+    }
+    if (
+      !allowRoot &&
+      options.isPathAllowed &&
+      localPathParts(target).some(
+        (part) => SKIPPED_DIRECTORIES.has(part.toLowerCase()) || SKIPPED_FILES.test(part)
+      )
+    ) {
+      throw new Error('文件路径不在允许的文件范围内')
+    }
+    return target
+  }
+
   return async (name, rawArguments, signal) => {
     signal.throwIfAborted()
     const args = parseArguments(rawArguments)
@@ -477,7 +555,7 @@ export function createWorkspaceActionExecutor(
     if (name === 'create_workspace_file') {
       if (
         !exactKeys(args, ['path', 'content']) ||
-        !validRelativePath(args.path) ||
+        !validFilePath(args.path) ||
         !validNewText(args.content)
       ) {
         return result('error', { error: '创建文件参数无效' })
@@ -489,7 +567,8 @@ export function createWorkspaceActionExecutor(
           args.content,
           signal,
           assertAccess,
-          approve
+          approve,
+          options
         )
       } catch (error) {
         signal.throwIfAborted()
@@ -500,7 +579,7 @@ export function createWorkspaceActionExecutor(
     if (name === 'edit_workspace_file') {
       if (
         !exactKeys(args, ['path', 'proposedText', 'expectedSha256']) ||
-        !validRelativePath(args.path) ||
+        !validFilePath(args.path) ||
         typeof args.proposedText !== 'string' ||
         args.proposedText.length > 2000 ||
         typeof args.expectedSha256 !== 'string' ||
@@ -510,18 +589,25 @@ export function createWorkspaceActionExecutor(
       }
       try {
         const cwd = await checkedRoot(root, assertAccess)
-        const path = args.path
-        const snapshot = await createProjectSnapshot(cwd, [resolve(cwd, path)], signal)
+        const target = await checkedTarget(cwd, args.path)
+        const path = options.isPathAllowed ? target : args.path
+        const alias = basename(target)
+        const parents = await inspectParents(
+          parse(target).root,
+          relative(parse(target).root, target).split(sep).join('/')
+        )
+        const snapshot = await createProjectSnapshot(dirname(target), [target], signal)
         signal.throwIfAborted()
         if (!assertAccess()) return result('error', { error: '工作区授权已失效' })
-        const baseline = snapshot.baselines?.get(path)
+        const baseline = snapshot.baselines?.get(alias)
         if (
           !baseline ||
+          !sameLocalPath(baseline.absolutePath, target) ||
           createHash('sha256').update(baseline.originalBytes).digest('hex') !== args.expectedSha256
         ) {
           return result('conflict', { path, error: '文件内容已变化，请重新读取后再修改' })
         }
-        const prepared = await prepareChange(snapshot, path, args.proposedText, signal)
+        const prepared = await prepareChange(snapshot, alias, args.proposedText, signal)
         signal.throwIfAborted()
         if (!assertAccess()) return result('error', { error: '工作区授权已失效' })
         if (prepared.status !== 'prepared')
@@ -539,24 +625,27 @@ export function createWorkspaceActionExecutor(
         )
         signal.throwIfAborted()
         if (!assertAccess()) return result('error', { error: '工作区授权已失效' })
-        if (!accepted) return result('cancelled', { path, error: '用户未批准文件修改' })
+        if (!accepted) return result('cancelled', { path, error: '当前策略未允许文件修改' })
 
-        const outcome = await commitChange(
-          snapshot,
-          prepared,
-          signal,
-          assertAccess,
-          () => undefined
-        )
+        await confirmParents(parents)
+        await checkedTarget(cwd, target)
+        signal.throwIfAborted()
+        const canReplace = (): boolean =>
+          assertAccess() &&
+          (options.isPathAllowed ? options.isPathAllowed(target) : insideLocalPath(cwd, target))
+
+        const outcome = await commitChange(snapshot, prepared, signal, canReplace, (phase) => {
+          if (phase === 'staging') options.onEffect?.()
+        })
         let accessValid = false
         try {
-          accessValid = assertAccess()
+          accessValid = canReplace()
         } catch {
           // The commit outcome is authoritative even if access was revoked afterward.
         }
         return result(outcome.status, {
           path,
-          message: outcome.message,
+          message: outcome.status === 'applied' ? '文件修改已提交并复核' : outcome.message,
           ...(outcome.recovery ? { recoveryPath: outcome.recovery.path } : {}),
           cleanupWarning: outcome.cleanupWarning,
           accessValid
@@ -570,7 +659,8 @@ export function createWorkspaceActionExecutor(
     if (name === 'run_workspace_command') {
       if (!validCommand(args)) return result('error', { error: '命令参数无效' })
       try {
-        const cwd = await checkedRoot(root, assertAccess)
+        const defaultCwd = await checkedRoot(root, assertAccess)
+        const cwd = await checkedTarget(defaultCwd, args.cwd ?? '', true)
         const before = await lstat(cwd)
         signal.throwIfAborted()
         if (!assertAccess() || !before.isDirectory() || before.isSymbolicLink()) {
@@ -582,8 +672,9 @@ export function createWorkspaceActionExecutor(
         )
         signal.throwIfAborted()
         if (!assertAccess()) return result('error', { error: '工作区授权已失效' })
-        if (!accepted) return result('cancelled', { error: '用户未批准命令执行' })
+        if (!accepted) return result('cancelled', { cwd, error: '当前策略未允许命令执行' })
         await checkedRoot(root, assertAccess)
+        await checkedTarget(defaultCwd, cwd, true)
         const after = await lstat(cwd)
         signal.throwIfAborted()
         if (
@@ -595,7 +686,16 @@ export function createWorkspaceActionExecutor(
         ) {
           return result('error', { error: '工作区目录或授权已变化，未执行命令' })
         }
-        return await runCommand(cwd, args.program, args.args, signal, assertAccess)
+        return await runCommand(
+          cwd,
+          args.program,
+          args.args,
+          signal,
+          () =>
+            assertAccess() &&
+            (options.isPathAllowed ? options.isPathAllowed(cwd) : insideLocalPath(defaultCwd, cwd)),
+          options.onEffect
+        )
       } catch (error) {
         signal.throwIfAborted()
         return result('error', { error: error instanceof Error ? error.message : '命令执行失败' })

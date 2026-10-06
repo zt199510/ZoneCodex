@@ -21,6 +21,12 @@ import type {
   CommandExecutionEvent
 } from './command-preparation'
 import type { TaskRecord } from './task'
+import type {
+  ExecutionApproval,
+  ExecutionInfo,
+  PermissionMode,
+  PermissionsState
+} from './execution'
 
 // 正式聊天与 Agent 共用的流式文字增量事件。
 export type StreamDelta = AgentDelta
@@ -75,6 +81,12 @@ export interface AppAPI {
   // 监听终端事件
   onTerminalEvent: (listener: (event: TerminalEvent) => void) => () => void
   // 真实 Agent 请求接口
+  resolveAgentExecution: (context: AgentRequestContext) => Promise<ExecutionInfo>
+  getExecutionPermissions: () => Promise<PermissionsState>
+  setExecutionPermissions: (mode: PermissionMode) => Promise<PermissionsState>
+  getPendingExecutionApproval: () => Promise<ExecutionApproval | null>
+  respondToExecutionApproval: (approvalId: string, approved: boolean) => Promise<boolean>
+  onExecutionApprovalChange: (listener: (approval: ExecutionApproval | null) => void) => () => void
   startAgentRequest: (
     requestId: string,
     prompt: string,

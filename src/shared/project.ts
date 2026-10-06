@@ -1,6 +1,8 @@
+import { parseExecutionInfo, type ExecutionInfo } from './execution'
+
 export type ToolScope =
-  | { kind: 'time'; workspaceId?: string }
-  | { kind: 'project'; snapshotId: string; workspaceId?: string }
+  | { kind: 'time'; workspaceId?: string; executionId?: string }
+  | { kind: 'project'; snapshotId: string; workspaceId?: string; executionId?: string }
 
 /** 当前窗口的项目上下文。目录授权和文件快照仍由主进程单独维护。 */
 export type Workspace = {
@@ -60,6 +62,7 @@ export type AgentRequestContext = {
   conversationId: string
   workspaceId?: string
   attachment?: { snapshotId: string; allowUpload: true }
+  execution?: ExecutionInfo
 }
 
 type PlainRecord = Record<string, unknown>
@@ -207,14 +210,22 @@ export function parseToolScope(value: unknown): ToolScope | null {
   try {
     if (!isPlainRecord(value) || typeof value.kind !== 'string') return null
     if (hasOwn(value, 'workspaceId') && !isAgentId(value.workspaceId)) return null
+    if (
+      hasOwn(value, 'executionId') &&
+      (typeof value.executionId !== 'string' || !/^[a-f0-9]{64}$/.test(value.executionId))
+    )
+      return null
     const workspace = hasOwn(value, 'workspaceId')
       ? { workspaceId: value.workspaceId as string }
       : {}
+    const execution = hasOwn(value, 'executionId')
+      ? { executionId: value.executionId as string }
+      : {}
     if (value.kind === 'time') {
-      return hasOwn(value, 'snapshotId') ? null : { kind: 'time', ...workspace }
+      return hasOwn(value, 'snapshotId') ? null : { kind: 'time', ...workspace, ...execution }
     }
     if (value.kind === 'project' && isAgentId(value.snapshotId)) {
-      return { kind: 'project', snapshotId: value.snapshotId, ...workspace }
+      return { kind: 'project', snapshotId: value.snapshotId, ...workspace, ...execution }
     }
     return null
   } catch {
@@ -227,13 +238,22 @@ export function parseAgentRequestContext(value: unknown): AgentRequestContext | 
     if (!isPlainRecord(value) || !isAgentId(value.conversationId)) return null
     if (
       Object.keys(value).some(
-        (key) => key !== 'conversationId' && key !== 'workspaceId' && key !== 'attachment'
+        (key) =>
+          key !== 'conversationId' &&
+          key !== 'workspaceId' &&
+          key !== 'attachment' &&
+          key !== 'execution'
       ) ||
       (hasOwn(value, 'workspaceId') && !isAgentId(value.workspaceId))
     )
       return null
     const context: AgentRequestContext = { conversationId: value.conversationId }
     if (hasOwn(value, 'workspaceId')) context.workspaceId = value.workspaceId as string
+    if (hasOwn(value, 'execution')) {
+      const execution = parseExecutionInfo(value.execution)
+      if (!execution) return null
+      context.execution = execution
+    }
     if (hasOwn(value, 'attachment')) {
       const attachment = value.attachment
       if (
@@ -253,13 +273,15 @@ export function parseAgentRequestContext(value: unknown): AgentRequestContext | 
 
 export function toolScopeForAgentRequest(context: AgentRequestContext): ToolScope {
   const workspace = context.workspaceId ? { workspaceId: context.workspaceId } : {}
+  const execution = context.execution ? { executionId: context.execution.scopeId } : {}
   return context.attachment
-    ? { kind: 'project', snapshotId: context.attachment.snapshotId, ...workspace }
-    : { kind: 'time', ...workspace }
+    ? { kind: 'project', snapshotId: context.attachment.snapshotId, ...workspace, ...execution }
+    : { kind: 'time', ...workspace, ...execution }
 }
 
 export function sameToolScope(a: ToolScope, b: ToolScope): boolean {
   if (a.workspaceId !== b.workspaceId) return false
+  if (a.executionId !== b.executionId) return false
   if (a.kind === 'time') return b.kind === 'time'
   return b.kind === 'project' && a.snapshotId === b.snapshotId
 }
@@ -409,7 +431,7 @@ export function parseWorkspaceSelectionResult(value: unknown): WorkspaceSelectio
 export function isToolAllowed(name: unknown, scope: ToolScope): name is string {
   return (
     name === 'get_current_time' ||
-    (scope.workspaceId !== undefined &&
+    ((scope.workspaceId !== undefined || scope.executionId !== undefined) &&
       (name === 'list_workspace_files' ||
         name === 'search_workspace_text' ||
         name === 'read_workspace_file' ||

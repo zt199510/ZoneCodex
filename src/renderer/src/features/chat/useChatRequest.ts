@@ -2,8 +2,15 @@ import { useEffect, useRef, useState } from 'react'
 import { selectToolHistory } from '../../../../shared/agent-history'
 import type { ProtocolItem, ToolRun } from '../../../../shared/agent-history'
 import type { AgentRequestContext, ProjectSelection, Workspace } from '../../../../shared/project'
+import { toolScopeForAgentRequest } from '../../../../shared/project'
 import type { ChatAttachment, ChatMessage } from '../../../../shared/conversation'
 import type { Conversation } from '../../../../shared/conversation-library'
+import {
+  hasLocalSideEffects,
+  sameExecutionInfo,
+  type ExecutionInfo,
+  type PermissionsState
+} from '../../../../shared/execution'
 import { isTerminalTaskStatus, maxTaskRecords } from '../../../../shared/task'
 import type { OperationControl } from '../conversation/useOperation'
 import { resolveAgentRequest } from './agent-request'
@@ -13,6 +20,10 @@ export type ToolActivity = Record<string, string[]>
 // 输入框和请求层共用同一条上限；请求层仍需独立校验，避免其他入口绕过表单限制。
 const maxPromptLength = 2000
 
+function samePermissions(expected: PermissionsState, current: PermissionsState | null): boolean {
+  return current?.mode === expected.mode && current.revision === expected.revision
+}
+
 type ActiveRequest = {
   conversationId: string
   requestId: string
@@ -20,6 +31,12 @@ type ActiveRequest = {
   assistantId: string
   prompt: string
   context: AgentRequestContext
+  sourceMessages: readonly ChatMessage[]
+  sourceToolRuns: readonly ToolRun[]
+  permissions: PermissionsState
+  expectedExecution?: ExecutionInfo
+  phase: 'resolving' | 'running'
+  sideEffectStarted: boolean
   history: ProtocolItem[]
   trace: string[]
   attachments: ChatAttachment[]
@@ -33,6 +50,8 @@ type ChatRetrySource = {
   snapshotId: string | null
   attachments: ChatAttachment[]
   workspaceId: string | null
+  permissions: PermissionsState
+  execution?: ExecutionInfo
 }
 type UpdateMessages = (
   conversationId: string,
@@ -51,6 +70,8 @@ type ChatRequestOptions = {
   operations: OperationControl
   projectSelection: ProjectSelection | null
   workspace: Workspace | null
+  getPermissions: () => PermissionsState | null
+  observeExecution: (execution: ExecutionInfo) => void
 }
 type ChatRequest = {
   error: string | null
@@ -63,7 +84,8 @@ type ChatRequest = {
     sourceProjectSelection?: ProjectSelection | null,
     sourceWorkspace?: Workspace | null,
     onAccepted?: (accepted: AcceptedChatRequest) => void,
-    messageAttachments?: readonly ChatAttachment[]
+    messageAttachments?: readonly ChatAttachment[],
+    expectedExecution?: ExecutionInfo
   ) => boolean
   canRetry: (assistantId: string) => boolean
   retry: (assistantId: string) => boolean
@@ -87,7 +109,9 @@ export function useChatRequest({
   toolRuns,
   operations,
   projectSelection,
-  workspace
+  workspace,
+  getPermissions,
+  observeExecution
 }: ChatRequestOptions): ChatRequest {
   const { begin, finish } = operations
   const [error, setError] = useState<string | null>(null)
@@ -111,6 +135,10 @@ export function useChatRequest({
     const offProgress = window.api.onAgentProgress((event) => {
       const active = activeRequest.current
       if (!active || active.requestId !== event.requestId) return
+      if (hasLocalSideEffects([event.message])) {
+        active.sideEffectStarted = true
+        retrySources.current.delete(active.assistantId)
+      }
       active.trace = [...active.trace, event.message].slice(-30)
       setToolActivity((previous) => ({
         ...previous,
@@ -153,7 +181,9 @@ export function useChatRequest({
       const active = activeRequest.current
       activeRequest.current = null
       if (!active) return
-      void window.api.cancelAgentRequest(active.requestId).catch(() => undefined)
+      if (active.phase === 'running') {
+        void window.api.cancelAgentRequest(active.requestId).catch(() => undefined)
+      }
     }
   }, [updateConversation, updateMessages])
 
@@ -164,6 +194,13 @@ export function useChatRequest({
     items: ProtocolItem[],
     answer?: string
   ): void {
+    active.sideEffectStarted ||= hasLocalSideEffects(trace)
+    if (active.sideEffectStarted) retrySources.current.delete(active.assistantId)
+    const visibleAnswer =
+      answer ??
+      (active.sideEffectStarted && status !== 'complete'
+        ? '本地操作可能已经执行。请先核对文件或命令结果，再决定是否重新请求。'
+        : undefined)
     updateConversation(active.conversationId, (previous) => ({
       ...previous,
       messages: previous.messages.map((message) => {
@@ -172,7 +209,9 @@ export function useChatRequest({
           ...message,
           status,
           content:
-            message.id === active.assistantId && answer !== undefined ? answer : message.content
+            message.id === active.assistantId && visibleAnswer !== undefined
+              ? visibleAnswer
+              : message.content
         }
       }),
       toolRuns: previous.toolRuns.map((run) =>
@@ -190,6 +229,49 @@ export function useChatRequest({
 
   async function run(active: ActiveRequest): Promise<void> {
     try {
+      const execution = await window.api.resolveAgentExecution(active.context)
+      // Resolving the directory and settings is asynchronous. Stop can finish
+      // the placeholder immediately; a late resolution must not start a task.
+      if (activeRequest.current !== active) return
+      observeExecution(execution)
+      if (
+        !samePermissions(active.permissions, execution) ||
+        !samePermissions(active.permissions, getPermissions())
+      ) {
+        throw new Error('权限设置已变化，请重新发送消息。')
+      }
+      if (active.expectedExecution && !sameExecutionInfo(active.expectedExecution, execution)) {
+        retrySources.current.delete(active.assistantId)
+        throw new Error('运行目录或权限已变化，请核对后重新发送消息。')
+      }
+      active.context = { ...active.context, execution }
+      // Keep the original project and attachment fields; only the execution
+      // information comes from the main-process resolver.
+      const scope = toolScopeForAgentRequest(active.context)
+      active.history = selectToolHistory(
+        active.sourceMessages,
+        active.sourceToolRuns,
+        'live',
+        scope
+      )
+      const source = retrySources.current.get(active.assistantId)
+      if (source) source.execution = execution
+      updateConversation(active.conversationId, (previous) => ({
+        ...previous,
+        toolRuns: [
+          ...previous.toolRuns,
+          {
+            requestId: active.requestId,
+            userId: active.userId,
+            assistantId: active.assistantId,
+            mode: 'live',
+            scope,
+            trace: [],
+            items: []
+          }
+        ]
+      }))
+      active.phase = 'running'
       const result = await window.api.startAgentRequest(
         active.requestId,
         active.prompt,
@@ -203,13 +285,23 @@ export function useChatRequest({
       } else if (result.status === 'cancelled') {
         finishToolTurn(active, 'cancelled', result.trace, [])
       } else {
-        finishToolTurn(active, 'failed', result.trace, [])
+        finishToolTurn(
+          active,
+          'failed',
+          result.trace,
+          [],
+          active.sideEffectStarted || hasLocalSideEffects(result.trace) ? result.error : undefined
+        )
         setError(result.error)
       }
-    } catch {
+    } catch (cause) {
       if (activeRequest.current?.requestId === active.requestId) {
         finishToolTurn(active, 'failed', active.trace, [])
-        setError('回复连接中断，请稍后重试。')
+        setError(
+          active.phase === 'resolving' && cause instanceof Error
+            ? cause.message
+            : '回复连接中断，请稍后重试。'
+        )
       }
     } finally {
       if (activeRequest.current?.requestId === active.requestId) {
@@ -227,7 +319,8 @@ export function useChatRequest({
     sourceProjectSelection: ProjectSelection | null = projectSelection,
     sourceWorkspace: Workspace | null = workspace,
     onAccepted?: (accepted: AcceptedChatRequest) => void,
-    messageAttachments: readonly ChatAttachment[] = []
+    messageAttachments: readonly ChatAttachment[] = [],
+    expectedExecution?: ExecutionInfo
   ): boolean {
     const content = rawContent.trim()
     // `begin` 仍是最终的原子互斥点；这里的同步检查让保存、选文件或生成期间
@@ -244,11 +337,14 @@ export function useChatRequest({
       setError(`请输入不超过 ${maxPromptLength} 个字符的消息。`)
       return false
     }
-    let history: ProtocolItem[]
+    const permissions = getPermissions()
+    if (!permissions) {
+      setError('权限设置尚未就绪，请稍后再发送。')
+      return false
+    }
     let request: ReturnType<typeof resolveAgentRequest>
     try {
       request = resolveAgentRequest(targetConversationId, sourceWorkspace, sourceProjectSelection)
-      history = selectToolHistory(sourceMessages, sourceToolRuns, 'live', request.scope)
     } catch (error) {
       setError(error instanceof Error ? error.message : '工具上下文无效，请重新说明问题。')
       return false
@@ -266,7 +362,13 @@ export function useChatRequest({
       assistantId: crypto.randomUUID(),
       prompt: content,
       context: request.context,
-      history,
+      sourceMessages: [...sourceMessages],
+      sourceToolRuns: [...sourceToolRuns],
+      permissions: { ...permissions },
+      ...(expectedExecution ? { expectedExecution } : {}),
+      phase: 'resolving',
+      sideEffectStarted: false,
+      history: [],
       trace: [],
       attachments,
       taskId: crypto.randomUUID()
@@ -286,18 +388,6 @@ export function useChatRequest({
           ...(active.attachments.length > 0 ? { attachments: active.attachments } : {})
         },
         { id: active.assistantId, role: 'assistant', content: '', status: 'pending' }
-      ],
-      toolRuns: [
-        ...previous.toolRuns,
-        {
-          requestId: active.requestId,
-          userId: active.userId,
-          assistantId: active.assistantId,
-          mode: 'live',
-          scope: request.scope,
-          trace: [],
-          items: []
-        }
       ]
     }))
     onAccepted?.({
@@ -312,7 +402,8 @@ export function useChatRequest({
       sourceToolRuns: [...sourceToolRuns],
       snapshotId: sourceProjectSelection?.snapshotId ?? null,
       attachments,
-      workspaceId: sourceWorkspace?.workspaceId ?? null
+      workspaceId: sourceWorkspace?.workspaceId ?? null,
+      permissions: { ...permissions }
     })
     void run(active)
     return true
@@ -325,6 +416,7 @@ export function useChatRequest({
       source.conversationId === conversationId &&
       source.snapshotId === (projectSelection?.snapshotId ?? null) &&
       source.workspaceId === (workspace?.workspaceId ?? null) &&
+      samePermissions(source.permissions, getPermissions()) &&
       operations.isIdle() &&
       !activeRequest.current
     )
@@ -333,7 +425,7 @@ export function useChatRequest({
   function retry(assistantId: string): boolean {
     const source = retrySources.current.get(assistantId)
     if (!source || !canRetry(assistantId)) return false
-    return send(
+    const accepted = send(
       source.prompt,
       source.sourceMessages,
       source.sourceToolRuns,
@@ -341,13 +433,22 @@ export function useChatRequest({
       projectSelection,
       workspace,
       undefined,
-      source.attachments
+      source.attachments,
+      source.execution
     )
+    if (accepted) retrySources.current.delete(assistantId)
+    return accepted
   }
 
   async function stop(): Promise<void> {
     const active = activeRequest.current
     if (!active) return
+    if (active.phase === 'resolving') {
+      activeRequest.current = null
+      finishToolTurn(active, 'cancelled', active.trace, [])
+      finish('generating')
+      return
+    }
     try {
       await window.api.cancelAgentRequest(active.requestId)
     } catch {

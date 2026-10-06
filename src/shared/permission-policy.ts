@@ -1,4 +1,29 @@
 import type { CommandProposalArgs } from './command-proposal'
+import type { PermissionMode } from './execution'
+
+export type LocalPermissionDecision = 'allow' | 'review' | 'ask' | 'deny'
+
+/** Policy only; command isolation must be provided by a real execution backend. */
+export function decideLocalPermission({
+  operation,
+  mode,
+  withinWritableRoots,
+  approvalPolicy = mode === 'full-access' ? 'never' : 'on-request',
+  sandboxAvailable = false
+}: {
+  operation: 'read' | 'write' | 'command'
+  mode: PermissionMode
+  withinWritableRoots: boolean
+  approvalPolicy?: 'on-request' | 'never'
+  sandboxAvailable?: boolean
+}): LocalPermissionDecision {
+  if (mode === 'full-access') return 'allow'
+  if (operation === 'read') return 'allow'
+  if (operation === 'write' && withinWritableRoots) return 'allow'
+  if (operation === 'command' && sandboxAvailable && withinWritableRoots) return 'allow'
+  if (approvalPolicy === 'never') return 'deny'
+  return mode === 'auto-approve' ? 'review' : 'ask'
+}
 
 export type PermissionRisk = 'read_only' | 'project_write' | 'command'
 export type ApprovalRequirement = 'none' | 'user'
