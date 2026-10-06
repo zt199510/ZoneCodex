@@ -163,6 +163,8 @@ export async function approveStandaloneCommand(
   })
   if (decision === 'allow') return true
   if (decision === 'deny') return false
+  // Legacy proposals have no verified user request for risk review. Missing
+  // context follows the same manual-approval fallback as an unknown verdict.
   const approved = await requestExecutionApproval(windowId, { ...request, kind: 'command' }, signal)
   const current = getExecutionPermissionState(windowId)
   return (

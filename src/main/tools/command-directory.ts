@@ -1,20 +1,70 @@
-import { lstat, readFile, realpath } from 'node:fs/promises'
+import { lstat, open, realpath } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import { createHash, randomUUID } from 'node:crypto'
-export type DirectoryRead = {
+export type CommandDirectoryBaseline = {
   directory: string
-  scripts: { typecheck: string; pretypecheck?: string; posttypecheck?: string }
-  packageManager?: string
+  identity: { dev: number; ino: number }
   npmrc: 'present' | 'absent'
   fingerprint: string
 }
+export type DirectoryRead = CommandDirectoryBaseline & {
+  scripts: { typecheck: string; pretypecheck?: string; posttypecheck?: string }
+  packageManager?: string
+}
 const MAX = 64 * 1024
-async function regular(path: string): Promise<Buffer | null> {
-  const s = await lstat(path).catch(() => null)
-  if (!s || !s.isFile() || s.isSymbolicLink() || s.size > MAX) return null
-  const b = await readFile(path)
-  if (b.length > MAX) return null
-  return b
+async function regular(path: string, optional = false): Promise<Buffer | null> {
+  const before = await lstat(path).catch((error: NodeJS.ErrnoException) => {
+    if (optional && error.code === 'ENOENT') return null
+    throw error
+  })
+  if (!before) return null
+  if (!before.isFile() || before.isSymbolicLink() || before.size > MAX) {
+    throw new Error('目录配置不是可读取的普通文件，或内容过长')
+  }
+  const handle = await open(path, 'r')
+  try {
+    const opened = await handle.stat()
+    if (!opened.isFile() || opened.dev !== before.dev || opened.ino !== before.ino) {
+      throw new Error('目录配置已变化，请重新读取')
+    }
+    const buffer = Buffer.alloc(MAX + 1)
+    let length = 0
+    while (length < buffer.length) {
+      const read = await handle.read(buffer, length, buffer.length - length, length)
+      if (read.bytesRead === 0) break
+      length += read.bytesRead
+    }
+    const after = await lstat(path)
+    const current = await handle.stat()
+    if (
+      length > MAX ||
+      !after.isFile() ||
+      after.isSymbolicLink() ||
+      after.dev !== opened.dev ||
+      after.ino !== opened.ino ||
+      current.size !== length ||
+      current.size !== opened.size ||
+      current.mtimeMs !== opened.mtimeMs ||
+      current.ctimeMs !== opened.ctimeMs
+    ) {
+      throw new Error('目录配置已变化或内容过长，请重新读取')
+    }
+    return buffer.subarray(0, length)
+  } finally {
+    await handle.close()
+  }
+}
+export function sameCommandDirectory(
+  current: CommandDirectoryBaseline,
+  baseline: CommandDirectoryBaseline
+): boolean {
+  return (
+    current.directory === baseline.directory &&
+    current.identity.dev === baseline.identity.dev &&
+    current.identity.ino === baseline.identity.ino &&
+    current.fingerprint === baseline.fingerprint &&
+    current.npmrc === baseline.npmrc
+  )
 }
 export async function inspectCommandDirectory(input: string): Promise<DirectoryRead> {
   if (typeof input !== 'string' || input.startsWith('\\\\')) throw new Error('不支持网络目录')
@@ -41,6 +91,7 @@ export async function inspectCommandDirectory(input: string): Promise<DirectoryR
     throw new Error('缺少非空 scripts.typecheck')
   const out: DirectoryRead = {
     directory: dir,
+    identity: { dev: ds.dev, ino: ds.ino },
     scripts: { typecheck: (scripts as Record<string, string>).typecheck },
     npmrc: 'absent',
     fingerprint: ''
@@ -59,12 +110,27 @@ export async function inspectCommandDirectory(input: string): Promise<DirectoryR
     if (typeof pm !== 'string' || pm.length > 200) throw new Error('packageManager 声明无效')
     out.packageManager = pm
   }
-  const npmrc = await regular(join(dir, '.npmrc'))
+  const npmrc = await regular(join(dir, '.npmrc'), true)
   out.npmrc = npmrc ? 'present' : 'absent'
   out.fingerprint = createHash('sha256')
-    .update(pkg)
-    .update(npmrc ?? Buffer.from('absent'))
+    .update(
+      JSON.stringify({
+        package: createHash('sha256').update(pkg).digest('hex'),
+        npmrc: npmrc === null ? null : createHash('sha256').update(npmrc).digest('hex')
+      })
+    )
     .digest('hex')
+  const current = await lstat(dir)
+  const canonical = await realpath(resolve(input))
+  if (
+    !current.isDirectory() ||
+    current.isSymbolicLink() ||
+    current.dev !== ds.dev ||
+    current.ino !== ds.ino ||
+    canonical !== dir
+  ) {
+    throw new Error('目录已变化，请重新选择并读取')
+  }
   return out
 }
 export const newDirectoryId = (): string => randomUUID()

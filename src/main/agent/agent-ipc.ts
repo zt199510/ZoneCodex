@@ -33,6 +33,7 @@ import {
   type ExecutionApprovalInput
 } from '../../shared/execution'
 import { hasExecutionApproval, requestExecutionApproval } from './execution-approval'
+import { reviewExecutionApproval } from './approval-reviewer'
 import {
   executionStillCurrent,
   getExecutionPermissionState,
@@ -82,7 +83,6 @@ export function registerAgentRequest(
     const windowId = BrowserWindow.fromWebContents(event.sender)!.id
     const mode = parsePermissionMode(value)
     if (!mode) throw new Error('权限模式无效')
-    if (mode === 'auto-approve') throw new Error('“帮我批准”尚未启用')
     if (isBusy(windowId)) throw new Error('请等待当前任务结束后切换权限')
     return setExecutionPermissionMode(windowId, mode)
   })
@@ -291,11 +291,30 @@ export function registerAgentRequest(
                       before: request.before,
                       after: request.after
                     }
-                  : { ...common, kind: 'command', program: request.program, args: request.args }
+                  : {
+                      ...common,
+                      kind: 'command',
+                      program: request.program,
+                      args: [...request.args]
+                    }
+            if (!updateTask(windowId, lifecycleId, 'waiting_approval')) {
+              controller.abort()
+              return false
+            }
             clearTimeout(timer)
-            updateTask(windowId, lifecycleId, 'waiting_approval')
             try {
-              const answer = await requestExecutionApproval(windowId, approval, signal)
+              let answer = false
+              if (decision === 'review') {
+                const verdict = await reviewExecutionApproval(approval, prompt.trim(), signal)
+                signal.throwIfAborted()
+                if (!assertWorkspaceAccess()) return false
+                answer = verdict === 'approve'
+              }
+              if (!answer) {
+                signal.throwIfAborted()
+                if (!assertWorkspaceAccess()) return false
+                answer = await requestExecutionApproval(windowId, approval, signal)
+              }
               signal.throwIfAborted()
               const approved = answer && assertWorkspaceAccess()
               if (approved) {
@@ -307,8 +326,8 @@ export function registerAgentRequest(
               return approved
             } finally {
               if (!controller.signal.aborted) {
-                updateTask(windowId, lifecycleId, 'running')
-                timer = armTimeout()
+                if (updateTask(windowId, lifecycleId, 'running')) timer = armTimeout()
+                else controller.abort()
               }
             }
           }

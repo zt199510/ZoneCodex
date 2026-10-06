@@ -7,7 +7,9 @@ import {
   type CommandSource
 } from '../../shared/command-preparation'
 import { claimCommandPreparation } from './command-preparation-ipc'
+import { getExecutionPermissionState } from './execution-context'
 import { getCommandTemplate } from '../../shared/permission-policy'
+import { inspectCommandDirectory, sameCommandDirectory } from '../tools/command-directory'
 import {
   attachTaskRuntime,
   createTask,
@@ -95,6 +97,7 @@ export function registerCommandExecution(
     const req = parseCommandExecutionRequest(raw)
     if (!req || !isSourceAllowed(w.id, req.source))
       return { status: 'error' as const, error: '执行来源无效' }
+    const permissionState = getExecutionPermissionState(w.id)
     const confirmationKey = `${w.id}:${req.confirmationId}`
     if (
       confirmations.has(confirmationKey) ||
@@ -163,7 +166,7 @@ export function registerCommandExecution(
         ),
         controller.signal
       )
-      if (controller.signal.aborted || !running.has(executionId)) {
+      if (controller.signal.aborted || running.get(executionId) !== item) {
         stop(executionId, 'cancelled', '用户已取消执行')
         return { status: 'error' as const, error: '执行已取消' }
       }
@@ -175,9 +178,35 @@ export function registerCommandExecution(
         return { status: 'error' as const, error: '未批准本次命令执行' }
       }
       // Approval applies to this concrete command, and its source must still be current.
-      if (w.isDestroyed() || !isSourceAllowed(w.id, req.source)) {
+      const sourceCurrent = (): boolean => {
+        if (
+          w.isDestroyed() ||
+          event.sender.isDestroyed() ||
+          event.sender.mainFrame !== event.senderFrame ||
+          !isSourceAllowed(w.id, req.source)
+        ) {
+          return false
+        }
+        const current = getExecutionPermissionState(w.id)
+        return (
+          current.mode === permissionState.mode && current.revision === permissionState.revision
+        )
+      }
+      if (!sourceCurrent()) {
         stop(executionId, 'cancelled', '执行来源已失效，请重新发起')
         return { status: 'error' as const, error: '执行来源已失效，请重新发起' }
+      }
+      const fresh = await inspectCommandDirectory(claimed.directory)
+      if (controller.signal.aborted || running.get(executionId) !== item) {
+        stop(executionId, 'cancelled', '用户已取消执行')
+        return { status: 'error' as const, error: '执行已取消' }
+      }
+      if (!sourceCurrent()) {
+        stop(executionId, 'cancelled', '执行来源已失效，请重新发起')
+        return { status: 'error' as const, error: '执行来源已失效，请重新发起' }
+      }
+      if (!sameCommandDirectory(fresh, claimed)) {
+        throw new Error('目录或配置已变化，请重新选择并准备')
       }
       if (!updateTask(w.id, taskId, 'running')) {
         stop(executionId, 'cancelled', '任务已结束，请重新发起')
@@ -233,7 +262,7 @@ export function registerCommandExecution(
       emit(w.id, { status: 'started', executionId })
       return { status: 'started' as const, executionId }
     } catch (error) {
-      if (controller.signal.aborted || !running.has(executionId)) {
+      if (controller.signal.aborted || running.get(executionId) !== item) {
         stop(executionId, 'cancelled', '用户已取消执行')
         return { status: 'error' as const, error: '执行已取消' }
       }

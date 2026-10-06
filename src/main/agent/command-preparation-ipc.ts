@@ -3,6 +3,8 @@ import { randomUUID } from 'node:crypto'
 import {
   inspectCommandDirectory,
   newDirectoryId,
+  sameCommandDirectory,
+  type CommandDirectoryBaseline,
   type DirectoryRead
 } from '../tools/command-directory'
 import {
@@ -55,9 +57,26 @@ export function registerCommandPreparation(
         properties: ['openDirectory'],
         title: '选择命令工作目录'
       })
-      if (selecting.get(w.id) !== token || w.isDestroyed()) return { status: 'cancelled' as const }
+      if (
+        selecting.get(w.id) !== token ||
+        w.isDestroyed() ||
+        event.sender.isDestroyed() ||
+        event.sender.mainFrame !== event.senderFrame ||
+        !isSourceAllowed(w.id, req.source)
+      ) {
+        return { status: 'cancelled' as const }
+      }
       if (picked.canceled || !picked.filePaths[0]) return { status: 'cancelled' as const }
       const read = await inspectCommandDirectory(picked.filePaths[0])
+      if (
+        selecting.get(w.id) !== token ||
+        w.isDestroyed() ||
+        event.sender.isDestroyed() ||
+        event.sender.mainFrame !== event.senderFrame ||
+        !isSourceAllowed(w.id, req.source)
+      ) {
+        return { status: 'cancelled' as const }
+      }
       const grantId = newDirectoryId()
       grants.set(grantId, {
         windowId: w.id,
@@ -96,7 +115,20 @@ export function registerCommandPreparation(
     }
     try {
       const fresh = await inspectCommandDirectory(g.directory)
-      if (fresh.fingerprint !== g.read.fingerprint || fresh.npmrc !== g.read.npmrc) {
+      if (
+        w.isDestroyed() ||
+        event.sender.isDestroyed() ||
+        event.sender.mainFrame !== event.senderFrame ||
+        grants.get(req.grantId) !== g ||
+        !isSourceAllowed(w.id, req.source)
+      ) {
+        return err('目录授权已失效')
+      }
+      if (Date.now() > g.expires) {
+        grants.delete(req.grantId)
+        return { status: 'expired' as const, error: '目录审查已过期' }
+      }
+      if (!sameCommandDirectory(fresh, g.read)) {
         grants.delete(req.grantId)
         return { status: 'conflict' as const, error: '目录配置已变化，请重新选择并读取' }
       }
@@ -147,7 +179,7 @@ export function claimCommandPreparation(
   windowId: number,
   preparedId: string,
   source: CommandSource
-): { directory: string } | null {
+): CommandDirectoryBaseline | null {
   const p = prepared.get(preparedId)
   if (
     !p ||
@@ -166,5 +198,10 @@ export function claimCommandPreparation(
   )
     return null
   grants.delete(p.grantId)
-  return { directory: g.directory }
+  return {
+    directory: g.read.directory,
+    identity: { ...g.read.identity },
+    fingerprint: g.read.fingerprint,
+    npmrc: g.read.npmrc
+  }
 }
