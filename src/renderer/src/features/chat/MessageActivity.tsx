@@ -34,7 +34,7 @@ const resultLabels: Record<string, string> = {
 }
 type ToolCall = { id: string; name: string; arguments: string; output?: string }
 type ActivityBlock =
-  { kind: 'commentary'; text: string; id: number } | { kind: 'tool'; call: ToolCall }
+  { kind: 'commentary'; text: string; id: number } | { kind: 'tools'; calls: ToolCall[] }
 function readObject(text: string | undefined): Record<string, unknown> | null {
   if (text === undefined) return null
   try {
@@ -73,7 +73,9 @@ function activityBlocks(items: readonly ProtocolItem[]): ActivityBlock[] {
     ) {
       const call: ToolCall = { id: item.call_id, name: item.name, arguments: item.arguments }
       calls.set(call.id, call)
-      blocks.push({ kind: 'tool', call })
+      const previous = blocks.at(-1)
+      if (previous?.kind === 'tools') previous.calls.push(call)
+      else blocks.push({ kind: 'tools', calls: [call] })
     } else if (
       item.type === 'function_call_output' &&
       typeof item.call_id === 'string' &&
@@ -167,8 +169,27 @@ function restoreCollapsedDetailsFocus(details: HTMLDetailsElement | null): void 
 function toolIcon(name: string): IconName {
   if (name === 'run_workspace_command' || name === 'propose_command') return 'terminal'
   if (name.includes('search')) return 'search'
+  if (name === 'read_project_file' || name === 'read_workspace_file') return 'book'
+  if (name === 'edit_workspace_file' || name === 'propose_file_change') return 'edit'
   if (name.includes('file')) return 'file'
   return 'code'
+}
+const fileTools = new Set([
+  'read_project_file',
+  'read_workspace_file',
+  'create_workspace_file',
+  'edit_workspace_file',
+  'propose_file_change'
+])
+function formatElapsed(milliseconds: number, pending = false): string {
+  if (!pending && milliseconds < 1000) return '不到1秒'
+  const seconds = Math.max(
+    0,
+    pending ? Math.floor(milliseconds / 1000) : Math.round(milliseconds / 1000)
+  )
+  const hours = Math.floor(seconds / 3600)
+  const minutes = Math.floor((seconds % 3600) / 60)
+  return `${hours ? `${hours}小时` : ''}${hours || minutes ? `${minutes}分钟` : ''}${seconds % 60}秒`
 }
 function toolState(call: ToolCall, status: ChatMessage['status']): string {
   if (call.output === undefined)
@@ -204,6 +225,150 @@ function toolState(call: ToolCall, status: ChatMessage['status']): string {
     return 'completed'
   return 'uncertain'
 }
+const toolCategories = [
+  {
+    names: ['read_project_file', 'read_workspace_file'],
+    action: '读取文件',
+    completed: '已读取文件',
+    icon: 'book'
+  },
+  { names: ['edit_workspace_file'], action: '编辑文件', completed: '编辑了文件', icon: 'edit' },
+  { names: ['create_workspace_file'], action: '新建文件', completed: '新建了文件', icon: 'file' },
+  {
+    names: ['run_workspace_command'],
+    action: '运行命令',
+    completed: '运行了命令',
+    icon: 'terminal'
+  },
+  {
+    names: ['search_project_text', 'search_workspace_text'],
+    action: '搜索文本',
+    completed: '已搜索文本',
+    icon: 'search'
+  },
+  { names: ['list_workspace_files'], action: '列出文件', completed: '已列出文件', icon: 'file' },
+  {
+    names: ['get_current_time'],
+    action: '读取当前时间',
+    completed: '已读取当前时间',
+    icon: 'code'
+  },
+  {
+    names: ['propose_file_change'],
+    action: '准备文件修改建议',
+    completed: '已准备文件修改建议',
+    icon: 'edit'
+  },
+  {
+    names: ['propose_command'],
+    action: '准备命令提案',
+    completed: '已准备命令提案',
+    icon: 'terminal'
+  }
+] satisfies { names: string[]; action: string; completed: string; icon: IconName }[]
+function groupSummary(
+  calls: readonly ToolCall[],
+  status: ChatMessage['status']
+): { label: string; icon: IconName; running: boolean } {
+  const categories = [
+    ...toolCategories,
+    ...Array.from(new Set(calls.map((call) => call.name)))
+      .filter((name) => !toolCategories.some((category) => category.names.includes(name)))
+      .map((name) => ({
+        names: [name],
+        action: toolLabels[name] ?? name,
+        completed: `${toolLabels[name] ?? name}已完成`,
+        icon: toolIcon(name)
+      }))
+  ].filter((category) => calls.some((call) => category.names.includes(call.name)))
+  const labels = categories.map((category) => {
+    const categoryCalls = calls.filter((call) => category.names.includes(call.name))
+    const states = new Set(categoryCalls.map((call) => toolState(call, status)))
+    if (states.size === 1 && states.has('completed')) {
+      if (
+        category.names.includes('edit_workspace_file') &&
+        categoryCalls.every((call) => readObject(call.output)?.status === 'no_change')
+      )
+        return '文件没有变化'
+      return category.completed
+    }
+    if (states.size === 1 && states.has('running')) return `正在${category.action}`
+    const outcomes = [
+      ['running', '处理中'],
+      ['failed', '失败'],
+      ['timed_out', '已超时'],
+      ['cancelled', '已取消'],
+      ['uncertain', '结果未确认']
+    ]
+      .filter(([state]) => states.has(state))
+      .map(([, label]) => label)
+    return `${category.action}（${outcomes.join('、')}）`
+  })
+  const icon = categories.find((category) => category.icon === 'edit')?.icon ?? categories[0].icon
+  return {
+    label: labels.join(''),
+    icon,
+    running: calls.some((call) => toolState(call, status) === 'running')
+  }
+}
+function ToolGroup({
+  calls,
+  status
+}: {
+  calls: ToolCall[]
+  status: ChatMessage['status']
+}): React.JSX.Element {
+  const details = useRef<HTMLDetailsElement>(null)
+  const single = calls.length === 1
+  const promoted = useRef(!single)
+  const interacted = useRef(false)
+  const [expanded, setExpanded] = useState(single)
+  const summary = groupSummary(calls, status)
+  useLayoutEffect(() => {
+    if (promoted.current || single) return
+    promoted.current = true
+    const active = details.current?.ownerDocument.activeElement
+    const childFocused =
+      active && details.current?.querySelector('.message-tool-group-items')?.contains(active)
+    if (!interacted.current && !childFocused) setExpanded(false)
+  }, [single])
+  const rememberChildInteraction = (event: React.SyntheticEvent<HTMLDetailsElement>): void => {
+    if (
+      event.target instanceof Node &&
+      event.currentTarget.querySelector('.message-tool-group-items')?.contains(event.target)
+    )
+      interacted.current = true
+  }
+  return (
+    <details
+      className={`message-tool-group${single ? ' is-single' : ''}`}
+      ref={details}
+      open={single || expanded}
+      onClickCapture={rememberChildInteraction}
+      onFocusCapture={rememberChildInteraction}
+      onToggle={(event) => {
+        if (event.target !== event.currentTarget) return
+        if (!event.currentTarget.open) restoreCollapsedDetailsFocus(event.currentTarget)
+        if (!single) setExpanded(event.currentTarget.open)
+      }}
+    >
+      <summary className="message-tool-group-summary">
+        <span className={`message-tool-icon${summary.running ? ' is-running' : ''}`}>
+          <Icon name={summary.icon} size={15} />
+        </span>
+        <span className="message-tool-summary-text">{summary.label}</span>
+        <span className="message-tool-chevron">
+          <Icon name="chevron" size={12} />
+        </span>
+      </summary>
+      <div className="message-tool-group-items">
+        {calls.map((call) => (
+          <ToolItem key={call.id} call={call} status={status} />
+        ))}
+      </div>
+    </details>
+  )
+}
 function ToolItem({
   call,
   status
@@ -216,6 +381,18 @@ function ToolItem({
   const command = call.name === 'run_workspace_command'
   const state = toolState(call, status)
   const requested = toolLabels[call.name] ?? call.name
+  const completedLabel =
+    call.name === 'read_project_file' || call.name === 'read_workspace_file'
+      ? '已读取'
+      : call.name === 'edit_workspace_file' && result?.status === 'applied'
+        ? '编辑了'
+        : call.name === 'create_workspace_file' && result?.status === 'created'
+          ? '新建了'
+          : result?.status === 'completed'
+            ? command
+              ? '运行了命令'
+              : requested
+            : (resultLabels[String(result?.status)] ?? requested)
   const label =
     state === 'running'
       ? requested
@@ -227,7 +404,7 @@ function ToolItem({
             ? `${requested}已取消`
             : state === 'timed_out'
               ? '命令已超时'
-              : (resultLabels[String(result?.status)] ?? (command ? '运行了命令' : requested))
+              : completedLabel
   const program = typeof args?.program === 'string' ? args.program : null
   const argv =
     Array.isArray(args?.args) && args.args.every((arg) => typeof arg === 'string')
@@ -255,8 +432,18 @@ function ToolItem({
           <Icon name={toolIcon(call.name)} size={15} />
         </span>
         <span className="message-tool-summary-text">
-          {label}
-          {target && ` · ${target.text}`}
+          <span>{label}</span>
+          {target &&
+            (fileTools.has(call.name) ? (
+              <>
+                {' '}
+                <span className="message-tool-file-reference" title={target.title}>
+                  {target.text}
+                </span>
+              </>
+            ) : (
+              ` · ${target.text}`
+            ))}
         </span>
         <span className="message-tool-chevron">
           <Icon name="chevron" size={12} />
@@ -378,9 +565,9 @@ export function MessageActivity({
   const elapsed = Number.isSafeInteger(parsedElapsed) ? parsedElapsed : null
   const timingLabel =
     status === 'pending'
-      ? `正在处理 · ${Math.floor(runningElapsed / 1000)}秒`
+      ? `正在处理 · ${formatElapsed(runningElapsed, true)}`
       : elapsed !== null
-        ? `用时 ${elapsed < 1000 ? '不到1' : Math.round(elapsed / 1000)}秒`
+        ? `用时 ${formatElapsed(elapsed)}`
         : '处理过程'
   if (blocks.length)
     return (
@@ -390,6 +577,7 @@ export function MessageActivity({
           ref={overview}
           open={expanded}
           onToggle={(event) => {
+            if (event.target !== event.currentTarget) return
             if (!event.currentTarget.open) restoreCollapsedDetailsFocus(event.currentTarget)
             setExpanded(event.currentTarget.open)
           }}
@@ -408,7 +596,7 @@ export function MessageActivity({
                   <MarkdownContent content={block.text} />
                 </div>
               ) : (
-                <ToolItem key={block.call.id} call={block.call} status={status} />
+                <ToolGroup key={block.calls[0].id} calls={block.calls} status={status} />
               )
             )}
           </div>

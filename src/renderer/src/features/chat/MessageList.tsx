@@ -6,7 +6,7 @@ import type { MessageChangeProposal } from '../../../../shared/change-proposal'
 import type { ChangeProposalStatus } from '../review/useConversationReview'
 import type { ToolActivity } from './useChatRequest'
 import { Icon } from '../../components/ui/Icon'
-import { MarkdownContent } from './MarkdownContent'
+import { MarkdownContent, UserMessageContent } from './MarkdownContent'
 import { MessageEditor } from './MessageEditor'
 import { MessageActivity } from './MessageActivity'
 import { MessageChangeProposalCard, MessageCommandProposalCard } from './MessageProposals'
@@ -133,6 +133,8 @@ export function MessageList({
                 {message.content ? (
                   message.role === 'assistant' ? (
                     <MarkdownContent content={message.content} />
+                  ) : message.role === 'user' ? (
+                    <UserMessageContent content={message.content} />
                   ) : (
                     message.content
                   )

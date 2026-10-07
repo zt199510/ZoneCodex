@@ -231,6 +231,7 @@
 }
 
 .message-tool-overview-summary,
+.message-tool-group-summary,
 .message-tool-summary {
   display: flex;
   align-items: center;
@@ -244,8 +245,16 @@
   line-height: 24px;
 }
 
+.message-tool-group-summary,
 .message-tool-summary {
   min-width: 0;
+  border-radius: 6px;
+}
+
+.message-tool-group-summary:focus-visible,
+.message-tool-summary:focus-visible {
+  outline: 2px solid #4a9eff;
+  outline-offset: 0;
 }
 
 .message-tool-summary-text {
@@ -255,11 +264,13 @@
   white-space: nowrap;
 }
 
+.message-tool-group-summary > .message-tool-chevron,
 .message-tool-summary > .message-tool-chevron {
   flex: 0 0 auto;
 }
 
 .message-tool-overview-summary::-webkit-details-marker,
+.message-tool-group-summary::-webkit-details-marker,
 .message-tool-summary::-webkit-details-marker {
   display: none;
 }
@@ -282,6 +293,7 @@
 }
 
 .message-tool-overview[open] > summary > svg,
+.message-tool-group[open] > summary .message-tool-chevron,
 .message-tool-item[open] > summary .message-tool-chevron {
   transform: rotate(90deg);
 }
@@ -297,8 +309,36 @@
   color: #242424;
 }
 
+.message-tool-group {
+  min-width: 0;
+}
+
+.message-tool-group-items {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+  margin-top: 1px;
+}
+
+.message-tool-group.is-single > .message-tool-group-summary {
+  display: none;
+}
+
+.message-tool-group.is-single > .message-tool-group-items {
+  margin-top: 0;
+}
+
+.message-tool-group-summary:hover,
 .message-tool-summary:hover {
   color: #454545;
+}
+
+.message-tool-file-reference {
+  color: #aaa;
+  text-decoration: underline;
+  text-decoration-color: #c7c7c7;
+  text-underline-offset: 2px;
 }
 
 .message-tool-icon {

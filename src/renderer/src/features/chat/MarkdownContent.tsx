@@ -3,6 +3,7 @@ import type { MouseEvent, ReactNode } from 'react'
 import Markdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import type { Components } from 'react-markdown'
+import type { Element, Nodes, Root, Text } from 'hast'
 import { createLowlight } from 'lowlight'
 import javascript from 'highlight.js/lib/languages/javascript'
 import typescript from 'highlight.js/lib/languages/typescript'
@@ -214,6 +215,73 @@ const components: Components = {
     <div className="markdown-table-scroll" role="region" aria-label="消息表格" tabIndex={0}>
       <table>{children}</table>
     </div>
+  )
+}
+
+const userComponents: Components = {
+  a: components.a
+}
+
+export function UserMessageContent({ content }: { content: string }): React.JSX.Element {
+  const linksOnly = useMemo(
+    () => () => (tree: Root) => {
+      const links: { node: Element; start: number; end: number }[] = []
+      function collect(node: Nodes): void {
+        if (node.type === 'element' && node.tagName === 'a') {
+          const start = node.position?.start.offset
+          let end = node.position?.end.offset
+          if (
+            typeof start === 'number' &&
+            typeof end === 'number' &&
+            start >= 0 &&
+            end <= content.length &&
+            end > start
+          ) {
+            const source = content.slice(start, end)
+            if (/^(?:https?:\/\/|www\.)/i.test(source)) {
+              const target = source.replace(/[，。；：！？、）】》」』]+$/u, '')
+              if (target !== source) {
+                node.properties.href = displayUrl(
+                  /^www\./i.test(target) ? `http://${target}` : target
+                )
+                node.children = [{ type: 'text', value: target }]
+                end = start + target.length
+              }
+            }
+            if (typeof node.properties.href === 'string' && displayUrl(node.properties.href))
+              links.push({ node, start, end })
+          }
+          return
+        }
+        if ('children' in node) node.children.forEach(collect)
+      }
+      collect(tree)
+      // Restore user text after Markdown's whitespace normalization. Only
+      // parsed links render as elements; other source text stays exact.
+      const children: (Text | Element)[] = []
+      let cursor = 0
+      for (const link of links) {
+        if (link.start < cursor) continue
+        if (link.start > cursor)
+          children.push({ type: 'text', value: content.slice(cursor, link.start) })
+        children.push(link.node)
+        cursor = link.end
+      }
+      if (cursor < content.length) children.push({ type: 'text', value: content.slice(cursor) })
+      tree.children = children
+    },
+    [content]
+  )
+  return (
+    <Markdown
+      remarkPlugins={[remarkGfm]}
+      rehypePlugins={[linksOnly]}
+      skipHtml
+      urlTransform={displayUrl}
+      components={userComponents}
+    >
+      {content}
+    </Markdown>
   )
 }
 
