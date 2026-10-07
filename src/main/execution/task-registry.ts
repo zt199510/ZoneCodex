@@ -227,7 +227,9 @@ export function cleanupTaskWindow(windowId: number): void {
     } catch {
       // Window teardown still records interruption even if a handle is already gone.
     }
-    updateTask(windowId, taskId, 'interrupted', { error: '窗口已关闭，任务未继续运行' })
+    updateTask(windowId, taskId, 'interrupted', {
+      error: '窗口已关闭，已请求停止任务；实际收尾结果无法继续显示'
+    })
   }
   runtimes.forEach((runtime, taskId) => {
     if (runtime.windowId === windowId) runtimes.delete(taskId)

@@ -12,7 +12,7 @@ export type ExecutionApprovalInput = {
 } & (
   | { kind: 'create'; path: string; content: string }
   | { kind: 'edit'; path: string; before: string; after: string }
-  | { kind: 'command'; program: string; args: string[] }
+  | { kind: 'command'; program: string; args: string[]; reason?: string }
 )
 
 /** One pending operation, never a persistent permission or directory grant. */
@@ -84,13 +84,27 @@ export function parseExecutionApproval(value: unknown): ExecutionApproval | null
   }
   if (
     value.kind === 'command' &&
-    exact(['program', 'args']) &&
+    (exact(['program', 'args']) || exact(['program', 'args', 'reason'])) &&
     localPath(value.program) &&
     Array.isArray(value.args) &&
     value.args.length <= 20 &&
-    value.args.every((arg) => typeof arg === 'string' && arg.length <= 500)
+    value.args.every((arg) => typeof arg === 'string' && arg.length <= 500) &&
+    (!Object.hasOwn(value, 'reason') ||
+      (typeof value.reason === 'string' &&
+        value.reason.length > 0 &&
+        value.reason.length <= 1000 &&
+        !Array.from(value.reason).some((character) => {
+          const code = character.charCodeAt(0)
+          return code < 9 || (code > 13 && code < 32) || code === 127
+        })))
   ) {
-    return { ...common, kind: 'command', program: value.program, args: [...value.args] }
+    return {
+      ...common,
+      kind: 'command',
+      program: value.program,
+      args: [...value.args],
+      ...(typeof value.reason === 'string' ? { reason: value.reason } : {})
+    }
   }
   return null
 }

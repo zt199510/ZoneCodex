@@ -8,10 +8,14 @@ const { buildSync } = require('esbuild')
 
 const root = path.resolve(__dirname, '..')
 
-function loadBundled(relativePath) {
+function loadBundled(relativePath, additionalExports = '') {
   const filename = path.join(root, relativePath)
   const result = buildSync({
-    entryPoints: [filename],
+    stdin: {
+      contents: `export * from ${JSON.stringify('./' + relativePath)};\n${additionalExports}`,
+      resolveDir: root,
+      sourcefile: 'workspace-check-entry.ts'
+    },
     bundle: true,
     platform: 'node',
     format: 'cjs',
@@ -49,7 +53,18 @@ async function main() {
   const { createWorkspaceReadExecutor, workspaceReadTools } = loadBundled(
     'src/main/tools/workspace-files.ts'
   )
-  const { createWorkspaceActionExecutor } = loadBundled('src/main/tools/workspace-actions.ts')
+  // The executor, signer and runner must share their real plan registry.
+  const {
+    createWorkspaceActionExecutor,
+    prepareCommandExecution,
+    authorizeCommandExecution,
+    discardCommandExecution,
+    startCommandProcess
+  } = loadBundled(
+    'src/main/tools/workspace-actions.ts',
+    `export { prepareCommandExecution, authorizeCommandExecution, discardCommandExecution } from './src/main/execution/command-plan';
+     export { startCommandProcess } from './src/main/execution/command-runner';`
+  )
   const { runToolLoop } = loadBundled('src/main/agent/tool-loop.ts')
   const { buildAgentRequest } = loadBundled('src/main/agent/agent-instructions.ts')
   const { parseToolHistory, selectToolHistory } = loadBundled('src/shared/agent-history.ts')
@@ -62,6 +77,30 @@ async function main() {
   const source = path.join(workspace, 'example.ts')
   const original = 'export const answer = 42\n// needle in workspace\n'
   const signal = new AbortController().signal
+  let commandSequence = 0
+  const makeCommandPlan = async (request, commandSignal, assertCurrent = () => true) => {
+    const prepared = await prepareCommandExecution(
+      request,
+      {
+        owner: {
+          windowId: 45,
+          conversationId: 'conversation-command-check',
+          requestId: 'command-check-' + ++commandSequence
+        },
+        permissions: { mode: 'full-access', revision: 0 },
+        scopeId: 'a'.repeat(64),
+        writableRoots: [workspace],
+        environment: 'tool',
+        assertCurrent
+      },
+      commandSignal
+    )
+    try {
+      return authorizeCommandExecution(prepared, 'full-access')
+    } finally {
+      discardCommandExecution(prepared)
+    }
+  }
 
   try {
     await mkdir(path.join(workspace, 'src'), { recursive: true })
@@ -266,6 +305,12 @@ async function main() {
       async (request) => {
         approvals.push(request)
         return approvalDecision
+      },
+      {
+        authorizeCommand: async (request, commandSignal) => {
+          approvals.push({ kind: 'command', ...request })
+          return approvalDecision ? makeCommandPlan(request, commandSignal) : null
+        }
       }
     )
     const createdFile = path.join(workspace, 'created.ts')
@@ -373,7 +418,7 @@ async function main() {
         actions,
         'run_workspace_command',
         {
-          program: 'zonecodex-nonexistent-test-program',
+          program: process.execPath,
           args: []
         },
         signal
@@ -418,6 +463,48 @@ async function main() {
     let effects = 0
     let commandAccess = true
     let onCommandEffect = () => {}
+    const disconnectedCommands = createWorkspaceActionExecutor(
+      workspace,
+      () => true,
+      async () => true,
+      { onEffect: () => effects++ }
+    )
+    const disconnected = JSON.parse(
+      await call(
+        disconnectedCommands,
+        'run_workspace_command',
+        { program: process.execPath, args: ['--version'], cwd: null },
+        signal
+      )
+    )
+    assert.equal(disconnected.status, 'error')
+    assert.match(disconnected.error, /命令执行后端未接通/)
+    assert.equal(effects, 0, 'a boolean file approval cannot authorize a command')
+    let planCurrent = true
+    const staleCommands = createWorkspaceActionExecutor(
+      workspace,
+      () => true,
+      async () => true,
+      {
+        onEffect: () => effects++,
+        authorizeCommand: async (request, commandSignal) => {
+          const plan = await makeCommandPlan(request, commandSignal, () => planCurrent)
+          planCurrent = false
+          return plan
+        }
+      }
+    )
+    const staleCommand = JSON.parse(
+      await call(
+        staleCommands,
+        'run_workspace_command',
+        { program: process.execPath, args: ['--version'], cwd: null },
+        signal
+      )
+    )
+    assert.equal(staleCommand.status, 'error')
+    assert.match(staleCommand.error, /已变化|已失效/)
+    assert.equal(effects, 0, 'a stale signed plan cannot begin a spawn attempt')
     const executeCommand = createWorkspaceActionExecutor(
       workspace,
       () => commandAccess,
@@ -426,7 +513,9 @@ async function main() {
         onEffect: () => {
           effects++
           onCommandEffect()
-        }
+        },
+        authorizeCommand: (request, commandSignal) =>
+          makeCommandPlan(request, commandSignal, () => commandAccess)
       }
     )
     const nodeCommand = async (code, commandSignal = signal) =>
@@ -441,11 +530,12 @@ async function main() {
     const normalCommand = await nodeCommand(
       "process.stdout.write('output'); process.stderr.write('diagnostic')"
     )
-    assert.equal(normalCommand.status, 'completed')
+    assert.equal(normalCommand.status, 'completed', JSON.stringify(normalCommand))
     assert.equal(normalCommand.exitCode, 0)
     assert.equal(normalCommand.stdout, 'output')
     assert.equal(normalCommand.stderr, 'diagnostic')
     assert.equal(normalCommand.truncated, false)
+    if (process.platform === 'win32') assert.equal(normalCommand.treeExited, true)
     const failedCommand = await nodeCommand('process.exitCode = 7')
     assert.equal(failedCommand.status, 'failed')
     assert.equal(failedCommand.exitCode, 7)
@@ -479,7 +569,20 @@ async function main() {
       )
     )
     assert.equal(missingCommand.status, 'error')
-    assert.equal(effects, beforeMissing + 1, 'spawn failure is still a side-effect attempt')
+    assert.equal(effects, beforeMissing, 'a nonexistent executable is rejected before launch')
+    const invalidExecutable = path.join(workspace, 'invalid-program.exe')
+    await writeFile(invalidExecutable, 'synthetic invalid executable', { mode: 0o600 })
+    const beforeInvalidExecutable = effects
+    const invalidExecutableResult = JSON.parse(
+      await call(
+        executeCommand,
+        'run_workspace_command',
+        { program: invalidExecutable, args: [], cwd: null },
+        signal
+      )
+    )
+    assert.ok(['error', 'failed'].includes(invalidExecutableResult.status))
+    assert.equal(effects, beforeInvalidExecutable + 1, 'a real spawn attempt disables safe retry')
     const commandAbort = new AbortController()
     const abortReason = new Error('cancel-command-check')
     onCommandEffect = () => setTimeout(() => commandAbort.abort(abortReason), 100)
@@ -493,33 +596,48 @@ async function main() {
       }, 100)
     const revokedCommand = await nodeCommand('setInterval(() => {}, 1000)')
     assert.equal(revokedCommand.status, 'error')
-    assert.match(revokedCommand.error, /进程是否退出未确认/)
+    assert.match(revokedCommand.error, /工作区授权已失效/)
+    if (process.platform === 'win32') {
+      assert.equal(revokedCommand.treeExited, true)
+      assert.match(revokedCommand.error, /已确认受控进程退出/)
+    } else {
+      assert.equal(revokedCommand.treeExited, false)
+      assert.match(revokedCommand.error, /进程树是否退出未确认/)
+    }
     const beforeDenied = effects
     assert.equal((await nodeCommand("process.stdout.write('should-not-run')")).status, 'error')
     assert.equal(effects, beforeDenied, 'revoked access cannot launch another process')
     commandAccess = true
     onCommandEffect = () => {}
-    const { startCommandProcess } = loadBundled('src/main/execution/command-runner.ts')
+    const timeoutPlan = await makeCommandPlan(
+      { program: process.execPath, args: ['-e', 'setInterval(() => {}, 1000)'], cwd: workspace },
+      signal
+    )
     let terminalEvents = 0
     await new Promise((resolve, reject) => {
       startCommandProcess({
-        program: process.execPath,
-        args: ['-e', 'setInterval(() => {}, 1000)'],
-        cwd: workspace,
+        plan: timeoutPlan,
         outputMode: 'bytes',
         outputLimit: 1800,
         timeoutMs: 25,
         onError: reject,
-        onClose: () => reject(new Error('timeout command closed before its timer')),
+        onClose: () => {
+          if (terminalEvents === 0) reject(new Error('timeout command closed before its timer'))
+        },
         onTimeout: (process) => {
           terminalEvents++
-          process.stop()
-          resolve()
+          void process
+            .stop()
+            .then((outcome) => {
+              if (globalThis.process.platform === 'win32') assert.equal(outcome.treeExited, true)
+              resolve()
+            }, reject)
+            .catch(reject)
         }
       })
     })
     await new Promise((resolve) => setTimeout(resolve, 50))
-    assert.equal(terminalEvents, 1, 'timeout requests termination once and suppresses a late close')
+    assert.equal(terminalEvents, 1, 'timeout requests termination once and waits for its outcome')
 
     console.log(
       'Workspace tools passed: read/search/list, boundary, authorization, scope, loop, create, hash-checked edit; real command exit/output/truncation/environment/spawn failure/cancellation/revocation/timeout.'

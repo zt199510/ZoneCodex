@@ -10,3 +10,7 @@ out
 .env.*
 !.env.example
 *.tsbuildinfo
+resources/windows-command-runtime/*
+!resources/windows-command-runtime/README.md
+!resources/windows-command-runtime/LICENSE
+!resources/windows-command-runtime/THIRD_PARTY_NOTICES.txt

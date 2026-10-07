@@ -206,7 +206,7 @@ export function ExecutionApproval({
                 <dt>原因</dt>
                 <dd>
                   {pending.kind === 'command'
-                    ? '当前权限下，运行此命令需要你的批准。'
+                    ? (pending.reason ?? '当前权限下，运行此命令需要你的批准。')
                     : '目标文件位于当前允许写入的目录之外，需要你的批准。'}
                 </dd>
                 {pending.kind === 'command' ? (

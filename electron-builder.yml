@@ -1,18 +1,26 @@
 appId: com.electron.app
 productName: zonecodex
+afterPack: scripts/build-windows-command-runtime.mjs
+afterSign: scripts/build-windows-command-runtime.mjs
 directories:
   buildResources: build
 files:
-  - '!**/.vscode/*'
-  - '!src/*'
-  - '!electron.vite.config.{js,ts,mjs,cjs}'
-  - '!{.eslintcache,eslint.config.mjs,.prettierignore,.prettierrc.yaml,dev-app-update.yml,CHANGELOG.md,README.md}'
-  - '!{.env,.env.*,.npmrc,pnpm-lock.yaml}'
-  - '!{tsconfig.json,tsconfig.node.json,tsconfig.web.json}'
-asarUnpack:
-  - resources/**
+  - out/**
+  - package.json
+  - resources/icon.png
 win:
   executableName: zonecodex
+  extraResources:
+    - from: resources/windows-command-runtime
+      to: windows-command-runtime
+      filter:
+        - host.exe
+        - codex.exe
+        - codex-command-runner.exe
+        - codex-windows-sandbox-setup.exe
+        - manifest.json
+        - LICENSE
+        - THIRD_PARTY_NOTICES.txt
 nsis:
   artifactName: ${name}-${version}-setup.${ext}
   shortcutName: ${productName}

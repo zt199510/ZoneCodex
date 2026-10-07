@@ -26,7 +26,11 @@ import {
   resolveExecutionContext,
   type ExecutionContext
 } from '../execution/execution-context'
-import { createWorkspaceAuthorization } from '../execution/action-authorization'
+import {
+  createWorkspaceAuthorization,
+  createWorkspaceCommandAuthorization
+} from '../execution/action-authorization'
+import { inspectWindowsCommandBackend } from '../execution/windows-command-backend'
 
 type Job = { id: string; controller: AbortController; snapshotId?: string }
 const jobs = new Map<number, Job>()
@@ -200,18 +204,22 @@ export async function runAgentRequest(
     let timer = armTimeout()
     try {
       appendTrace('模式：真实模型 SSE')
-      const agentRequest = buildAgentRequest({
-        snapshot: projectSnapshot,
-        workspaceInstruction,
-        workspaceId,
-        execution: execution.info
-      })
       const assertWorkspaceAccess = (): boolean => {
         return (
           !controller.signal.aborted && executionStillCurrent(windowId, checkedContext, execution)
         )
       }
-      const approveWorkspaceAction = createWorkspaceAuthorization({
+      const commandBackend = await inspectWindowsCommandBackend()
+      controller.signal.throwIfAborted()
+      if (!assertWorkspaceAccess()) throw new AgentError('运行上下文已失效，请重新发送')
+      const agentRequest = buildAgentRequest({
+        snapshot: projectSnapshot,
+        workspaceInstruction,
+        workspaceId,
+        execution: execution.info,
+        commandSandboxAvailable: commandBackend?.networkReady === true
+      })
+      const authorizationOptions: Parameters<typeof createWorkspaceAuthorization>[0] = {
         windowId,
         requestId: id,
         conversationId: checkedContext.conversationId,
@@ -238,11 +246,14 @@ export async function runAgentRequest(
             else controller.abort()
           }
         }
-      })
+      }
+      const approveWorkspaceAction = createWorkspaceAuthorization(authorizationOptions)
+      const authorizeWorkspaceCommand = createWorkspaceCommandAuthorization(authorizationOptions)
       const executeTools = createAgentToolExecutor({
         execution,
         assertCurrent: assertWorkspaceAccess,
         approve: approveWorkspaceAction,
+        authorizeCommand: authorizeWorkspaceCommand,
         projectSnapshot,
         projectExecutor,
         executeCommandProposal,
@@ -295,14 +306,21 @@ export async function runAgentRequest(
       const actionWarning = workspaceActionApproved
         ? '本地操作可能已经执行。请先核对文件或命令结果，再决定是否重新请求。'
         : null
+      const terminationWarning =
+        error instanceof Error && error.message.includes('进程树是否退出未确认')
+          ? error.message
+          : null
+      if (terminationWarning) appendTrace(`命令停止结果：${terminationWarning}`)
       if (timedOut) {
-        const message = ['任务超过 4 分钟，已停止', actionWarning].filter(Boolean).join('。')
+        const message = ['任务超过 4 分钟，已停止请求', terminationWarning, actionWarning]
+          .filter(Boolean)
+          .join('。')
         updateTask(windowId, lifecycleId, 'timed_out', { error: message })
         return { status: 'error', error: message, trace }
       }
       if (controller.signal.aborted) {
         updateTask(windowId, lifecycleId, 'cancelled', {
-          error: actionWarning ? `用户已取消任务。${actionWarning}` : '用户已取消任务'
+          error: ['用户已取消任务', terminationWarning, actionWarning].filter(Boolean).join('。')
         })
         return { status: 'cancelled', trace }
       }

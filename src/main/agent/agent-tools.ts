@@ -1,6 +1,7 @@
 import { AgentError } from '../errors'
 import type { ExecuteTool } from './tool-loop'
 import type { ExecutionContext } from '../execution/execution-context'
+import type { CommandAuthorize } from '../execution/command-plan'
 import { executeTimeTool } from '../tools/current-time'
 import { createWorkspaceReadExecutor, workspaceReadTools } from '../tools/workspace-files'
 import {
@@ -15,6 +16,7 @@ type AgentToolsOptions = {
   execution: ExecutionContext
   assertCurrent: () => boolean
   approve: WorkspaceApprove
+  authorizeCommand: CommandAuthorize
   onEffect: () => void
   appendTrace: (message: string) => void
   onProgress: (message: string) => void
@@ -29,6 +31,7 @@ export function createAgentToolExecutor(options: AgentToolsOptions): ExecuteTool
     execution,
     assertCurrent,
     approve,
+    authorizeCommand,
     onEffect,
     appendTrace,
     onProgress,
@@ -41,7 +44,8 @@ export function createAgentToolExecutor(options: AgentToolsOptions): ExecuteTool
   })
   const actInWorkspace = createWorkspaceActionExecutor(execution.info.cwd, assertCurrent, approve, {
     isPathAllowed: () => assertCurrent(),
-    onEffect
+    onEffect,
+    authorizeCommand
   })
   const completeReads = new Map<string, string>()
   return async (name, args, signal): Promise<string> => {

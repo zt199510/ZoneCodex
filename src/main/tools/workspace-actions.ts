@@ -1,4 +1,13 @@
-import { startCommandProcess, type CommandOutput } from '../execution/command-runner'
+import {
+  startCommandProcess,
+  type CommandOutput,
+  type CommandProcess
+} from '../execution/command-runner'
+import {
+  discardCommandExecution,
+  type CommandAuthorize,
+  type CommandExecutionPlan
+} from '../execution/command-plan'
 import { createHash } from 'node:crypto'
 import { lstat, open, realpath } from 'node:fs/promises'
 import { basename, dirname, isAbsolute, join, parse, relative, sep, win32 } from 'node:path'
@@ -11,6 +20,7 @@ import { canonicalLocalPath, insideLocalPath, localPathParts, sameLocalPath } fr
 export type WorkspaceActionOptions = {
   isPathAllowed?: (target: string) => boolean
   onEffect?: () => void
+  authorizeCommand?: CommandAuthorize
 }
 
 export type WorkspaceApprovalRequest =
@@ -61,16 +71,21 @@ export const workspaceActionTools = [
     type: 'function',
     name: 'run_workspace_command',
     description:
-      'Run a program only when the current runtime permission and execution backend permit it. cwd may be relative to the default working directory or absolute; use null for the default. No shell wrapper is used. Setting cwd does not sandbox the program.',
+      'Run a program through the verified runtime command backend. cwd may be relative to the default working directory or absolute; use null for the default. Use sandbox_permissions use_default or null for the current restricted policy. Only when the user task requires access outside that policy, request require_escalated and give a concrete justification. A denied or failed run is never automatically retried outside the sandbox. No untrusted shell text is constructed.',
     strict: true,
     parameters: {
       type: 'object',
       properties: {
         program: { type: 'string', minLength: 1, maxLength: 500 },
         args: { type: 'array', items: { type: 'string', maxLength: 500 }, maxItems: 20 },
-        cwd: { type: ['string', 'null'], maxLength: 512 }
+        cwd: { type: ['string', 'null'], maxLength: 512 },
+        sandbox_permissions: {
+          type: ['string', 'null'],
+          enum: ['use_default', 'require_escalated', null]
+        },
+        justification: { type: ['string', 'null'], maxLength: 1000 }
       },
-      required: ['program', 'args', 'cwd'],
+      required: ['program', 'args', 'cwd', 'sandbox_permissions', 'justification'],
       additionalProperties: false
     }
   }
@@ -99,30 +114,6 @@ const SKIPPED_DIRECTORIES = new Set([
 ])
 const SKIPPED_FILES =
   /(^\.(?:env(?:\.|$)|npmrc$|pypirc$|netrc$)|(?:^|[._-])(?:secret|credential|password|private[-_.]?key)(?:[._-]|$)|\.(?:pem|p12|pfx|key)$)/i
-const COMMAND_ENV_KEYS = [
-  'PATH',
-  'Path',
-  'PATHEXT',
-  'SystemRoot',
-  'TEMP',
-  'TMP',
-  'HOME',
-  'USERPROFILE',
-  'HOMEDRIVE',
-  'HOMEPATH',
-  'LANG',
-  'LC_ALL'
-] as const
-
-function commandEnvironment(): NodeJS.ProcessEnv {
-  const environment: NodeJS.ProcessEnv = {}
-  for (const key of COMMAND_ENV_KEYS) {
-    const value = process.env[key]
-    if (typeof value === 'string') environment[key] = value
-  }
-  return environment
-}
-
 function result(status: string, details: Record<string, unknown> = {}): string {
   return JSON.stringify({ status, ...details })
 }
@@ -235,14 +226,32 @@ function validCommand(args: Record<string, unknown>): args is {
   program: string
   args: string[]
   cwd?: string | null
+  sandbox_permissions?: 'use_default' | 'require_escalated' | null
+  justification?: string | null
 } {
   return (
-    (exactKeys(args, ['program', 'args']) || exactKeys(args, ['program', 'args', 'cwd'])) &&
+    Object.hasOwn(args, 'program') &&
+    Object.hasOwn(args, 'args') &&
+    Object.keys(args).every((key) =>
+      ['program', 'args', 'cwd', 'sandbox_permissions', 'justification'].includes(key)
+    ) &&
     (args.cwd === undefined ||
       args.cwd === null ||
       (typeof args.cwd === 'string' &&
         args.cwd.length <= 512 &&
         !hasControlCharacters(args.cwd))) &&
+    (args.sandbox_permissions === undefined ||
+      args.sandbox_permissions === null ||
+      args.sandbox_permissions === 'use_default' ||
+      args.sandbox_permissions === 'require_escalated') &&
+    (args.justification === undefined ||
+      args.justification === null ||
+      (typeof args.justification === 'string' &&
+        args.justification.trim().length > 0 &&
+        args.justification.length <= 1000 &&
+        !hasControlCharacters(args.justification))) &&
+    (args.sandbox_permissions !== 'require_escalated' ||
+      (typeof args.justification === 'string' && args.justification.trim().length > 0)) &&
     typeof args.program === 'string' &&
     !!args.program.trim() &&
     args.program.length <= 500 &&
@@ -267,9 +276,8 @@ async function checkedRoot(root: string, assertAccess: () => boolean): Promise<s
 }
 
 async function runCommand(
+  plan: CommandExecutionPlan,
   cwd: string,
-  program: string,
-  args: string[],
   signal: AbortSignal,
   assertAccess: () => boolean,
   onEffect?: () => void
@@ -282,7 +290,10 @@ async function runCommand(
       return false
     }
   }
-  if (!hasAccess()) return result('error', { error: '工作区授权已失效' })
+  if (!hasAccess()) {
+    discardCommandExecution(plan)
+    return result('error', { error: '工作区授权已失效' })
+  }
   const capturedOutput = (output: CommandOutput): Record<string, unknown> => ({
     cwd,
     stdout: output.stdout,
@@ -290,12 +301,29 @@ async function runCommand(
     truncated: output.truncated
   })
   return new Promise<string>((resolveResult, rejectResult) => {
+    let stopping = false
+    let settled = false
+    const complete = (value: string): void => {
+      if (settled) return
+      settled = true
+      resolveResult(value)
+    }
+    const failed = (error: unknown): void => {
+      if (settled) return
+      settled = true
+      rejectResult(error)
+    }
+    const stop = (process: CommandProcess, finish: (treeExited: boolean) => void): void => {
+      if (stopping || settled) return
+      stopping = true
+      void process.stop().then(
+        (outcome) => finish(outcome.treeExited),
+        () => finish(false)
+      )
+    }
     try {
       startCommandProcess({
-        program,
-        args,
-        cwd,
-        environment: commandEnvironment(),
+        plan,
         outputLimit: MAX_OUTPUT_BYTES,
         outputMode: 'bytes',
         timeoutMs: COMMAND_TIMEOUT_MS,
@@ -306,49 +334,85 @@ async function runCommand(
         },
         signal,
         access: { check: hasAccess, intervalMs: 250 },
-        onError: (error, output) => {
-          resolveResult(
-            result('error', { error: error.message.slice(0, 500), ...capturedOutput(output) })
+        onError: (error, output, outcome) => {
+          if (stopping) return
+          complete(
+            result('error', {
+              error: [
+                error.message,
+                outcome.treeExited ? null : '进程树是否退出未确认，请核对本地结果'
+              ]
+                .filter(Boolean)
+                .join('；')
+                .slice(0, 500),
+              treeExited: outcome.treeExited,
+              ...capturedOutput(output)
+            })
           )
         },
-        onClose: (code, closedSignal, output) => {
-          if (!hasAccess()) {
-            resolveResult(result('error', { error: '工作区授权已失效', ...capturedOutput(output) }))
+        onClose: (code, closedSignal, output, outcome) => {
+          if (stopping) return
+          if (!outcome.treeExited) {
+            complete(
+              result('uncertain', {
+                error: '命令已经结束，但无法确认全部子进程退出；请核对结果后再决定是否重新请求',
+                treeExited: false,
+                ...capturedOutput(output)
+              })
+            )
             return
           }
-          resolveResult(
+          if (!hasAccess()) {
+            complete(result('error', { error: '工作区授权已失效', ...capturedOutput(output) }))
+            return
+          }
+          complete(
             result(code === 0 ? 'completed' : 'failed', {
               exitCode: code,
               signal: closedSignal,
+              treeExited: true,
               ...capturedOutput(output)
             })
           )
         },
         onTimeout: (process, output) => {
-          process.stop()
-          resolveResult(
-            result('timed_out', {
-              error: '命令执行超过 30 秒，已请求终止；进程是否退出未确认',
-              ...capturedOutput(output)
-            })
+          stop(process, (treeExited) =>
+            complete(
+              result('timed_out', {
+                error: treeExited
+                  ? '命令执行超过 30 秒，已确认受控进程退出'
+                  : '命令执行超过 30 秒，已请求终止；进程树是否退出未确认',
+                treeExited,
+                ...capturedOutput(output)
+              })
+            )
           )
         },
         onAccessLost: (process, output) => {
-          process.stop()
-          resolveResult(
-            result('error', {
-              error: '工作区授权已失效，已请求终止命令；进程是否退出未确认',
-              ...capturedOutput(output)
-            })
+          stop(process, (treeExited) =>
+            complete(
+              result('error', {
+                error: treeExited
+                  ? '工作区授权已失效，已确认受控进程退出'
+                  : '工作区授权已失效，已请求终止命令；进程树是否退出未确认',
+                treeExited,
+                ...capturedOutput(output)
+              })
+            )
           )
         },
         onAbort: (process) => {
-          process.stop()
-          rejectResult(signal.reason ?? new Error('命令已取消'))
+          stop(process, (treeExited) =>
+            failed(
+              treeExited
+                ? (signal.reason ?? new Error('命令已取消'))
+                : new Error('命令已取消并请求终止；进程树是否退出未确认，请核对本地结果')
+            )
+          )
         }
       })
     } catch (error) {
-      resolveResult(
+      complete(
         result('error', {
           cwd,
           error: error instanceof Error ? error.message : '命令启动失败'
@@ -633,6 +697,7 @@ export function createWorkspaceActionExecutor(
 
     if (name === 'run_workspace_command') {
       if (!validCommand(args)) return result('error', { error: '命令参数无效' })
+      let plan: CommandExecutionPlan | null = null
       try {
         const defaultCwd = await checkedRoot(root, assertAccess)
         const cwd = await checkedTarget(defaultCwd, args.cwd ?? '', true)
@@ -641,13 +706,22 @@ export function createWorkspaceActionExecutor(
         if (!assertAccess() || !before.isDirectory() || before.isSymbolicLink()) {
           return result('error', { error: '工作区目录或授权已变化，未执行命令' })
         }
-        const accepted = await approve(
-          { kind: 'command', program: args.program, args: [...args.args], cwd },
+        if (!options.authorizeCommand) {
+          return result('error', { error: '命令执行后端未接通，本次未启动' })
+        }
+        plan = await options.authorizeCommand(
+          {
+            program: args.program,
+            args: [...args.args],
+            cwd,
+            sandbox_permissions: args.sandbox_permissions ?? 'use_default',
+            justification: args.justification ?? null
+          },
           signal
         )
         signal.throwIfAborted()
         if (!assertAccess()) return result('error', { error: '工作区授权已失效' })
-        if (!accepted) return result('cancelled', { cwd, error: '当前策略未允许命令执行' })
+        if (!plan) return result('cancelled', { cwd, error: '当前策略未允许命令执行' })
         await checkedRoot(root, assertAccess)
         await checkedTarget(defaultCwd, cwd, true)
         const after = await lstat(cwd)
@@ -662,9 +736,8 @@ export function createWorkspaceActionExecutor(
           return result('error', { error: '工作区目录或授权已变化，未执行命令' })
         }
         return await runCommand(
+          plan,
           cwd,
-          args.program,
-          args.args,
           signal,
           () =>
             assertAccess() &&
@@ -672,8 +745,10 @@ export function createWorkspaceActionExecutor(
           options.onEffect
         )
       } catch (error) {
-        signal.throwIfAborted()
+        if (signal.aborted) throw error
         return result('error', { error: error instanceof Error ? error.message : '命令执行失败' })
+      } finally {
+        if (plan) discardCommandExecution(plan)
       }
     }
 

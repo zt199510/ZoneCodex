@@ -1,0 +1,50 @@
+Codex Windows command runtime redistributed by ZoneCodex
+
+Included executables (upstream program code is not patched):
+  codex.exe
+  codex-command-runner.exe
+  codex-windows-sandbox-setup.exe
+Version: 0.160.1
+Upstream: https://github.com/openai/codex/tree/rust-v0.160.1
+License: Apache License 2.0; see the accompanying LICENSE file.
+License source: https://raw.githubusercontent.com/openai/codex/rust-v0.160.1/LICENSE
+Notice source: https://raw.githubusercontent.com/openai/codex/rust-v0.160.1/NOTICE
+
+The command supervisor host.exe is an independent ZoneCodex implementation.
+Distribution signing may change PE signature metadata. The accompanying manifest
+records SHA-256 hashes of the final distributed executable files.
+
+Upstream NOTICE (preserved verbatim):
+
+OpenAI Codex
+Copyright 2025 OpenAI
+
+This project includes code derived from [Ratatui](https://github.com/ratatui/ratatui), licensed under the MIT license.
+Copyright (c) 2016-2022 Florian Dehau
+Copyright (c) 2023-2025 The Ratatui Developers
+
+Ratatui license
+Source: https://raw.githubusercontent.com/ratatui/ratatui/main/LICENSE
+
+The MIT License (MIT)
+
+Copyright (c) 2016-2022 Florian Dehau
+Copyright (c) 2023-2025 The Ratatui Developers
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
