@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import type { ChatMessage } from '../../../../shared/conversation'
+import type { ToolRun } from '../../../../shared/agent-history'
 import type { MessageCommandProposal } from '../../../../shared/command-proposal'
 import type { MessageChangeProposal } from '../../../../shared/change-proposal'
 import type { ChangeProposalStatus } from '../review/useConversationReview'
@@ -16,6 +17,7 @@ export function MessageList({
   commandSnapshotId = null,
   onOpenCommand,
   toolActivity = {},
+  toolRuns = [],
   changeProposals = {},
   changeProposalStatus = {},
   proposalOpenDisabled = false,
@@ -32,6 +34,7 @@ export function MessageList({
   commandSnapshotId?: string | null
   onOpenCommand?: (proposal: MessageCommandProposal, trigger: HTMLButtonElement) => void
   toolActivity?: ToolActivity
+  toolRuns?: readonly ToolRun[]
   changeProposals?: Readonly<Record<string, MessageChangeProposal>>
   changeProposalStatus?: Readonly<Record<string, ChangeProposalStatus>>
   proposalOpenDisabled?: boolean
@@ -52,6 +55,16 @@ export function MessageList({
         const entries = message.role === 'assistant' ? toolActivity[message.id] : undefined
         const command = message.role === 'assistant' ? commandProposals[message.id] : undefined
         const activity = entries?.length ? entries : undefined
+        const run =
+          message.role === 'assistant'
+            ? toolRuns.find((item) => item.assistantId === message.id)
+            : undefined
+        const hasProcess =
+          run?.items.some(
+            (item) =>
+              item.type === 'function_call' ||
+              (item.type === 'message' && item.phase === 'commentary')
+          ) ?? false
         const proposal = message.role === 'assistant' ? changeProposals[message.id] : undefined
         const proposalStatus =
           message.role === 'assistant' ? changeProposalStatus[message.id] : undefined
@@ -68,7 +81,15 @@ export function MessageList({
             }
           >
             {message.role === 'system' && <div className="message-author">系统</div>}
-            {activity && <MessageActivity messageId={message.id} entries={activity} />}
+            {(activity || hasProcess) && (
+              <MessageActivity
+                messageId={message.id}
+                entries={activity ?? []}
+                items={run?.items ?? []}
+                status={message.status}
+                answerStarted={message.status === 'pending' && Boolean(message.content)}
+              />
+            )}
             {editingId === message.id && onSendEditedMessage ? (
               <MessageEditor
                 initialValue={message.content}
@@ -114,7 +135,9 @@ export function MessageList({
                     message.content
                   )
                 ) : message.status === 'pending' ? (
-                  '正在生成回复…'
+                  hasProcess ? null : (
+                    '正在生成回复…'
+                  )
                 ) : message.status === 'failed' || message.status === 'cancelled' ? null : (
                   '未收到回复文字'
                 )}

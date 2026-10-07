@@ -20,6 +20,8 @@ const paths = {
   archive: 'M4 7h16v13H4zM3 4h18v3H3zM9 11h6',
   restore: 'M4 7v5h5M4.8 12A7.5 7.5 0 1 0 7 6.2',
   stop: 'M6 6h12v12H6Z',
+  terminal:
+    'M5 8l4 4-4 4m7 0h6M4 3h16a1 1 0 0 1 1 1v16a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1Z',
   chevron: 'm9 5 7 7-7 7'
 } as const
 

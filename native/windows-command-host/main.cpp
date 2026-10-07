@@ -1,213 +1,15 @@
 #define WIN32_LEAN_AND_MEAN
 #define NOMINMAX
 #include <windows.h>
-#include <netfw.h>
-#include <sddl.h>
-#include <winsvc.h>
-#include <algorithm>
 #include <atomic>
 #include <cerrno>
 #include <cstdint>
 #include <cstdlib>
-#include <cwctype>
 #include <mutex>
 #include <string>
 #include <vector>
 
 namespace {
-template <typename T>
-class ComPtr {
- public:
-  ComPtr() = default;
-  ~ComPtr() { if (value_) value_->Release(); }
-  ComPtr(const ComPtr&) = delete;
-  ComPtr& operator=(const ComPtr&) = delete;
-  T* operator->() const { return value_; }
-  T** put() { return &value_; }
- private:
-  T* value_ = nullptr;
-};
-
-class ComApartment {
- public:
-  ComApartment() : result_(CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED)) {}
-  ~ComApartment() { if (SUCCEEDED(result_)) CoUninitialize(); }
-  bool valid() const { return SUCCEEDED(result_); }
- private:
-  HRESULT result_;
-};
-
-class BString {
- public:
-  explicit BString(const wchar_t* value = nullptr)
-      : value_(value ? SysAllocString(value) : nullptr) {}
-  ~BString() { SysFreeString(value_); }
-  BString(const BString&) = delete;
-  BString& operator=(const BString&) = delete;
-  BSTR get() const { return value_; }
-  BSTR* put() { return &value_; }
-  std::wstring text() const { return value_ ? value_ : L""; }
- private:
-  BSTR value_;
-};
-
-struct NetworkCapability {
-  bool available;
-  const char* reason;
-};
-
-bool serviceRunning(SC_HANDLE manager, const wchar_t* name) {
-  SC_HANDLE service = OpenServiceW(manager, name, SERVICE_QUERY_STATUS);
-  if (!service) return false;
-  SERVICE_STATUS_PROCESS status{};
-  DWORD bytes = 0;
-  const bool running = QueryServiceStatusEx(service, SC_STATUS_PROCESS_INFO,
-      reinterpret_cast<LPBYTE>(&status), sizeof(status), &bytes) &&
-      status.dwCurrentState == SERVICE_RUNNING;
-  CloseServiceHandle(service);
-  return running;
-}
-
-std::wstring normalized(const std::wstring& text) {
-  std::wstring result;
-  for (wchar_t ch : text) {
-    if (!iswspace(ch)) result += static_cast<wchar_t>(towlower(ch));
-  }
-  return result;
-}
-
-std::vector<std::wstring> addressSet(const std::wstring& text) {
-  std::vector<std::wstring> result;
-  const auto value = normalized(text);
-  size_t start = 0;
-  do {
-    const size_t end = value.find(L',', start);
-    auto item = value.substr(start, end == std::wstring::npos ? end : end - start);
-    // Firewall COM canonicalizes the official IPv4 mask and the singleton :: range.
-    if (item == L"127.0.0.0/8") item = L"127.0.0.0/255.0.0.0";
-    if (item == L"::") item = L"::-::";
-    result.push_back(item);
-    if (end == std::wstring::npos) break;
-    start = end + 1;
-  } while (true);
-  std::sort(result.begin(), result.end());
-  return result;
-}
-
-bool allPorts(const std::wstring& value) {
-  const auto ports = normalized(value);
-  return ports.empty() || ports == L"*" || ports == L"1-65535";
-}
-
-bool exactUser(BSTR value, PSID sid) {
-  PSECURITY_DESCRIPTOR descriptor = nullptr;
-  if (!value || !ConvertStringSecurityDescriptorToSecurityDescriptorW(
-      value, SDDL_REVISION_1, &descriptor, nullptr)) return false;
-  PACL acl = nullptr;
-  BOOL present = FALSE, defaulted = FALSE;
-  void* rawAce = nullptr;
-  bool valid = GetSecurityDescriptorDacl(descriptor, &present, &acl, &defaulted) &&
-      present && acl && acl->AceCount == 1 && GetAce(acl, 0, &rawAce);
-  if (valid) {
-    const auto ace = static_cast<ACCESS_ALLOWED_ACE*>(rawAce);
-    valid = ace->Header.AceType == ACCESS_ALLOWED_ACE_TYPE &&
-        ace->Header.AceFlags == 0 && ace->Mask == 1 &&
-        IsValidSid(const_cast<DWORD*>(&ace->SidStart)) &&
-        EqualSid(const_cast<DWORD*>(&ace->SidStart), sid);
-  }
-  LocalFree(descriptor);
-  return valid;
-}
-
-bool offlineRule(INetFwRules* rules, const wchar_t* name,
-                 NET_FW_RULE_DIRECTION expectedDirection, long expectedProtocol,
-                 const wchar_t* expectedAddresses, PSID sid) {
-  BString key(name);
-  if (!key.get()) return false;
-  ComPtr<INetFwRule> base;
-  ComPtr<INetFwRule3> rule;
-  if (FAILED(rules->Item(key.get(), base.put())) ||
-      FAILED(base->QueryInterface(__uuidof(INetFwRule3),
-          reinterpret_cast<void**>(rule.put())))) return false;
-  VARIANT_BOOL enabled = VARIANT_FALSE;
-  NET_FW_ACTION action = NET_FW_ACTION_ALLOW;
-  NET_FW_RULE_DIRECTION direction = NET_FW_RULE_DIR_IN;
-  long profiles = 0, protocol = 0;
-  if (FAILED(rule->get_Enabled(&enabled)) || enabled != VARIANT_TRUE ||
-      FAILED(rule->get_Action(&action)) || action != NET_FW_ACTION_BLOCK ||
-      FAILED(rule->get_Direction(&direction)) || direction != expectedDirection ||
-      FAILED(rule->get_Profiles(&profiles)) || (profiles & 7) != 7 ||
-      FAILED(rule->get_Protocol(&protocol)) || protocol != expectedProtocol) return false;
-  BString users, addresses, remotePorts, localPorts, localAddresses;
-  BString application, service, interfaceTypes, remoteUsers, remoteMachines, package;
-  if (FAILED(rule->get_LocalUserAuthorizedList(users.put())) || !exactUser(users.get(), sid) ||
-      FAILED(rule->get_RemoteAddresses(addresses.put())) ||
-      addressSet(addresses.text()) != addressSet(expectedAddresses) ||
-      FAILED(rule->get_RemotePorts(remotePorts.put())) || !allPorts(remotePorts.text()) ||
-      FAILED(rule->get_LocalPorts(localPorts.put())) || !allPorts(localPorts.text()) ||
-      FAILED(rule->get_LocalAddresses(localAddresses.put())) || normalized(localAddresses.text()) != L"*" ||
-      FAILED(rule->get_ApplicationName(application.put())) || !application.text().empty() ||
-      FAILED(rule->get_ServiceName(service.put())) || !service.text().empty() ||
-      FAILED(rule->get_InterfaceTypes(interfaceTypes.put())) || normalized(interfaceTypes.text()) != L"all" ||
-      FAILED(rule->get_RemoteUserAuthorizedList(remoteUsers.put())) || !remoteUsers.text().empty() ||
-      FAILED(rule->get_RemoteMachineAuthorizedList(remoteMachines.put())) || !remoteMachines.text().empty() ||
-      FAILED(rule->get_LocalAppPackageId(package.put())) || !package.text().empty()) return false;
-  VARIANT interfaces;
-  VariantInit(&interfaces);
-  const HRESULT result = rule->get_Interfaces(&interfaces);
-  const bool allInterfaces = SUCCEEDED(result) &&
-      (interfaces.vt == VT_EMPTY || interfaces.vt == VT_NULL);
-  VariantClear(&interfaces);
-  return allInterfaces;
-}
-
-// These are the fixed rust-v0.160.1 official offline rules. This query never
-// provisions users, installs rules, reads account credentials, or caches readiness.
-NetworkCapability offlineNetworkRules() {
-  SC_HANDLE manager = OpenSCManagerW(nullptr, nullptr, SC_MANAGER_CONNECT);
-  if (!manager) return {false, "firewall-service-unavailable"};
-  const bool running = serviceRunning(manager, L"BFE") && serviceRunning(manager, L"mpssvc");
-  CloseServiceHandle(manager);
-  if (!running) return {false, "firewall-service-unavailable"};
-  ComApartment apartment;
-  if (!apartment.valid()) return {false, "network-policy-query-failed"};
-  ComPtr<INetFwPolicy2> policy;
-  if (FAILED(CoCreateInstance(__uuidof(NetFwPolicy2), nullptr, CLSCTX_INPROC_SERVER,
-      __uuidof(INetFwPolicy2), reinterpret_cast<void**>(policy.put()))))
-    return {false, "network-policy-query-failed"};
-  for (const auto profile : {NET_FW_PROFILE2_DOMAIN, NET_FW_PROFILE2_PRIVATE, NET_FW_PROFILE2_PUBLIC}) {
-    VARIANT_BOOL enabled = VARIANT_FALSE;
-    if (FAILED(policy->get_FirewallEnabled(profile, &enabled)) || enabled != VARIANT_TRUE)
-      return {false, "firewall-disabled"};
-  }
-  NET_FW_MODIFY_STATE modify = NET_FW_MODIFY_STATE_GP_OVERRIDE;
-  long currentProfiles = 0;
-  if (policy->get_LocalPolicyModifyState(&modify) != S_OK || modify != NET_FW_MODIFY_STATE_OK ||
-      FAILED(policy->get_CurrentProfileTypes(&currentProfiles)) ||
-      (currentProfiles & 7) == 0 || (currentProfiles & ~7) != 0)
-    return {false, "firewall-policy-ineffective"};
-  DWORD sidBytes = 0, domainChars = 0;
-  SID_NAME_USE kind{};
-  LookupAccountNameW(nullptr, L"CodexSandboxOffline", nullptr, &sidBytes, nullptr, &domainChars, &kind);
-  if (GetLastError() != ERROR_INSUFFICIENT_BUFFER || sidBytes == 0 || sidBytes > SECURITY_MAX_SID_SIZE || domainChars > 32768)
-    return {false, "offline-account-unavailable"};
-  std::vector<unsigned char> sid(sidBytes);
-  std::vector<wchar_t> domain(domainChars);
-  if (!LookupAccountNameW(nullptr, L"CodexSandboxOffline", sid.data(), &sidBytes,
-      domain.data(), &domainChars, &kind) || kind != SidTypeUser || !IsValidSid(sid.data()))
-    return {false, "offline-account-unavailable"};
-  ComPtr<INetFwRules> rules;
-  if (FAILED(policy->get_Rules(rules.put()))) return {false, "network-policy-query-failed"};
-  const wchar_t* nonLoopback = L"0.0.0.0-126.255.255.255,128.0.0.0-255.255.255.255,::,::2-ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff";
-  const wchar_t* loopback = L"127.0.0.0/8,::/127";
-  if (!offlineRule(rules.operator->(), L"codex_sandbox_offline_block_outbound", NET_FW_RULE_DIR_OUT, 256, nonLoopback, sid.data()) ||
-      !offlineRule(rules.operator->(), L"codex_sandbox_offline_block_inbound", NET_FW_RULE_DIR_IN, 256, nonLoopback, sid.data()) ||
-      !offlineRule(rules.operator->(), L"codex_sandbox_offline_block_loopback_tcp", NET_FW_RULE_DIR_OUT, 6, loopback, sid.data()) ||
-      !offlineRule(rules.operator->(), L"codex_sandbox_offline_block_loopback_udp", NET_FW_RULE_DIR_OUT, 17, loopback, sid.data()))
-    return {false, "offline-rules-missing-or-mismatched"};
-  return {true, "official-rules-ready"};
-}
-
 class Handle {
  public:
   explicit Handle(HANDLE value = nullptr) : value_(value) {}
@@ -375,8 +177,7 @@ bool absolutePath(const std::wstring& value) {
 }
 
 int run(int argc, wchar_t** argv, Host& host) {
-  const bool requireNetwork = argc > 5 && std::wstring(argv[5]) == L"--require-offline-network";
-  const int separator = requireNetwork ? 6 : 5;
+  const int separator = 5;
   const int programIndex = separator + 1;
   if (argc < 7 || std::wstring(argv[1]) != L"--cwd" ||
       std::wstring(argv[3]) != L"--timeout-ms" || argc <= programIndex ||
@@ -390,11 +191,6 @@ int run(int argc, wchar_t** argv, Host& host) {
   if (errno || !*argv[4] || *end || argv[4][0] == L'-' || timeout == 0 ||
       timeout > 86400000UL) {
     return reportError(host, "Invalid timeout", ERROR_INVALID_PARAMETER, true);
-  }
-  // COM rules alone failed real loopback probes. The mandatory network gate
-  // remains closed until the native WFP boundary is independently verified.
-  if (requireNetwork) {
-    return reportError(host, "Official offline network isolation unavailable", ERROR_ACCESS_DENIED, true);
   }
   std::wstring command;
   for (int i = programIndex; i < argc; ++i) {
@@ -543,12 +339,6 @@ int wmain(int argc, wchar_t** argv) {
   try {
     if (argc == 2 && std::wstring(argv[1]) == L"--capabilities") {
       return writeFrame(host, "{\"protocol\":1,\"atomicJob\":true}") ? 0 : 1;
-    }
-    if (argc == 2 && std::wstring(argv[1]) == L"--network-capability") {
-      const auto network = offlineNetworkRules();
-      return writeFrame(host, std::string("{\"protocol\":1,\"offlineNetwork\":false,\"rulesReady\":") +
-          (network.available ? "true" : "false") +
-          ",\"reason\":\"official-loopback-boundary-unverified\"}") ? 0 : 1;
     }
     return run(argc, argv, host);
   } catch (...) {

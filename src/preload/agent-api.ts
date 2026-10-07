@@ -7,7 +7,14 @@ import {
   parsePermissionMode,
   parsePermissionsState
 } from '../shared/execution'
-import { isAgentId, parseAgentDelta, parseAgentProgress, parseAgentResult } from '../shared/agent'
+import {
+  isAgentId,
+  parseAgentDelta,
+  parseAgentMessageEvent,
+  parseAgentProgress,
+  parseAgentResult,
+  parseAgentToolEvent
+} from '../shared/agent'
 import { parseToolHistory } from '../shared/agent-history'
 import {
   parseAgentRequestContext,
@@ -43,6 +50,8 @@ export const agentAPI: Pick<
   | 'startAgentRequest'
   | 'cancelAgentRequest'
   | 'onAgentProgress'
+  | 'onAgentToolEvent'
+  | 'onAgentMessageEvent'
 > = {
   listTasks: async () => {
     try {
@@ -188,7 +197,8 @@ export const agentAPI: Pick<
         checkedContext,
         taskId
       ),
-      checkedScope
+      checkedScope,
+      prompt.trim()
     )
   },
   cancelAgentRequest: async (requestId) => {
@@ -203,5 +213,21 @@ export const agentAPI: Pick<
     }
     ipcRenderer.on('agent:progress', handler)
     return () => ipcRenderer.removeListener('agent:progress', handler)
+  },
+  onAgentToolEvent: (listener) => {
+    const handler = (_event: IpcRendererEvent, value: unknown): void => {
+      const toolEvent = parseAgentToolEvent(value)
+      if (toolEvent) listener(toolEvent)
+    }
+    ipcRenderer.on('agent:tool-event', handler)
+    return () => ipcRenderer.removeListener('agent:tool-event', handler)
+  },
+  onAgentMessageEvent: (listener) => {
+    const handler = (_event: IpcRendererEvent, value: unknown): void => {
+      const message = parseAgentMessageEvent(value)
+      if (message) listener(message)
+    }
+    ipcRenderer.on('agent:message-event', handler)
+    return () => ipcRenderer.removeListener('agent:message-event', handler)
   }
 }

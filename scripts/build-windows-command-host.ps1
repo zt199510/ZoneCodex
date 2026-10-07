@@ -124,7 +124,7 @@ try {
   $commandHostCompiler = Join-Path $commandHostVc.FullName 'bin\Hostx64\x64\cl.exe'
   & $commandHostCompiler /nologo /std:c++17 /EHsc /W4 /WX /MT /O2 /utf-8 /DUNICODE /D_UNICODE `
     $commandHostSource "/Fo$commandHostStaging\host.obj" "/Fe$commandHostStaging\host.exe" `
-    /link /DYNAMICBASE /NXCOMPAT /HIGHENTROPYVA ole32.lib oleaut32.lib advapi32.lib uuid.lib
+    /link /DYNAMICBASE /NXCOMPAT /HIGHENTROPYVA kernel32.lib
   if ($LASTEXITCODE -ne 0) { throw "Windows command-host compilation failed: $LASTEXITCODE" }
   if ((Get-CommandHostTargetIdentity $commandHostExecutable) -cne $commandHostExecutableIdentity -or
       (Get-CommandHostTargetIdentity $commandHostObject) -cne $commandHostObjectIdentity) {

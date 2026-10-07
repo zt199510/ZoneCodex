@@ -4,7 +4,13 @@ import type { SaveConversationResult } from './conversation'
 import type { WindowAction, WindowState } from './window'
 import type { ConversationLibrary, LoadLibraryResult } from './conversation-library'
 import type { TerminalSize, TerminalResult, TerminalEvent } from './terminal'
-import type { AgentDelta, AgentResult, AgentProgress } from './agent'
+import type {
+  AgentDelta,
+  AgentResult,
+  AgentProgress,
+  AgentToolEvent,
+  AgentMessageEvent
+} from './agent'
 import type { ConversationTitleOutcome, ConversationTitleRequest } from './conversation-title'
 import type { ProtocolItem } from './agent-history'
 import type {
@@ -121,6 +127,8 @@ export interface AppAPI {
   cancelAgentRequest: (requestId: string) => Promise<boolean>
   // 监听 Agent 进度事件
   onAgentProgress: (listener: (event: AgentProgress) => void) => () => void
+  onAgentToolEvent: (listener: (event: AgentToolEvent) => void) => () => void
+  onAgentMessageEvent: (listener: (event: AgentMessageEvent) => void) => () => void
   // 生成会话元数据标题；结果不进入聊天消息、工具记录或任务记录
   generateConversationTitle: (
     request: ConversationTitleRequest

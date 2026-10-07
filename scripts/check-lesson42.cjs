@@ -243,8 +243,8 @@ async function main() {
     execution: { cwd: 'D:/workspace', mode: 'default', revision: 1, scopeId: 'a'.repeat(64) },
     commandSandboxAvailable: true
   })
-  assert.match(restricted.instructions, /主进程检测到可用的 Windows 命令沙箱后端/)
-  assert.match(restricted.instructions, /每条命令仍须核验实际后端和精确边界/)
+  assert.match(restricted.instructions, /Codex 官方 elevated 后端/)
+  assert.match(restricted.instructions, /每条命令仍须核验精确计划/)
   assert.ok(!restricted.instructions.includes('当前没有命令 OS 沙箱'))
   const commandTool = restricted.tools.find((tool) => tool.name === 'run_workspace_command')
   assert.ok(commandTool.parameters.required.includes('sandbox_permissions'))

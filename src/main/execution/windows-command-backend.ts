@@ -41,8 +41,6 @@ export type WindowsCommandBackend = Readonly<{
   cliPath: string
   cliHash: string
   codexHome: string
-  networkReady: boolean
-  networkReason: string
   identity: string
   files: readonly Readonly<{ path: string; hash: string }>[]
 }>
@@ -283,36 +281,6 @@ export async function inspectCommandHost(): Promise<CommandHost | null> {
   return root && manifest ? inspectHostAt(root, manifest) : null
 }
 
-/** Native readiness is fail closed; setup markers and COM rules alone cannot prove containment. */
-export async function inspectOfflineNetworkIsolation(
-  host: CommandHost
-): Promise<Readonly<{ available: boolean; reason: string }>> {
-  const unavailable = Object.freeze({ available: false, reason: 'network-policy-query-failed' })
-  if (!verifyCommandHost(host)) return unavailable
-  const response = await queryExecutable(host.path, '--network-capability')
-  if (!response || !verifyCommandHost(host)) return unavailable
-  try {
-    const value = JSON.parse(response) as Record<string, unknown>
-    if (
-      !value ||
-      Array.isArray(value) ||
-      Object.keys(value).some(
-        (key) => !['protocol', 'offlineNetwork', 'reason', 'rulesReady'].includes(key)
-      ) ||
-      value.protocol !== PROTOCOL ||
-      typeof value.offlineNetwork !== 'boolean' ||
-      (value.rulesReady !== undefined && typeof value.rulesReady !== 'boolean') ||
-      typeof value.reason !== 'string' ||
-      value.reason.length === 0 ||
-      value.reason.length > 200
-    )
-      return unavailable
-    return Object.freeze({ available: value.offlineNetwork, reason: value.reason })
-  } catch {
-    return unavailable
-  }
-}
-
 export async function inspectWindowsCommandBackend(): Promise<WindowsCommandBackend | null> {
   if (process.platform !== 'win32') return null
   const root = runtimeRoot()
@@ -330,7 +298,6 @@ export async function inspectWindowsCommandBackend(): Promise<WindowsCommandBack
   }
   const cliPath = join(root, 'codex.exe')
   if ((await queryExecutable(cliPath, '--version')) !== `codex-cli ${CLI_VERSION}`) return null
-  const network = await inspectOfflineNetworkIsolation(host)
   const backend = {
     host,
     hostPath: host.path,
@@ -338,8 +305,6 @@ export async function inspectWindowsCommandBackend(): Promise<WindowsCommandBack
     cliPath,
     cliHash: manifest.files['codex.exe']!,
     codexHome,
-    networkReady: network.available,
-    networkReason: network.reason,
     files: Object.freeze(files)
   }
   return Object.freeze({ ...backend, identity: backendIdentity(backend) })

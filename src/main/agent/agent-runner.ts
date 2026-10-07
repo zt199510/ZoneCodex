@@ -1,6 +1,8 @@
+import { performance } from 'node:perf_hooks'
 import type { WebContents } from 'electron'
-import type { AgentResult } from '../../shared/agent'
-import { parseToolHistory } from '../../shared/agent-history'
+import type { AgentMessageEvent, AgentResult, ToolCallEvent } from '../../shared/agent'
+import { parseIncompleteToolTurn, parseToolHistory } from '../../shared/agent-history'
+import type { ProtocolItem } from '../../shared/agent-history'
 import {
   toolScopeForAgentRequest,
   type AgentRequestContext,
@@ -74,7 +76,9 @@ export async function runAgentRequest(
   taskId: unknown,
   isPreparationActive: (windowId: number) => boolean
 ): Promise<AgentResult> {
+  const startedAt = performance.now()
   const trace: string[] = []
+  let observedItems: ProtocolItem[] = []
   const appendTrace = (message: string): void => {
     trace.push(message.slice(0, 500))
     if (trace.length > 30) trace.shift()
@@ -85,8 +89,10 @@ export async function runAgentRequest(
     hasProjectSelection(windowId) ||
     hasWorkspaceSelection(windowId) ||
     isPreparationActive(windowId)
-  )
+  ) {
+    appendTrace(`用时：${Math.max(0, Math.round(performance.now() - startedAt))}毫秒`)
     return { status: 'error', error: '请先完成当前操作', trace }
+  }
   const controller = new AbortController()
   const job: Job = {
     id,
@@ -217,7 +223,7 @@ export async function runAgentRequest(
         workspaceInstruction,
         workspaceId,
         execution: execution.info,
-        commandSandboxAvailable: commandBackend?.networkReady === true
+        commandSandboxAvailable: commandBackend !== null
       })
       const authorizationOptions: Parameters<typeof createWorkspaceAuthorization>[0] = {
         windowId,
@@ -268,6 +274,92 @@ export async function runAgentRequest(
           if (!sender.isDestroyed()) sender.send('agent:progress', { requestId: id, message })
         }
       })
+      const commentaryPositions = new Map<string, number>()
+      const publicMessages = new Map<string, { phase: AgentMessageEvent['phase']; text: string }>()
+      const observeMessage = (event: Omit<AgentMessageEvent, 'requestId'>): void => {
+        if (controller.signal.aborted || sender.isDestroyed()) return
+        const previous = publicMessages.get(event.messageId)
+        if (previous?.phase === event.phase && previous.text === event.text) return
+        if (previous && previous.phase !== event.phase) throw new AgentError('公开消息阶段不一致')
+        if (event.phase === 'final_answer') {
+          const finalTexts = [...publicMessages]
+            .filter(
+              ([messageId, message]) =>
+                messageId !== event.messageId && message.phase === 'final_answer'
+            )
+            .map(([, message]) => message.text)
+          finalTexts.push(event.text)
+          if (finalTexts.join('\n').length > 16000)
+            throw new AgentError('最终回答超过本轮显示长度上限')
+        }
+        if (event.phase === 'commentary') {
+          const candidate: ProtocolItem[] =
+            observedItems.length > 0
+              ? [...observedItems]
+              : [{ role: 'user', content: prompt.trim() }]
+          const position = commentaryPositions.get(event.messageId)
+          if (position === undefined) {
+            let pendingCall = false
+            for (const item of candidate) {
+              if (item.type === 'function_call') pendingCall = true
+              else if (item.type === 'function_call_output') pendingCall = false
+            }
+            // A late stream callback cannot insert a new message between an
+            // actual invocation and its still-missing result.
+            if (pendingCall) return
+          }
+          const message: ProtocolItem = {
+            type: 'message',
+            role: 'assistant',
+            phase: 'commentary',
+            content: [{ type: 'output_text', text: event.text }]
+          }
+          if (position === undefined) candidate.push(message)
+          else candidate[position] = message
+          const checked = parseIncompleteToolTurn(candidate, checkedScope, prompt.trim())
+          if (!checked) throw new AgentError('公开过程文字超过本轮保存上限')
+          observedItems = checked
+          if (position === undefined) commentaryPositions.set(event.messageId, candidate.length - 1)
+        }
+        publicMessages.set(event.messageId, { phase: event.phase, text: event.text })
+        sender.send('agent:message-event', { requestId: id, ...event })
+      }
+      const observeToolCall = (event: ToolCallEvent): void => {
+        const candidate: ProtocolItem[] =
+          observedItems.length > 0 ? [...observedItems] : [{ role: 'user', content: prompt.trim() }]
+        if (event.phase === 'start') {
+          if (event.commentary) {
+            candidate.push({
+              type: 'message',
+              role: 'assistant',
+              phase: 'commentary',
+              content: [{ type: 'output_text', text: event.commentary }]
+            })
+          }
+          candidate.push({
+            type: 'function_call',
+            call_id: event.callId,
+            name: event.name,
+            arguments: event.arguments
+          })
+        } else {
+          candidate.push({
+            type: 'function_call_output',
+            call_id: event.callId,
+            output: event.output
+          })
+        }
+        const checked = parseIncompleteToolTurn(candidate, checkedScope, prompt.trim())
+        if (checked) observedItems = checked
+        else if (event.phase === 'start') {
+          throw new AgentError('调用记录已超过本轮保存上限，未继续执行工具')
+        } else {
+          // A valid tool result can push a failing turn over its save budget.
+          // Keep prior evidence and the pending call rather than inventing an output.
+          appendTrace('工具结果超过本轮保存上限：最后结果未保存')
+        }
+        if (!sender.isDestroyed()) sender.send('agent:tool-event', { requestId: id, ...event })
+      }
       const completed = await runToolLoop(
         prompt.trim(),
         createLiveResponse(agentRequest.tools, agentRequest.instructions),
@@ -283,7 +375,9 @@ export async function runAgentRequest(
         (delta) => {
           if (controller.signal.aborted || sender.isDestroyed()) return
           sender.send('model-stream:delta', { requestId: id, delta })
-        }
+        },
+        observeToolCall,
+        observeMessage
       )
 
       controller.signal.throwIfAborted()
@@ -316,13 +410,13 @@ export async function runAgentRequest(
           .filter(Boolean)
           .join('。')
         updateTask(windowId, lifecycleId, 'timed_out', { error: message })
-        return { status: 'error', error: message, trace }
+        return { status: 'error', error: message, trace, items: observedItems }
       }
       if (controller.signal.aborted) {
         updateTask(windowId, lifecycleId, 'cancelled', {
           error: ['用户已取消任务', terminationWarning, actionWarning].filter(Boolean).join('。')
         })
-        return { status: 'cancelled', trace }
+        return { status: 'cancelled', trace, items: observedItems }
       }
       const message = [
         error instanceof AgentError ? error.message : '请求或工具处理失败，请检查网络和响应格式',
@@ -333,17 +427,18 @@ export async function runAgentRequest(
       updateTask(windowId, lifecycleId, 'failed', {
         error: message
       })
-      return { status: 'error', error: message, trace }
+      return { status: 'error', error: message, trace, items: observedItems }
     } finally {
       clearTimeout(timer)
     }
   } catch (error) {
     return controller.signal.aborted
-      ? { status: 'cancelled', trace }
+      ? { status: 'cancelled', trace, items: observedItems }
       : {
           status: 'error',
           error: error instanceof Error ? error.message : '无法准备运行上下文',
-          trace
+          trace,
+          items: observedItems
         }
   } finally {
     controller.abort()
@@ -351,5 +446,6 @@ export async function runAgentRequest(
     sender.removeListener('did-start-loading', cancel)
     sender.removeListener('render-process-gone', cancel)
     sender.removeListener('destroyed', cancel)
+    appendTrace(`用时：${Math.max(0, Math.round(performance.now() - startedAt))}毫秒`)
   }
 }

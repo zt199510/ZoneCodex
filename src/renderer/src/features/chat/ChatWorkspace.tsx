@@ -90,6 +90,7 @@ export function ChatWorkspace({
             onOpenCommand={openCommand}
             messages={messages}
             toolActivity={conversation.toolActivity}
+            toolRuns={conversation.toolRuns}
             changeProposals={conversation.changeProposals}
             changeProposalStatus={conversation.changeProposalStatus}
             proposalOpenDisabled={

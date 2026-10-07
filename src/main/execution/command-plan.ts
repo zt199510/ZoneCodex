@@ -279,7 +279,6 @@ export async function prepareCommandExecution(
     throw new Error('Windows 命令监督器不可用或已变化，本次未启动命令')
   const sandbox =
     !!backend &&
-    backend.networkReady &&
     roots.some((root) => within(root, cwd)) &&
     request.sandbox_permissions !== 'require_escalated'
   const temporaryRoot = sandbox ? await mkdtemp(join(tmpdir(), 'zonecodex-command-')) : null
@@ -323,9 +322,7 @@ export async function prepareCommandExecution(
           )
         : !roots.some((root) => within(root, cwd))
           ? '此命令的工作目录位于当前可写范围之外，将以本机权限运行。'
-          : backend && !backend.networkReady
-            ? '当前 Windows 命令沙箱的网络限制未就绪，本次需要在受限环境之外运行。'
-            : '当前 Windows 受限执行后端不可用，本次命令将以本机权限运行。'
+          : '当前 Windows 受限执行后端不可用，本次命令将以本机权限运行。'
   })
   try {
     const protections = Object.freeze(
@@ -479,7 +476,6 @@ export function claimCommandExecution(
             value.command.cwd,
             '--timeout-ms',
             String(timeoutMs),
-            ...(value.sandbox ? ['--require-offline-network'] : []),
             '--',
             program,
             ...args

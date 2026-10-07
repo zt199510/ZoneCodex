@@ -1,4 +1,4 @@
-import { parseProtocolTurn } from './agent-history'
+import { parseIncompleteToolTurn, parseProtocolTurn } from './agent-history'
 import type { ProtocolItem } from './agent-history'
 import type { ToolScope } from './project'
 
@@ -7,17 +7,149 @@ export type AgentMode = 'live'
 // 统一模型与 Agent 的文字增量事件。Agent 通过同一 IPC 通道发送，
 // 这样 renderer 不需要根据请求模式选择另一套消息更新协议。
 export type AgentDelta = { requestId: string; delta: string }
+export type AgentMessageEvent = {
+  requestId: string
+  messageId: string
+  phase: 'commentary' | 'final_answer'
+  text: string
+}
 // Agent 请求的执行结果
 export type AgentResult =
   | { status: 'done'; answer: string; trace: string[]; items: ProtocolItem[] }
-  | { status: 'cancelled'; trace: string[] }
-  | { status: 'error'; error: string; trace: string[] }
+  | { status: 'cancelled'; trace: string[]; items?: ProtocolItem[] }
+  | { status: 'error'; error: string; trace: string[]; items?: ProtocolItem[] }
+
+export type ToolCallEvent = { callId: string; name: string } & (
+  | { phase: 'start'; arguments: string; commentary?: string }
+  | { phase: 'finish'; output: string; durationMs: number }
+)
+export type AgentToolEvent = ToolCallEvent & { requestId: string }
+
+export function parseAgentMessageEvent(value: unknown): AgentMessageEvent | null {
+  try {
+    if (typeof value !== 'object' || value === null || Array.isArray(value)) return null
+    const prototype = Object.getPrototypeOf(value)
+    if (prototype !== Object.prototype && prototype !== null) return null
+    const descriptors = Object.getOwnPropertyDescriptors(value)
+    const keys = Reflect.ownKeys(descriptors)
+    if (
+      keys.length !== 4 ||
+      keys.some(
+        (key) =>
+          typeof key !== 'string' ||
+          !['requestId', 'messageId', 'phase', 'text'].includes(key) ||
+          !descriptors[key].enumerable ||
+          !('value' in descriptors[key])
+      )
+    )
+      return null
+    const event = value as Record<string, unknown>
+    if (
+      !isAgentId(event.requestId) ||
+      typeof event.messageId !== 'string' ||
+      !/^response-[1-9]-message-(?:[0-9]|[1-4][0-9])$/.test(event.messageId) ||
+      (event.phase !== 'commentary' && event.phase !== 'final_answer') ||
+      typeof event.text !== 'string' ||
+      event.text.length > 16000
+    )
+      return null
+    return {
+      requestId: event.requestId,
+      messageId: event.messageId,
+      phase: event.phase,
+      text: event.text
+    }
+  } catch {
+    return null
+  }
+}
+
+// Transport validation identifies known tools; the executor and stored prefix
+// independently enforce the active request's scope before any operation occurs.
+const toolEventNames = new Set([
+  'get_current_time',
+  'search_project_text',
+  'read_project_file',
+  'propose_file_change',
+  'propose_command',
+  'list_workspace_files',
+  'search_workspace_text',
+  'read_workspace_file',
+  'create_workspace_file',
+  'edit_workspace_file',
+  'run_workspace_command'
+])
+
+export function parseAgentToolEvent(value: unknown): AgentToolEvent | null {
+  try {
+    if (typeof value !== 'object' || value === null || Array.isArray(value)) return null
+    const prototype = Object.getPrototypeOf(value)
+    if (prototype !== Object.prototype && prototype !== null) return null
+    const descriptors = Object.getOwnPropertyDescriptors(value)
+    if (
+      Reflect.ownKeys(descriptors).some(
+        (key) =>
+          typeof key !== 'string' || !descriptors[key].enumerable || !('value' in descriptors[key])
+      )
+    )
+      return null
+    const event = value as Record<string, unknown>
+    if (
+      !isAgentId(event.requestId) ||
+      typeof event.callId !== 'string' ||
+      !event.callId ||
+      event.callId.length > 200 ||
+      typeof event.name !== 'string' ||
+      !toolEventNames.has(event.name)
+    )
+      return null
+    const identity = { requestId: event.requestId, callId: event.callId, name: event.name }
+    if (event.phase === 'start') {
+      if (
+        Object.keys(event).some(
+          (key) =>
+            !['requestId', 'callId', 'name', 'phase', 'arguments', 'commentary'].includes(key)
+        ) ||
+        typeof event.arguments !== 'string' ||
+        event.arguments.length > 4096 ||
+        ('commentary' in event &&
+          (typeof event.commentary !== 'string' || event.commentary.length > 16000))
+      )
+        return null
+      return {
+        ...identity,
+        phase: 'start',
+        arguments: event.arguments,
+        ...(typeof event.commentary === 'string' ? { commentary: event.commentary } : {})
+      }
+    }
+    if (
+      event.phase !== 'finish' ||
+      Object.keys(event).some(
+        (key) => !['requestId', 'callId', 'name', 'phase', 'output', 'durationMs'].includes(key)
+      ) ||
+      typeof event.output !== 'string' ||
+      event.output.length > 12000 ||
+      typeof event.durationMs !== 'number' ||
+      !Number.isSafeInteger(event.durationMs) ||
+      event.durationMs < 0
+    )
+      return null
+    return { ...identity, phase: 'finish', output: event.output, durationMs: event.durationMs }
+  } catch {
+    return null
+  }
+}
 // 判断是否为合法的 Agent ID
 export function isAgentId(value: unknown): value is string {
   return typeof value === 'string' && /^[a-zA-Z0-9-]{1,80}$/.test(value)
 }
 // 判断是否为合法的 Agent 结果
-export function parseAgentResult(value: unknown, scope: ToolScope = { kind: 'time' }): AgentResult {
+export function parseAgentResult(
+  value: unknown,
+  scope: ToolScope = { kind: 'time' },
+  expectedPrompt?: string
+): AgentResult {
   if (
     typeof value !== 'object' ||
     value === null ||
@@ -30,7 +162,13 @@ export function parseAgentResult(value: unknown, scope: ToolScope = { kind: 'tim
     throw new Error('Agent 结果格式不正确')
   }
   const trace: string[] = value.trace
-  if (value.status === 'cancelled') return { status: 'cancelled', trace }
+  const readIncompleteItems = (): { items?: ProtocolItem[] } => {
+    if (!('items' in value)) return {}
+    const items = parseIncompleteToolTurn(value.items, scope, expectedPrompt)
+    if (!items) throw new Error('Agent 未完成调用记录格式不正确')
+    return { items }
+  }
+  if (value.status === 'cancelled') return { status: 'cancelled', trace, ...readIncompleteItems() }
   if (
     value.status === 'done' &&
     'answer' in value &&
@@ -39,7 +177,11 @@ export function parseAgentResult(value: unknown, scope: ToolScope = { kind: 'tim
     'items' in value
   ) {
     const items = parseProtocolTurn(value.items, scope)
-    if (!items || items[items.length - 1].type !== 'message') {
+    if (
+      !items ||
+      items[items.length - 1].type !== 'message' ||
+      (expectedPrompt !== undefined && items[0].content !== expectedPrompt)
+    ) {
       throw new Error('Agent 协议历史格式不正确')
     }
     const finalContent = items[items.length - 1].content
@@ -64,7 +206,7 @@ export function parseAgentResult(value: unknown, scope: ToolScope = { kind: 'tim
     return { status: 'done', answer: value.answer, trace, items }
   }
   if (value.status === 'error' && 'error' in value && typeof value.error === 'string') {
-    return { status: 'error', error: value.error, trace }
+    return { status: 'error', error: value.error, trace, ...readIncompleteItems() }
   }
   throw new Error('Agent 状态格式不正确')
 }

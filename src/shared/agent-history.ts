@@ -196,6 +196,81 @@ export function parseToolHistory(
   return result
 }
 
+// Display evidence for an unfinished request is never reusable model history.
+// Only visible commentary and calls actually handed to the executor are captured.
+export function parseIncompleteToolTurn(
+  value: unknown,
+  scope: ToolScope = { kind: 'time' },
+  expectedPrompt?: string
+): ProtocolItem[] | null {
+  const checkedScope = parseToolScope(scope)
+  if (!checkedScope) return null
+  const items = cloneJsonArray(value, 160, 128000)
+  if (!items || !items.every((item): item is ProtocolItem => isRecord(item))) return null
+  if (items.length === 0) return []
+  const first = items[0]
+  if (
+    Object.keys(first).length !== 2 ||
+    first.role !== 'user' ||
+    typeof first.content !== 'string' ||
+    !first.content.trim() ||
+    first.content.length > 2000 ||
+    (expectedPrompt !== undefined && first.content !== expectedPrompt)
+  )
+    return null
+  const calls = new Set<string>()
+  let pendingCall: string | null = null
+  for (const item of items.slice(1)) {
+    if (item.type === 'function_call') {
+      if (
+        Object.keys(item).length !== 4 ||
+        pendingCall !== null ||
+        calls.size >= 8 ||
+        !isToolAllowed(item.name, checkedScope) ||
+        typeof item.arguments !== 'string' ||
+        item.arguments.length > 4096 ||
+        typeof item.call_id !== 'string' ||
+        !item.call_id ||
+        item.call_id.length > 200 ||
+        calls.has(item.call_id)
+      )
+        return null
+      calls.add(item.call_id)
+      pendingCall = item.call_id
+    } else if (item.type === 'function_call_output') {
+      if (
+        Object.keys(item).length !== 3 ||
+        pendingCall === null ||
+        item.call_id !== pendingCall ||
+        typeof item.output !== 'string' ||
+        item.output.length > 12000
+      )
+        return null
+      pendingCall = null
+    } else if (item.type === 'message') {
+      if (
+        Object.keys(item).length !== 4 ||
+        pendingCall !== null ||
+        item.role !== 'assistant' ||
+        item.phase !== 'commentary' ||
+        !Array.isArray(item.content) ||
+        item.content.length !== 1
+      )
+        return null
+      const part = item.content[0]
+      if (
+        !isRecord(part) ||
+        Object.keys(part).length !== 2 ||
+        part.type !== 'output_text' ||
+        typeof part.text !== 'string' ||
+        part.text.length > 16000
+      )
+        return null
+    } else return null
+  }
+  return items
+}
+
 // messages 应先通过会话消息校验；这里检查工具轮次与消息的关联。
 function parseToolRunsInternal(
   value: unknown,
@@ -259,13 +334,11 @@ function parseToolRunsInternal(
       }
       items = parsed
     } else {
-      if (
-        (user.status !== 'pending' && user.status !== 'failed' && user.status !== 'cancelled') ||
-        !Array.isArray(item.items) ||
-        item.items.length !== 0
-      )
+      if (user.status !== 'pending' && user.status !== 'failed' && user.status !== 'cancelled')
         return null
-      items = []
+      const parsed = parseIncompleteToolTurn(item.items, scope, user.content)
+      if (!parsed) return null
+      items = parsed
     }
     requestIds.add(item.requestId)
     usedMessages.add(item.userId)

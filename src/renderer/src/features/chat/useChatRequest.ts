@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { selectToolHistory } from '../../../../shared/agent-history'
+import { parseIncompleteToolTurn, selectToolHistory } from '../../../../shared/agent-history'
 import type { ProtocolItem, ToolRun } from '../../../../shared/agent-history'
 import type { AgentRequestContext, ProjectSelection, Workspace } from '../../../../shared/project'
 import { toolScopeForAgentRequest } from '../../../../shared/project'
@@ -39,6 +39,9 @@ type ActiveRequest = {
   sideEffectStarted: boolean
   history: ProtocolItem[]
   trace: string[]
+  items: ProtocolItem[]
+  commentaryIndexes: Map<string, number>
+  answerMessages: Map<string, string>
   attachments: ChatAttachment[]
   taskId: string
 }
@@ -121,16 +124,56 @@ export function useChatRequest({
   const subscribed = useRef(false)
 
   useEffect(() => {
-    const offDelta = window.api.onModelDelta((event) => {
+    const offMessage = window.api.onAgentMessageEvent((event) => {
       const active = activeRequest.current
-      if (!active || active.requestId !== event.requestId) return
-      updateMessages(active.conversationId, (previous) =>
-        previous.map((message) =>
-          message.id === active.assistantId && message.status === 'pending'
-            ? { ...message, content: message.content + event.delta }
-            : message
+      if (!active || active.phase !== 'running' || active.requestId !== event.requestId) return
+      if (event.phase === 'final_answer') {
+        const answers = new Map(active.answerMessages)
+        answers.set(event.messageId, event.text)
+        const content = [...answers]
+          .sort(([first], [second]) => first.localeCompare(second, undefined, { numeric: true }))
+          .map(([, text]) => text)
+          .join('\n')
+        if (content.length > 16000) return
+        active.answerMessages = answers
+        updateMessages(active.conversationId, (previous) =>
+          previous.map((message) =>
+            message.id === active.assistantId && message.status === 'pending'
+              ? { ...message, content }
+              : message
+          )
         )
+        return
+      }
+      const next = active.items.length
+        ? [...active.items]
+        : [{ role: 'user', content: active.prompt }]
+      const index = active.commentaryIndexes.get(event.messageId)
+      const commentary: ProtocolItem = {
+        type: 'message',
+        role: 'assistant',
+        phase: 'commentary',
+        content: [{ type: 'output_text', text: event.text }]
+      }
+      if (index === undefined) next.push(commentary)
+      else if (next[index]?.type === 'message') next[index] = commentary
+      else return
+      const checked = parseIncompleteToolTurn(
+        next,
+        toolScopeForAgentRequest(active.context),
+        active.prompt
       )
+      if (!checked) return
+      if (index === undefined) active.commentaryIndexes.set(event.messageId, checked.length - 1)
+      active.items = checked
+      updateConversation(active.conversationId, (previous) => ({
+        ...previous,
+        toolRuns: previous.toolRuns.map((run) =>
+          run.requestId === active.requestId && run.assistantId === active.assistantId
+            ? { ...run, items: checked }
+            : run
+        )
+      }))
     })
     const offProgress = window.api.onAgentProgress((event) => {
       const active = activeRequest.current
@@ -143,6 +186,53 @@ export function useChatRequest({
       setToolActivity((previous) => ({
         ...previous,
         [active.assistantId]: [...(previous[active.assistantId] ?? []), event.message].slice(-30)
+      }))
+    })
+    const offTool = window.api.onAgentToolEvent((event) => {
+      const active = activeRequest.current
+      if (!active || active.phase !== 'running' || active.requestId !== event.requestId) return
+      let next: ProtocolItem[]
+      if (event.phase === 'start') {
+        if (
+          active.items.some(
+            (item) => item.type === 'function_call' && item.call_id === event.callId
+          )
+        )
+          return
+        next = active.items.length ? [...active.items] : [{ role: 'user', content: active.prompt }]
+        next.push({
+          type: 'function_call',
+          call_id: event.callId,
+          name: event.name,
+          arguments: event.arguments
+        })
+      } else {
+        const pending = active.items.at(-1)
+        if (
+          pending?.type !== 'function_call' ||
+          pending.call_id !== event.callId ||
+          pending.name !== event.name
+        )
+          return
+        next = [
+          ...active.items,
+          { type: 'function_call_output', call_id: event.callId, output: event.output }
+        ]
+      }
+      const checked = parseIncompleteToolTurn(
+        next,
+        toolScopeForAgentRequest(active.context),
+        active.prompt
+      )
+      if (!checked) return
+      active.items = checked
+      updateConversation(active.conversationId, (previous) => ({
+        ...previous,
+        toolRuns: previous.toolRuns.map((run) =>
+          run.requestId === active.requestId && run.assistantId === active.assistantId
+            ? { ...run, items: checked }
+            : run
+        )
       }))
     })
     const offTask = window.api.onTaskState((record) => {
@@ -158,8 +248,9 @@ export function useChatRequest({
     subscribed.current = true
     return () => {
       subscribed.current = false
-      offDelta()
+      offMessage()
       offProgress()
+      offTool()
       offTask()
       const active = activeRequest.current
       activeRequest.current = null
@@ -266,20 +357,20 @@ export function useChatRequest({
       if (result.status === 'done') {
         finishToolTurn(active, 'complete', result.trace, result.items, result.answer)
       } else if (result.status === 'cancelled') {
-        finishToolTurn(active, 'cancelled', result.trace, [])
+        finishToolTurn(active, 'cancelled', result.trace, result.items ?? active.items)
       } else {
         finishToolTurn(
           active,
           'failed',
           result.trace,
-          [],
+          result.items ?? active.items,
           active.sideEffectStarted || hasLocalSideEffects(result.trace) ? result.error : undefined
         )
         setError(result.error)
       }
     } catch (cause) {
       if (activeRequest.current?.requestId === active.requestId) {
-        finishToolTurn(active, 'failed', active.trace, [])
+        finishToolTurn(active, 'failed', active.trace, active.items)
         setError(
           active.phase === 'resolving' && cause instanceof Error
             ? cause.message
@@ -353,6 +444,9 @@ export function useChatRequest({
       sideEffectStarted: false,
       history: [],
       trace: [],
+      items: [],
+      commentaryIndexes: new Map(),
+      answerMessages: new Map(),
       attachments,
       taskId: crypto.randomUUID()
     }

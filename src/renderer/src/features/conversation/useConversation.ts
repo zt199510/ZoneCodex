@@ -1,5 +1,6 @@
 import { useCallback, useRef, useState } from 'react'
 import type { ChatMessage } from '../../../../shared/conversation'
+import type { ToolRun } from '../../../../shared/agent-history'
 import {
   createConversationTitle,
   getActiveConversation,
@@ -59,6 +60,7 @@ export type ConversationController = ConversationReviewController & {
   setClosePending: (value: boolean) => void
   getOperation: () => Operation
   toolActivity: ToolActivity
+  toolRuns: readonly ToolRun[]
   removeFile: (path: string) => Promise<boolean>
 }
 
@@ -596,6 +598,7 @@ export function useConversation(): ConversationController {
     },
     editAndSend,
     toolActivity: visibleActivity,
+    toolRuns: active?.toolRuns ?? [],
     removeFile,
     preparation,
     commit,
