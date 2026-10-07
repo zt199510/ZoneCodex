@@ -1,6 +1,7 @@
-import { useLayoutEffect, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import type { ChatMessage } from '../../../../shared/conversation'
 import type { ProtocolItem } from '../../../../shared/agent-history'
+import { commandTemplate } from '../../../../shared/command-proposal'
 import { Icon, type IconName } from '../../components/ui/Icon'
 import { MarkdownContent } from './MarkdownContent'
 
@@ -93,6 +94,76 @@ function displayCommand(program: string, args: readonly string[]): string {
     )
     .join(' ')
 }
+function targetName(path: string): string {
+  return path.split(/[\\/]/).filter(Boolean).at(-1) ?? path
+}
+function toolTarget(
+  name: string,
+  args: Record<string, unknown> | null
+): { text: string; title: string } | null {
+  if (!args) return null
+  if (name === 'run_workspace_command') {
+    if (
+      typeof args.program !== 'string' ||
+      !args.program ||
+      !Array.isArray(args.args) ||
+      !args.args.every((arg) => typeof arg === 'string')
+    )
+      return null
+    return {
+      text: displayCommand(targetName(args.program), args.args),
+      title: displayCommand(args.program, args.args)
+    }
+  }
+  if (name === 'propose_command') {
+    return args.template === commandTemplate.template
+      ? { text: commandTemplate.display, title: commandTemplate.display }
+      : null
+  }
+  if (name === 'get_current_time') {
+    return args.timeZone === 'UTC' || args.timeZone === 'Asia/Hong_Kong'
+      ? { text: args.timeZone, title: args.timeZone }
+      : null
+  }
+  if (name === 'search_workspace_text' || name === 'search_project_text') {
+    if (typeof args.query !== 'string' || !args.query) return null
+    if (name === 'search_project_text') return { text: args.query, title: args.query }
+    if (typeof args.path !== 'string') return null
+    const text = `${args.query} · ${args.path === '' ? '默认目录' : args.path}`
+    return { text, title: text }
+  }
+  if (name === 'list_workspace_files') {
+    if (typeof args.path !== 'string') return null
+    const text = args.path === '' ? '默认目录' : args.path
+    return { text, title: text }
+  }
+  if (
+    [
+      'read_project_file',
+      'read_workspace_file',
+      'create_workspace_file',
+      'edit_workspace_file',
+      'propose_file_change'
+    ].includes(name) &&
+    typeof args.path === 'string' &&
+    args.path
+  )
+    return { text: targetName(args.path), title: args.path }
+  return null
+}
+function restoreCollapsedDetailsFocus(details: HTMLDetailsElement | null): void {
+  const summary = details?.querySelector<HTMLElement>(':scope > summary')
+  const active = details?.ownerDocument.activeElement
+  if (
+    details &&
+    summary &&
+    active &&
+    active !== details &&
+    details.contains(active) &&
+    !summary.contains(active)
+  )
+    summary.focus({ preventScroll: true })
+}
 function toolIcon(name: string): IconName {
   if (name === 'run_workspace_command' || name === 'propose_command') return 'terminal'
   if (name.includes('search')) return 'search'
@@ -166,13 +237,27 @@ function ToolItem({
     typeof result?.cwd === 'string' ? result.cwd : typeof args?.cwd === 'string' ? args.cwd : null
   const error = typeof result?.error === 'string' ? result.error : null
   const hasCommandOutput = command && result && ('stdout' in result || 'stderr' in result)
+  const target = toolTarget(call.name, args)
   return (
-    <details className="message-tool-item" data-tool-name={call.name} data-state={state}>
-      <summary className="message-tool-summary">
+    <details
+      className="message-tool-item"
+      data-tool-name={call.name}
+      data-state={state}
+      onToggle={(event) => {
+        if (!event.currentTarget.open) restoreCollapsedDetailsFocus(event.currentTarget)
+      }}
+    >
+      <summary
+        className="message-tool-summary"
+        title={target ? `${label} · ${target.title}` : undefined}
+      >
         <span className={`message-tool-icon${state === 'running' ? ' is-running' : ''}`}>
           <Icon name={toolIcon(call.name)} size={15} />
         </span>
-        <span>{label}</span>
+        <span className="message-tool-summary-text">
+          {label}
+          {target && ` · ${target.text}`}
+        </span>
         <span className="message-tool-chevron">
           <Icon name="chevron" size={12} />
         </span>
@@ -268,33 +353,49 @@ export function MessageActivity({
   status?: ChatMessage['status']
   answerStarted?: boolean
 }): React.JSX.Element | null {
+  const overview = useRef<HTMLDetailsElement>(null)
+  const [runningElapsed, setRunningElapsed] = useState(0)
   const finalSeen = useRef(answerStarted || status === 'complete')
   const [expanded, setExpanded] = useState(!answerStarted && status !== 'complete')
+  useEffect(() => {
+    if (status !== 'pending') return
+    const startedAt = performance.now()
+    const timer = window.setInterval(() => {
+      setRunningElapsed(Math.max(0, performance.now() - startedAt))
+    }, 1000)
+    return () => window.clearInterval(timer)
+  }, [status])
   useLayoutEffect(() => {
     if (!finalSeen.current && (answerStarted || status === 'complete')) {
       finalSeen.current = true
+      restoreCollapsedDetailsFocus(overview.current)
       setExpanded(false)
     }
   }, [answerStarted, status])
   const blocks = activityBlocks(items)
   const timing = [...entries].reverse().find((line) => /^用时：\d+毫秒$/.test(line))
-  const elapsed = timing ? Number(timing.slice(3, -2)) : null
+  const parsedElapsed = timing ? Number(timing.slice(3, -2)) : null
+  const elapsed = Number.isSafeInteger(parsedElapsed) ? parsedElapsed : null
+  const timingLabel =
+    status === 'pending'
+      ? `正在处理 · ${Math.floor(runningElapsed / 1000)}秒`
+      : elapsed !== null
+        ? `用时 ${elapsed < 1000 ? '不到1' : Math.round(elapsed / 1000)}秒`
+        : '处理过程'
   if (blocks.length)
     return (
       <section className="message-tool-run" aria-label="本轮处理过程">
         <details
           className="message-tool-overview"
+          ref={overview}
           open={expanded}
-          onToggle={(event) => setExpanded(event.currentTarget.open)}
+          onToggle={(event) => {
+            if (!event.currentTarget.open) restoreCollapsedDetailsFocus(event.currentTarget)
+            setExpanded(event.currentTarget.open)
+          }}
         >
           <summary className="message-tool-overview-summary">
-            <span>
-              {status === 'pending' && !answerStarted
-                ? '正在处理'
-                : elapsed !== null
-                  ? `用时 ${elapsed < 1000 ? '不到1' : Math.round(elapsed / 1000)}秒`
-                  : '处理过程'}
-            </span>
+            <span>{timingLabel}</span>
             <Icon name="chevron" size={12} />
           </summary>
           <div className="message-tool-timeline">
@@ -324,15 +425,22 @@ export function MessageActivity({
       ? [{ name, label: toolLabels[name] ?? name, index }]
       : []
   })
-  if (!legacy.length) return null
+  if (!legacy.length && status !== 'pending' && elapsed === null) return null
   return (
-    <ul className="message-tool-activity" aria-label="工具活动">
-      {legacy.map((item) => (
-        <li key={`${messageId}-legacy-${item.index}`}>
-          <Icon name={toolIcon(item.name)} size={14} />
-          <span>{item.label}</span>
-        </li>
-      ))}
-    </ul>
+    <section className="message-tool-run" aria-label="本轮处理过程">
+      {(status === 'pending' || elapsed !== null) && (
+        <div className="message-tool-overview-summary message-response-timing">{timingLabel}</div>
+      )}
+      {legacy.length > 0 && (
+        <ul className="message-tool-activity" aria-label="工具活动">
+          {legacy.map((item) => (
+            <li key={`${messageId}-legacy-${item.index}`}>
+              <Icon name={toolIcon(item.name)} size={14} />
+              <span>{item.label}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
   )
 }

@@ -244,6 +244,21 @@
   line-height: 24px;
 }
 
+.message-tool-summary {
+  min-width: 0;
+}
+
+.message-tool-summary-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.message-tool-summary > .message-tool-chevron {
+  flex: 0 0 auto;
+}
+
 .message-tool-overview-summary::-webkit-details-marker,
 .message-tool-summary::-webkit-details-marker {
   display: none;
@@ -254,6 +269,10 @@
   padding: 0 0 6px;
   margin-bottom: 14px;
   border-bottom: 1px solid #ededed;
+}
+
+.message-response-timing {
+  cursor: default;
 }
 
 .message-tool-overview-summary > svg,

@@ -35,7 +35,12 @@ export function ChatInput({
     element.style.height = `${Math.min(element.scrollHeight, 180)}px`
   }, [value])
   useLayoutEffect(() => {
-    if (wasSending.current && !isSending && !disabled) textarea.current?.focus()
+    const element = textarea.current
+    if (wasSending.current && !isSending && !disabled && element) {
+      const active = element.ownerDocument.activeElement
+      if (active === element.ownerDocument.body || (active && element.form?.contains(active)))
+        element.focus({ preventScroll: true })
+    }
     wasSending.current = isSending
   }, [disabled, isSending])
   function submit(event: FormEvent): void {

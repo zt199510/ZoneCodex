@@ -122,8 +122,12 @@
 }
 
 .markdown-code-language {
+  min-width: 0;
+  overflow: hidden;
   font-family: inherit;
+  text-overflow: ellipsis;
   text-transform: lowercase;
+  white-space: nowrap;
 }
 
 .markdown-code-copy {
@@ -157,6 +161,65 @@
 
 .markdown-code-block pre code {
   white-space: inherit;
+}
+
+.markdown-code-block pre:focus-visible {
+  outline: 1px solid #b7b7b7;
+  outline-offset: -2px;
+}
+
+.markdown-code-block .hljs-comment,
+.markdown-code-block .hljs-quote {
+  color: #7c8288;
+}
+
+.markdown-code-block .hljs-keyword,
+.markdown-code-block .hljs-selector-tag,
+.markdown-code-block .hljs-doctag,
+.markdown-code-block .hljs-type {
+  color: #72558c;
+}
+
+.markdown-code-block .hljs-string,
+.markdown-code-block .hljs-regexp,
+.markdown-code-block .hljs-template-tag,
+.markdown-code-block .hljs-template-variable {
+  color: #55765f;
+}
+
+.markdown-code-block .hljs-number,
+.markdown-code-block .hljs-literal,
+.markdown-code-block .hljs-symbol,
+.markdown-code-block .hljs-bullet {
+  color: #976642;
+}
+
+.markdown-code-block .hljs-title,
+.markdown-code-block .hljs-section,
+.markdown-code-block .hljs-selector-id,
+.markdown-code-block .hljs-selector-class {
+  color: #48688b;
+}
+
+.markdown-code-block .hljs-attr,
+.markdown-code-block .hljs-attribute,
+.markdown-code-block .hljs-variable,
+.markdown-code-block .hljs-built_in {
+  color: #5a6068;
+}
+
+.markdown-code-block .hljs-meta {
+  color: #797069;
+}
+
+.markdown-code-block .hljs-addition {
+  color: #55765f;
+  background: #edf4ef;
+}
+
+.markdown-code-block .hljs-deletion {
+  color: #936461;
+  background: #f7eded;
 }
 
 .markdown-table-scroll {

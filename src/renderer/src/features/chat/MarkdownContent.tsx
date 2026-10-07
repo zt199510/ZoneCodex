@@ -1,9 +1,78 @@
-import { Children, isValidElement, useEffect, useRef, useState } from 'react'
+import { Children, isValidElement, useEffect, useMemo, useRef, useState } from 'react'
 import type { MouseEvent, ReactNode } from 'react'
 import Markdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import type { Components } from 'react-markdown'
+import { createLowlight } from 'lowlight'
+import javascript from 'highlight.js/lib/languages/javascript'
+import typescript from 'highlight.js/lib/languages/typescript'
+import json from 'highlight.js/lib/languages/json'
+import xml from 'highlight.js/lib/languages/xml'
+import css from 'highlight.js/lib/languages/css'
+import python from 'highlight.js/lib/languages/python'
+import bash from 'highlight.js/lib/languages/bash'
+import powershell from 'highlight.js/lib/languages/powershell'
+import sql from 'highlight.js/lib/languages/sql'
+import yaml from 'highlight.js/lib/languages/yaml'
+import diff from 'highlight.js/lib/languages/diff'
 import { Icon } from '../../components/ui/Icon'
+
+const lowlight = createLowlight({
+  javascript,
+  typescript,
+  json,
+  xml,
+  css,
+  python,
+  bash,
+  powershell,
+  sql,
+  yaml,
+  diff
+})
+lowlight.registerAlias({ typescript: ['tsx'], bash: ['shell'] })
+type HighlightNode = ReturnType<typeof lowlight.highlight>['children'][number]
+
+function highlightedCode(code: string, language: string): ReactNode {
+  const name = language.toLowerCase()
+  // Keep unknown languages and large streamed blocks as exact plain text.
+  if (
+    !lowlight.registered(name) ||
+    code.length > 12000 ||
+    code.split('\n').some((line) => line.length > 2000)
+  )
+    return code
+  try {
+    let remaining = 10000
+    function tokens(nodes: readonly HighlightNode[], depth: number): ReactNode {
+      if (depth > 32) throw new Error('Token tree is too deep')
+      return nodes.map((node, index) => {
+        if (--remaining < 0) throw new Error('Token tree is too large')
+        if (node.type === 'text') return node.value
+        if (node.type !== 'element' || node.tagName !== 'span')
+          throw new Error('Unexpected token node')
+        const className = Array.isArray(node.properties.className)
+          ? node.properties.className
+              .filter(
+                (value) =>
+                  typeof value === 'string' &&
+                  /^(?:hljs-[a-z][a-z0-9_-]*|[a-z][a-z0-9_-]*_)$/.test(value)
+              )
+              .join(' ')
+          : undefined
+        return (
+          <span key={index} className={className}>
+            {tokens(node.children, depth + 1)}
+          </span>
+        )
+      })
+    }
+    // Lowlight produces a public token tree; React escapes every text node.
+    return tokens(lowlight.highlight(name, code).children, 0)
+  } catch {
+    return code
+  }
+}
 
 // 不传 base URL：相对路径、锚点和 //example.com 都不作为外链接受。
 function displayUrl(value: string): string {
@@ -43,6 +112,7 @@ function CodeBlock({ children }: { children?: ReactNode }): React.JSX.Element {
   const className = codeProps?.className ?? ''
   const languageMatch = /(?:^|\s)language-([a-zA-Z0-9_+#.-]+)/.exec(className)
   const language = languageMatch?.[1] ?? 'text'
+  const highlighted = useMemo(() => highlightedCode(code, language), [code, language])
   const [copyState, setCopyState] = useState<'idle' | 'copied' | 'failed'>('idle')
   const resetTimer = useRef<number | null>(null)
 
@@ -96,7 +166,9 @@ function CodeBlock({ children }: { children?: ReactNode }): React.JSX.Element {
           />
         </button>
       </div>
-      <pre>{codeElement ?? children}</pre>
+      <pre tabIndex={0}>
+        <code className={className}>{highlighted}</code>
+      </pre>
     </div>
   )
 }

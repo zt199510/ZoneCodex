@@ -44,6 +44,7 @@ type ActiveRequest = {
   answerMessages: Map<string, string>
   attachments: ChatAttachment[]
   taskId: string
+  startedAt: number
 }
 type ChatRetrySource = {
   conversationId: string
@@ -275,6 +276,19 @@ export function useChatRequest({
       (active.sideEffectStarted && status !== 'complete'
         ? '本地操作可能已经执行。请先核对文件或命令结果，再决定是否重新请求。'
         : undefined)
+    const finalTrace = [
+      ...trace.filter((line) => !/^用时：\d+毫秒$/.test(line)),
+      `用时：${Math.max(0, Math.round(performance.now() - active.startedAt))}毫秒`
+    ].slice(-30)
+    const finishedRun: ToolRun = {
+      requestId: active.requestId,
+      userId: active.userId,
+      assistantId: active.assistantId,
+      mode: 'live',
+      scope: toolScopeForAgentRequest(active.context),
+      trace: finalTrace,
+      items
+    }
     updateConversation(active.conversationId, (previous) => ({
       ...previous,
       messages: previous.messages.map((message) => {
@@ -288,11 +302,13 @@ export function useChatRequest({
               : message.content
         }
       }),
-      toolRuns: previous.toolRuns.map((run) =>
-        run.requestId === active.requestId && run.assistantId === active.assistantId
-          ? { ...run, trace: trace.slice(-30), items }
-          : run
-      )
+      toolRuns: previous.toolRuns.some((run) => run.requestId === active.requestId)
+        ? previous.toolRuns.map((run) =>
+            run.requestId === active.requestId && run.assistantId === active.assistantId
+              ? { ...run, trace: finalTrace, items }
+              : run
+          )
+        : [...previous.toolRuns, finishedRun]
     }))
     setToolActivity((previous) => {
       const next = { ...previous }
@@ -448,7 +464,8 @@ export function useChatRequest({
       commentaryIndexes: new Map(),
       answerMessages: new Map(),
       attachments,
-      taskId: crypto.randomUUID()
+      taskId: crypto.randomUUID(),
+      startedAt: performance.now()
     }
     activeRequest.current = active
     setError(null)

@@ -81,7 +81,9 @@ export function MessageList({
             }
           >
             {message.role === 'system' && <div className="message-author">系统</div>}
-            {(activity || hasProcess) && (
+            {(activity ||
+              hasProcess ||
+              (message.role === 'assistant' && message.status === 'pending')) && (
               <MessageActivity
                 messageId={message.id}
                 entries={activity ?? []}
@@ -135,7 +137,7 @@ export function MessageList({
                     message.content
                   )
                 ) : message.status === 'pending' ? (
-                  hasProcess ? null : (
+                  message.role === 'assistant' ? null : (
                     '正在生成回复…'
                   )
                 ) : message.status === 'failed' || message.status === 'cancelled' ? null : (
