@@ -33,10 +33,14 @@ npm run build:windows-runtime
 
 Windows 安装包通过 `extraResources` 将四个程序、manifest、许可证和声明放在 `resources/windows-command-runtime/`，位于 `app.asar` 外。编译对象、开发脚本、课程文档及重复的运行资源不进入安装包。
 
-`afterPack` 校验复制完成的资源、监督器协议、固定 CLI 版本与许可文件，并原子更新安装包内的 manifest。`afterSign` 再次记录签名完成后的程序哈希，避免 PE 签名元数据改变后与构建时的哈希不符。禁用签名的构建仍执行 `afterPack`。这些钩子作为模块导入时不会触发本地资源构建或系统初始化。
+`afterPack` 和 `afterSign` 均先将四个程序的完整 SHA-256 与构建 manifest 比较，任何字节漂移都拒绝，之后核对监督器协议、固定 CLI 版本与许可文件，并原子写回相同资源描述。禁用签名的构建仍执行 `afterPack`。这些钩子作为模块导入时不会触发本地资源构建或系统初始化。
+
+electron-builder 会在复制额外资源时尝试签名，早于 `afterPack`。本项目因此按运行资源目录排除这四个程序的重新签名：保留官方程序原有签名和构建字节，`host.exe` 保持本机编译的未签名字节。ZoneCodex 主程序及安装器仍走正常签名流程。这一安排不依赖 PE 签名区域规范化，也不将改变后的程序重新登记成可信资源。
+
+生成程序和 manifest 写入前拒绝目录链接、文件链接及多硬链接目标，先写入唯一临时文件或编译目录，复核原目标身份后原子替换；源文件变化或任一检查失败不写穿已有链接。
 
 沙箱运行使用用户已有的 Codex Windows elevated 初始化状态。资源构建和打包不会创建账户、修改 ACL 或防火墙；运行资源完整与系统沙箱已就绪分别核对。不可用时不宣称具有沙箱能力。
 
 ## 上游来源与许可
 
-官方程序的代码不作修改；安装包签名可以改变 PE 签名元数据，manifest 记录最终分发文件的字节。上游源码为 [openai/codex 的 rust-v0.160.1](https://github.com/openai/codex/tree/rust-v0.160.1)。[LICENSE](LICENSE) 保留该版本的 Apache 2.0 原文；[THIRD_PARTY_NOTICES.txt](THIRD_PARTY_NOTICES.txt) 保留该版本的 NOTICE，并附带其中注明的 Ratatui MIT 许可文本。ZoneCodex 的监督器是本项目独立实现。
+官方程序的代码和原有签名均不修改，manifest 记录完整的最终分发字节。上游源码为 [openai/codex 的 rust-v0.160.1](https://github.com/openai/codex/tree/rust-v0.160.1)。[LICENSE](LICENSE) 保留该版本的 Apache 2.0 原文；[THIRD_PARTY_NOTICES.txt](THIRD_PARTY_NOTICES.txt) 保留该版本的 NOTICE，并附带其中注明的 Ratatui MIT 许可文本。ZoneCodex 的监督器是本项目独立实现。

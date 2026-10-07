@@ -1,5 +1,14 @@
 import { createHash } from 'node:crypto'
-import { lstatSync, existsSync, realpathSync, readFileSync } from 'node:fs'
+import {
+  closeSync,
+  existsSync,
+  fstatSync,
+  lstatSync,
+  openSync,
+  readFileSync,
+  readSync,
+  realpathSync
+} from 'node:fs'
 import { lstat, mkdtemp, readFile, realpath, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { delimiter, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
@@ -72,9 +81,43 @@ function within(root: string, target: string): boolean {
   return offset === '' || (!isAbsolute(offset) && offset !== '..' && !offset.startsWith(`..${sep}`))
 }
 function identity(file: string): string {
-  const stat = lstatSync(file)
-  if (!stat.isFile() || stat.isSymbolicLink()) throw new Error('命令程序不是普通文件')
-  return `${stat.dev}:${stat.ino}:${stat.size}:${stat.mtimeMs}`
+  const snapshot = (): string => {
+    const stat = lstatSync(file)
+    if (!stat.isFile() || stat.isSymbolicLink() || stat.size <= 0 || stat.size > 1024 * 1024 * 1024)
+      throw new Error('命令程序不是有效的普通文件')
+    return `${stat.dev}:${stat.ino}:${stat.size}:${stat.mtimeMs}:${stat.ctimeMs}`
+  }
+  const before = snapshot()
+  const descriptor = openSync(file, 'r')
+  try {
+    const stat = fstatSync(descriptor)
+    if (`${stat.dev}:${stat.ino}:${stat.size}:${stat.mtimeMs}:${stat.ctimeMs}` !== before)
+      throw new Error('命令程序已变化')
+    const hash = createHash('sha256')
+    const chunk = Buffer.allocUnsafe(256 * 1024)
+    let offset = 0
+    while (offset < stat.size) {
+      const count = readSync(
+        descriptor,
+        chunk,
+        0,
+        Math.min(chunk.length, stat.size - offset),
+        offset
+      )
+      if (!count) throw new Error('命令程序已变化')
+      hash.update(chunk.subarray(0, count))
+      offset += count
+    }
+    const after = fstatSync(descriptor)
+    if (
+      `${after.dev}:${after.ino}:${after.size}:${after.mtimeMs}:${after.ctimeMs}` !== before ||
+      snapshot() !== before
+    )
+      throw new Error('命令程序已变化')
+    return `${before}:${hash.digest('hex')}`
+  } finally {
+    closeSync(descriptor)
+  }
 }
 function commandEnvironment(kind: 'tool' | 'legacy'): NodeJS.ProcessEnv {
   return Object.fromEntries(
@@ -142,7 +185,7 @@ async function protectedPaths(
   roots: readonly string[]
 ): Promise<{ paths: string[]; gitPointers: { path: string; content: string }[] }> {
   const paths = roots.flatMap((root) =>
-    ['.git', '.agents', '.codex'].map((name) => join(root, name))
+    ['.git', '.agents', '.codex', '.aws'].map((name) => join(root, name))
   )
   const gitPointers: { path: string; content: string }[] = []
   for (const path of paths) {
@@ -232,6 +275,8 @@ export async function prepareCommandExecution(
     context.permissions.mode === 'full-access' ? null : await inspectWindowsCommandBackend()
   const host = backend?.host ?? (await inspectCommandHost())
   current()
+  if (process.platform === 'win32' && !host)
+    throw new Error('Windows 命令监督器不可用或已变化，本次未启动命令')
   const sandbox =
     !!backend &&
     backend.networkReady &&
@@ -283,6 +328,11 @@ export async function prepareCommandExecution(
             : '当前 Windows 受限执行后端不可用，本次命令将以本机权限运行。'
   })
   try {
+    const protections = Object.freeze(
+      protectedEntries.paths.map((path) =>
+        Object.freeze({ path, identity: protectionIdentity(path) })
+      )
+    )
     prepared.set(result, {
       context: {
         ...context,
@@ -298,13 +348,12 @@ export async function prepareCommandExecution(
       backend,
       environment: Object.freeze(environment),
       writableRoots: Object.freeze(roots),
-      protectedPaths: Object.freeze(protectedEntries.paths),
-      gitPointers: Object.freeze(protectedEntries.gitPointers.map((item) => Object.freeze(item))),
-      protections: Object.freeze(
-        protectedEntries.paths.map((path) =>
-          Object.freeze({ path, identity: protectionIdentity(path) })
-        )
+      // Missing default metadata paths remain snapshots, not explicit ACL targets.
+      protectedPaths: Object.freeze(
+        protections.filter((item) => item.identity !== null).map((item) => item.path)
       ),
+      gitPointers: Object.freeze(protectedEntries.gitPointers.map((item) => Object.freeze(item))),
+      protections,
       directories: Object.freeze(directories),
       temporaryRoot,
       signal,

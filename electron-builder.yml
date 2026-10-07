@@ -10,6 +10,16 @@ files:
   - resources/icon.png
 win:
   executableName: zonecodex
+  # Keep official signatures and host build bytes; main app/installer signing stays enabled.
+  signExts:
+    - '!windows-command-runtime\host.exe'
+    - '!windows-command-runtime/host.exe'
+    - '!windows-command-runtime\codex.exe'
+    - '!windows-command-runtime/codex.exe'
+    - '!windows-command-runtime\codex-command-runner.exe'
+    - '!windows-command-runtime/codex-command-runner.exe'
+    - '!windows-command-runtime\codex-windows-sandbox-setup.exe'
+    - '!windows-command-runtime/codex-windows-sandbox-setup.exe'
   extraResources:
     - from: resources/windows-command-runtime
       to: windows-command-runtime

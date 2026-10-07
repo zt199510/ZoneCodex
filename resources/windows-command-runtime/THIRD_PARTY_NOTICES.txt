@@ -11,8 +11,11 @@ License source: https://raw.githubusercontent.com/openai/codex/rust-v0.160.1/LIC
 Notice source: https://raw.githubusercontent.com/openai/codex/rust-v0.160.1/NOTICE
 
 The command supervisor host.exe is an independent ZoneCodex implementation.
-Distribution signing may change PE signature metadata. The accompanying manifest
-records SHA-256 hashes of the final distributed executable files.
+The upstream program code and existing signatures remain unchanged. These runtime
+executables are excluded from distribution re-signing, and host.exe retains its
+unsigned build bytes. Application and installer signing remains enabled. Both
+packaging hooks require exact SHA-256 agreement with the build manifest; changed
+runtime bytes are rejected rather than recorded as trusted replacements.
 
 Upstream NOTICE (preserved verbatim):
 

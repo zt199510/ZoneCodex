@@ -1,6 +1,7 @@
 /* eslint-disable @typescript-eslint/explicit-function-return-type -- This build script runs directly as Node JavaScript. */
 import { execFileSync } from 'node:child_process'
 import { createHash, randomUUID } from 'node:crypto'
+import { constants } from 'node:fs'
 import { copyFile, lstat, open, readFile, readdir, realpath, rename, rm } from 'node:fs/promises'
 import { dirname, isAbsolute, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -43,12 +44,55 @@ async function ordinaryFile(path, maximumBytes) {
   if (
     !info.isFile() ||
     info.isSymbolicLink() ||
+    info.nlink !== 1 ||
     info.size === 0 ||
     info.size > maximumBytes ||
     !samePath(await realpath(path), path)
   )
     throw new Error(`Runtime resource is not an ordinary nonempty file: ${path}`)
   return info
+}
+
+/** A replacement never writes through a previously generated link or shared file. */
+async function replacementTarget(path) {
+  await ordinaryDirectory(dirname(path))
+  let info
+  try {
+    info = await lstat(path)
+  } catch (error) {
+    if (error.code === 'ENOENT') return null
+    throw error
+  }
+  if (
+    !info.isFile() ||
+    info.isSymbolicLink() ||
+    info.nlink !== 1 ||
+    !samePath(await realpath(path), path)
+  ) {
+    throw new Error(`Runtime replacement target is not an ordinary exclusive file: ${path}`)
+  }
+  return [info.dev, info.ino, info.size, info.mtimeMs, info.ctimeMs].join(':')
+}
+
+async function unchangedReplacementTarget(path, previous) {
+  if ((await replacementTarget(path)) !== previous) {
+    throw new Error(`Runtime replacement target changed before replacement: ${path}`)
+  }
+}
+
+async function copyRuntimeFile(source, destination, expectedHash) {
+  const previous = await replacementTarget(destination)
+  const temporaryPath = `${destination}.${randomUUID()}.tmp`
+  try {
+    await copyFile(source, temporaryPath, constants.COPYFILE_EXCL)
+    if ((await hashFile(temporaryPath)) !== expectedHash) {
+      throw new Error(`Runtime source changed before it was copied: ${source}`)
+    }
+    await unchangedReplacementTarget(destination, previous)
+    await rename(temporaryPath, destination)
+  } finally {
+    await rm(temporaryPath, { force: true })
+  }
 }
 
 function validManifest(manifest) {
@@ -72,14 +116,14 @@ function validManifest(manifest) {
 
 /** Unique exclusive temporary files avoid following stale manifest links. */
 async function writeManifest(path, manifest) {
-  await ordinaryDirectory(dirname(path))
+  const previous = await replacementTarget(path)
   const temporaryPath = `${path}.${randomUUID()}.tmp`
   let temporary
   try {
     temporary = await open(temporaryPath, 'wx')
     await temporary.writeFile(JSON.stringify(manifest, null, 2) + '\n', 'utf8')
     await temporary.close()
-    await ordinaryDirectory(dirname(path))
+    await unchangedReplacementTarget(path, previous)
     await rename(temporaryPath, path)
   } finally {
     if (temporary) {
@@ -131,9 +175,11 @@ async function hashFile(path) {
 
 async function sourceAt(directory, manifest) {
   await ordinaryDirectory(directory)
+  const files = {}
   for (const name of officialFiles) {
     const path = join(directory, name)
     const hash = await hashFile(path)
+    files[name] = hash
     if (manifest && manifest.files[name] !== hash) {
       throw new Error(`Generated runtime integrity check failed: ${name}`)
     }
@@ -142,7 +188,7 @@ async function sourceAt(directory, manifest) {
   if (version !== `codex-cli ${cliVersion}`) {
     throw new Error(`Expected codex-cli ${cliVersion}; found ${version || 'an unknown version'}`)
   }
-  return directory
+  return { directory, files }
 }
 
 async function existingManifest() {
@@ -224,6 +270,9 @@ async function buildRuntime() {
     return
   }
   await ordinaryDirectory(output)
+  for (const name of [...executableFiles, 'host.obj', 'manifest.json']) {
+    await replacementTarget(join(output, name))
+  }
   const sourceFiles = await Promise.all(
     ['native/windows-command-host/main.cpp', 'scripts/build-windows-command-host.ps1'].map((path) =>
       readFile(join(root, path))
@@ -238,7 +287,12 @@ async function buildRuntime() {
   const source = await discoverSource(manifest)
   let rebuildHost = manifest?.hostSourceHash !== hostSourceHash
   if (!rebuildHost) {
-    rebuildHost = (await hashFile(join(output, 'host.exe'))) !== manifest.files['host.exe']
+    try {
+      rebuildHost = (await hashFile(join(output, 'host.exe'))) !== manifest.files['host.exe']
+    } catch (error) {
+      if (error.code !== 'ENOENT') throw error
+      rebuildHost = true
+    }
   }
   if (rebuildHost) {
     const powershell = join(
@@ -262,8 +316,11 @@ async function buildRuntime() {
     )
   }
   for (const name of officialFiles) {
-    if (resolve(source).toLowerCase() !== resolve(output).toLowerCase()) {
-      await copyFile(join(source, name), join(output, name))
+    if (!samePath(source.directory, output)) {
+      await copyRuntimeFile(join(source.directory, name), join(output, name), source.files[name])
+    }
+    if ((await hashFile(join(output, name))) !== source.files[name]) {
+      throw new Error(`Runtime resource changed before version checks: ${name}`)
     }
   }
   const capabilities = JSON.parse(query(join(output, 'host.exe'), '--capabilities'))
@@ -284,13 +341,18 @@ async function buildRuntime() {
       executableFiles.map(async (name) => [name, await hashFile(join(output, name))])
     )
   )
+  for (const name of officialFiles) {
+    if (files[name] !== source.files[name]) {
+      throw new Error(`Runtime resource changed before its manifest was written: ${name}`)
+    }
+  }
   await writeManifest(manifestPath, { protocol: 1, cliVersion, files, hostSourceHash })
   console.log(
     `Windows command runtime: Codex ${cliVersion}, protocol 1, four executable hashes verified.`
   )
 }
 
-/** Signing can change PE bytes; package hashes must describe the final distributed files. */
+/** Runtime resources retain their build bytes; the app and installer sign separately. */
 export default async function finalizePackagedRuntime(context, stage = 'signed') {
   if (context.electronPlatformName !== 'win32') return
   if (typeof context.appOutDir !== 'string' || !isAbsolute(context.appOutDir))
@@ -306,6 +368,11 @@ export default async function finalizePackagedRuntime(context, stage = 'signed')
       executableFiles.map(async (name) => [name, await hashFile(join(packagedRoot, name))])
     )
   )
+  for (const name of executableFiles) {
+    if (files[name] !== previous.files[name]) {
+      throw new Error(`Packaged runtime integrity drift at ${stage}: ${name}`)
+    }
+  }
   const capabilities = JSON.parse(query(join(packagedRoot, 'host.exe'), '--capabilities'))
   if (capabilities.protocol !== 1 || capabilities.atomicJob !== true)
     throw new Error('Packaged command host protocol mismatch.')
