@@ -1,79 +1,22 @@
-import { Children, isValidElement, useEffect, useMemo, useRef, useState } from 'react'
+import {
+  Children,
+  createContext,
+  isValidElement,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState
+} from 'react'
 import type { MouseEvent, ReactNode } from 'react'
 import Markdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import type { Components } from 'react-markdown'
 import type { Element, Nodes, Root, Text } from 'hast'
-import { createLowlight } from 'lowlight'
-import javascript from 'highlight.js/lib/languages/javascript'
-import typescript from 'highlight.js/lib/languages/typescript'
-import json from 'highlight.js/lib/languages/json'
-import xml from 'highlight.js/lib/languages/xml'
-import css from 'highlight.js/lib/languages/css'
-import python from 'highlight.js/lib/languages/python'
-import bash from 'highlight.js/lib/languages/bash'
-import powershell from 'highlight.js/lib/languages/powershell'
-import sql from 'highlight.js/lib/languages/sql'
-import yaml from 'highlight.js/lib/languages/yaml'
-import diff from 'highlight.js/lib/languages/diff'
 import { Icon } from '../../components/ui/Icon'
-
-const lowlight = createLowlight({
-  javascript,
-  typescript,
-  json,
-  xml,
-  css,
-  python,
-  bash,
-  powershell,
-  sql,
-  yaml,
-  diff
-})
-lowlight.registerAlias({ typescript: ['tsx'], bash: ['shell'] })
-type HighlightNode = ReturnType<typeof lowlight.highlight>['children'][number]
-
-function highlightedCode(code: string, language: string): ReactNode {
-  const name = language.toLowerCase()
-  // Keep unknown languages and large streamed blocks as exact plain text.
-  if (
-    !lowlight.registered(name) ||
-    code.length > 12000 ||
-    code.split('\n').some((line) => line.length > 2000)
-  )
-    return code
-  try {
-    let remaining = 10000
-    function tokens(nodes: readonly HighlightNode[], depth: number): ReactNode {
-      if (depth > 32) throw new Error('Token tree is too deep')
-      return nodes.map((node, index) => {
-        if (--remaining < 0) throw new Error('Token tree is too large')
-        if (node.type === 'text') return node.value
-        if (node.type !== 'element' || node.tagName !== 'span')
-          throw new Error('Unexpected token node')
-        const className = Array.isArray(node.properties.className)
-          ? node.properties.className
-              .filter(
-                (value) =>
-                  typeof value === 'string' &&
-                  /^(?:hljs-[a-z][a-z0-9_-]*|[a-z][a-z0-9_-]*_)$/.test(value)
-              )
-              .join(' ')
-          : undefined
-        return (
-          <span key={index} className={className}>
-            {tokens(node.children, depth + 1)}
-          </span>
-        )
-      })
-    }
-    // Lowlight produces a public token tree; React escapes every text node.
-    return tokens(lowlight.highlight(name, code).children, 0)
-  } catch {
-    return code
-  }
-}
+import { parseFileReferenceLink } from '../../../../shared/file-view'
+import type { OpenFileReference } from '../files/file-view-origin'
+import { highlightedCode } from '../files/source-highlight'
 
 // 不传 base URL：相对路径、锚点和 //example.com 都不作为外链接受。
 function displayUrl(value: string): string {
@@ -91,6 +34,12 @@ function displayUrl(value: string): string {
     return ''
   }
 }
+
+function messageUrl(value: string): string {
+  return displayUrl(value) || (parseFileReferenceLink(value) ? value : '')
+}
+
+const FileReferenceContext = createContext<OpenFileReference | undefined>(undefined)
 
 function textContent(value: ReactNode): string {
   if (typeof value === 'string' || typeof value === 'number') return String(value)
@@ -174,15 +123,35 @@ function CodeBlock({ children }: { children?: ReactNode }): React.JSX.Element {
   )
 }
 
-function ExternalLink({
+function MessageLink({
   href,
   children
 }: {
   href?: string
   children?: ReactNode
 }): React.JSX.Element {
+  const onOpenFile = useContext(FileReferenceContext)
   const safeHref = href ? displayUrl(href) : ''
   if (!safeHref) {
+    const reference = href ? parseFileReferenceLink(href) : null
+    if (reference && onOpenFile) {
+      return (
+        <button
+          type="button"
+          className="markdown-link markdown-file-reference"
+          title={`${reference.path}${
+            reference.startLine
+              ? `:${reference.startLine}${reference.endLine ? `-${reference.endLine}` : ''}`
+              : ''
+          }`}
+          aria-label={`查看文件 ${textContent(children) || reference.path}`}
+          onClick={(event) => onOpenFile(reference, event.currentTarget)}
+        >
+          <Icon name="file" size={13} />
+          <span>{children}</span>
+        </button>
+      )
+    }
     return (
       <span className="markdown-link markdown-link-invalid">
         {children}
@@ -204,7 +173,7 @@ function ExternalLink({
 }
 
 const components: Components = {
-  a: ({ href, children }) => <ExternalLink href={href}>{children}</ExternalLink>,
+  a: ({ href, children }) => <MessageLink href={href}>{children}</MessageLink>,
   // 不输出 img 标签，所以不会请求模型文本里的图片地址。
   img: ({ alt }) => (
     <span className="markdown-image-placeholder">[图片未加载：{alt || '无说明'}]</span>
@@ -222,7 +191,13 @@ const userComponents: Components = {
   a: components.a
 }
 
-export function UserMessageContent({ content }: { content: string }): React.JSX.Element {
+export function UserMessageContent({
+  content,
+  onOpenFile
+}: {
+  content: string
+  onOpenFile?: OpenFileReference
+}): React.JSX.Element {
   const linksOnly = useMemo(
     () => () => (tree: Root) => {
       const links: { node: Element; start: number; end: number }[] = []
@@ -248,7 +223,13 @@ export function UserMessageContent({ content }: { content: string }): React.JSX.
                 end = start + target.length
               }
             }
-            if (typeof node.properties.href === 'string' && displayUrl(node.properties.href))
+            if (
+              typeof node.properties.href === 'string' &&
+              (displayUrl(node.properties.href) ||
+                (onOpenFile &&
+                  source.startsWith('[') &&
+                  parseFileReferenceLink(node.properties.href)))
+            )
               links.push({ node, start, end })
           }
           return
@@ -270,32 +251,42 @@ export function UserMessageContent({ content }: { content: string }): React.JSX.
       if (cursor < content.length) children.push({ type: 'text', value: content.slice(cursor) })
       tree.children = children
     },
-    [content]
+    [content, onOpenFile]
   )
   return (
-    <Markdown
-      remarkPlugins={[remarkGfm]}
-      rehypePlugins={[linksOnly]}
-      skipHtml
-      urlTransform={displayUrl}
-      components={userComponents}
-    >
-      {content}
-    </Markdown>
-  )
-}
-
-export function MarkdownContent({ content }: { content: string }): React.JSX.Element {
-  return (
-    <div className="markdown-body">
+    <FileReferenceContext.Provider value={onOpenFile}>
       <Markdown
         remarkPlugins={[remarkGfm]}
+        rehypePlugins={[linksOnly]}
         skipHtml
-        urlTransform={displayUrl}
-        components={components}
+        urlTransform={messageUrl}
+        components={userComponents}
       >
         {content}
       </Markdown>
+    </FileReferenceContext.Provider>
+  )
+}
+
+export function MarkdownContent({
+  content,
+  onOpenFile
+}: {
+  content: string
+  onOpenFile?: OpenFileReference
+}): React.JSX.Element {
+  return (
+    <div className="markdown-body">
+      <FileReferenceContext.Provider value={onOpenFile}>
+        <Markdown
+          remarkPlugins={[remarkGfm]}
+          skipHtml
+          urlTransform={messageUrl}
+          components={components}
+        >
+          {content}
+        </Markdown>
+      </FileReferenceContext.Provider>
     </div>
   )
 }

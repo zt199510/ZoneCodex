@@ -2,7 +2,9 @@ import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import type { ChatMessage } from '../../../../shared/conversation'
 import type { ProtocolItem } from '../../../../shared/agent-history'
 import { commandTemplate } from '../../../../shared/command-proposal'
+import { parseFileReference } from '../../../../shared/file-view'
 import { Icon, type IconName } from '../../components/ui/Icon'
+import type { FileViewOrigin, OpenFileReference, OpenFileView } from '../files/file-view-origin'
 import { MarkdownContent } from './MarkdownContent'
 
 const toolLabels: Record<string, string> = {
@@ -101,7 +103,8 @@ function targetName(path: string): string {
 }
 function toolTarget(
   name: string,
-  args: Record<string, unknown> | null
+  args: Record<string, unknown> | null,
+  result: Record<string, unknown> | null
 ): { text: string; title: string } | null {
   if (!args) return null
   if (name === 'run_workspace_command') {
@@ -149,8 +152,15 @@ function toolTarget(
     ].includes(name) &&
     typeof args.path === 'string' &&
     args.path
-  )
-    return { text: targetName(args.path), title: args.path }
+  ) {
+    const path =
+      ['read_workspace_file', 'create_workspace_file', 'edit_workspace_file'].includes(name) &&
+      typeof result?.path === 'string' &&
+      result.path
+        ? result.path
+        : args.path
+    return { text: targetName(path), title: path }
+  }
   return null
 }
 function restoreCollapsedDetailsFocus(details: HTMLDetailsElement | null): void {
@@ -313,10 +323,14 @@ function groupSummary(
 }
 function ToolGroup({
   calls,
-  status
+  status,
+  fileOrigin,
+  onOpenFile
 }: {
   calls: ToolCall[]
   status: ChatMessage['status']
+  fileOrigin?: FileViewOrigin
+  onOpenFile?: OpenFileView
 }): React.JSX.Element {
   const details = useRef<HTMLDetailsElement>(null)
   const single = calls.length === 1
@@ -363,7 +377,13 @@ function ToolGroup({
       </summary>
       <div className="message-tool-group-items">
         {calls.map((call) => (
-          <ToolItem key={call.id} call={call} status={status} />
+          <ToolItem
+            key={call.id}
+            call={call}
+            status={status}
+            fileOrigin={fileOrigin}
+            onOpenFile={onOpenFile}
+          />
         ))}
       </div>
     </details>
@@ -371,10 +391,14 @@ function ToolGroup({
 }
 function ToolItem({
   call,
-  status
+  status,
+  fileOrigin,
+  onOpenFile
 }: {
   call: ToolCall
   status: ChatMessage['status']
+  fileOrigin?: FileViewOrigin
+  onOpenFile?: OpenFileView
 }): React.JSX.Element {
   const args = readObject(call.arguments)
   const result = readObject(call.output)
@@ -414,7 +438,30 @@ function ToolItem({
     typeof result?.cwd === 'string' ? result.cwd : typeof args?.cwd === 'string' ? args.cwd : null
   const error = typeof result?.error === 'string' ? result.error : null
   const hasCommandOutput = command && result && ('stdout' in result || 'stderr' in result)
-  const target = toolTarget(call.name, args)
+  const target = toolTarget(call.name, args, result)
+  const snapshotFile = call.name === 'read_project_file' || call.name === 'propose_file_change'
+  const existingWriteTarget =
+    (call.name === 'create_workspace_file' && result?.status === 'created') ||
+    (call.name === 'edit_workspace_file' &&
+      (result?.status === 'applied' || result?.status === 'no_change'))
+  const readableTarget =
+    state !== 'failed' &&
+    state !== 'cancelled' &&
+    (call.name === 'read_project_file' ||
+      call.name === 'read_workspace_file' ||
+      call.name === 'propose_file_change' ||
+      existingWriteTarget)
+  const reference = target && readableTarget ? parseFileReference({ path: target.title }) : null
+  const origin: FileViewOrigin | undefined = fileOrigin
+    ? snapshotFile
+      ? fileOrigin.scope?.kind === 'project'
+        ? {
+            ...fileOrigin,
+            source: { kind: 'snapshot', snapshotId: fileOrigin.scope.snapshotId }
+          }
+        : undefined
+      : { ...fileOrigin, source: { kind: 'local' } }
+    : undefined
   return (
     <details
       className="message-tool-item"
@@ -437,9 +484,31 @@ function ToolItem({
             (fileTools.has(call.name) ? (
               <>
                 {' '}
-                <span className="message-tool-file-reference" title={target.title}>
-                  {target.text}
-                </span>
+                {reference && origin && onOpenFile ? (
+                  <button
+                    type="button"
+                    className="message-tool-file-reference"
+                    title={target.title}
+                    aria-label={`查看文件 ${target.text}`}
+                    onClick={(event) => {
+                      event.preventDefault()
+                      event.stopPropagation()
+                      onOpenFile(reference, origin, event.currentTarget)
+                    }}
+                    onKeyDown={(event) => {
+                      if (event.key === 'Enter' || event.key === ' ') event.stopPropagation()
+                    }}
+                    onKeyUp={(event) => {
+                      if (event.key === 'Enter' || event.key === ' ') event.stopPropagation()
+                    }}
+                  >
+                    {target.text}
+                  </button>
+                ) : (
+                  <span className="message-tool-file-reference" title={target.title}>
+                    {target.text}
+                  </span>
+                )}
               </>
             ) : (
               ` · ${target.text}`
@@ -532,13 +601,19 @@ export function MessageActivity({
   entries,
   items = [],
   status = 'complete',
-  answerStarted = false
+  answerStarted = false,
+  fileOrigin,
+  onOpenFile,
+  onOpenMessageFile
 }: {
   messageId: string
   entries: readonly string[]
   items?: readonly ProtocolItem[]
   status?: ChatMessage['status']
   answerStarted?: boolean
+  fileOrigin?: FileViewOrigin
+  onOpenFile?: OpenFileView
+  onOpenMessageFile?: OpenFileReference
 }): React.JSX.Element | null {
   const overview = useRef<HTMLDetailsElement>(null)
   const [runningElapsed, setRunningElapsed] = useState(0)
@@ -593,10 +668,16 @@ export function MessageActivity({
                   className="message-tool-commentary"
                   key={`${messageId}-commentary-${block.id}`}
                 >
-                  <MarkdownContent content={block.text} />
+                  <MarkdownContent content={block.text} onOpenFile={onOpenMessageFile} />
                 </div>
               ) : (
-                <ToolGroup key={block.calls[0].id} calls={block.calls} status={status} />
+                <ToolGroup
+                  key={block.calls[0].id}
+                  calls={block.calls}
+                  status={status}
+                  fileOrigin={fileOrigin}
+                  onOpenFile={onOpenFile}
+                />
               )
             )}
           </div>

@@ -5,6 +5,7 @@ import type { MessageCommandProposal } from '../../../../shared/command-proposal
 import type { MessageChangeProposal } from '../../../../shared/change-proposal'
 import type { ChangeProposalStatus } from '../review/useConversationReview'
 import type { ToolActivity } from './useChatRequest'
+import type { FileViewOrigin, OpenFileReference, OpenFileView } from '../files/file-view-origin'
 import { Icon } from '../../components/ui/Icon'
 import { MarkdownContent, UserMessageContent } from './MarkdownContent'
 import { MessageEditor } from './MessageEditor'
@@ -27,7 +28,8 @@ export function MessageList({
   editMaxLength = 2000,
   onCopyMessage,
   onRetryAssistant,
-  canRetryAssistant
+  canRetryAssistant,
+  onOpenFile
 }: {
   messages: readonly ChatMessage[]
   commandProposals?: Readonly<Record<string, MessageCommandProposal>>
@@ -45,6 +47,7 @@ export function MessageList({
   onCopyMessage?: (message: ChatMessage) => Promise<boolean> | boolean
   onRetryAssistant?: (message: ChatMessage) => void
   canRetryAssistant?: (message: ChatMessage) => boolean
+  onOpenFile?: OpenFileView
 }): React.JSX.Element {
   const [editingId, setEditingId] = useState<string | null>(null)
   const [copiedId, setCopiedId] = useState<string | null>(null)
@@ -59,6 +62,37 @@ export function MessageList({
           message.role === 'assistant'
             ? toolRuns.find((item) => item.assistantId === message.id)
             : undefined
+        const referenceRun =
+          run ??
+          (message.role === 'user'
+            ? toolRuns.find((item) => item.userId === message.id)
+            : undefined)
+        const fileOrigin: FileViewOrigin = {
+          messageId: message.id,
+          scope: referenceRun?.scope,
+          source: { kind: 'local' }
+        }
+        const attachments = referenceRun
+          ? messages.find((item) => item.id === referenceRun.userId)?.attachments
+          : message.attachments
+        const onOpenMessageFile: OpenFileReference | undefined = onOpenFile
+          ? (reference, trigger) => {
+              const scope = referenceRun?.scope
+              const snapshotAlias =
+                scope?.kind === 'project' &&
+                attachments?.some((attachment) => attachment.path === reference.path)
+              onOpenFile(
+                reference,
+                snapshotAlias && scope?.kind === 'project'
+                  ? {
+                      ...fileOrigin,
+                      source: { kind: 'snapshot', snapshotId: scope.snapshotId }
+                    }
+                  : fileOrigin,
+                trigger
+              )
+            }
+          : undefined
         const hasProcess =
           run?.items.some(
             (item) =>
@@ -90,6 +124,9 @@ export function MessageList({
                 items={run?.items ?? []}
                 status={message.status}
                 answerStarted={message.status === 'pending' && Boolean(message.content)}
+                fileOrigin={fileOrigin}
+                onOpenFile={onOpenFile}
+                onOpenMessageFile={onOpenMessageFile}
               />
             )}
             {editingId === message.id && onSendEditedMessage ? (
@@ -132,9 +169,9 @@ export function MessageList({
                   )}
                 {message.content ? (
                   message.role === 'assistant' ? (
-                    <MarkdownContent content={message.content} />
+                    <MarkdownContent content={message.content} onOpenFile={onOpenMessageFile} />
                   ) : message.role === 'user' ? (
-                    <UserMessageContent content={message.content} />
+                    <UserMessageContent content={message.content} onOpenFile={onOpenMessageFile} />
                   ) : (
                     message.content
                   )

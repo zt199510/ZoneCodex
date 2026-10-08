@@ -420,3 +420,128 @@ button.conversation-item:disabled {
   height: auto;
   min-height: 0;
 }
+
+.workspace-body.with-file-view {
+  flex-direction: row;
+}
+
+.file-view-panel {
+  display: flex;
+  flex-direction: column;
+  flex: 0 0 46%;
+  min-width: 280px;
+  max-width: 720px;
+  min-height: 0;
+  overflow: hidden;
+  border-left: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text);
+}
+
+.file-view-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 48px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+}
+
+.file-view-header strong {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.file-view-header button {
+  flex-shrink: 0;
+}
+
+.file-view-source {
+  display: grid;
+  gap: 5px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border);
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.file-view-source span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.file-view-notice {
+  padding: 12px;
+  font-size: 12px;
+  line-height: 1.7;
+  color: var(--muted);
+}
+
+.file-view-error {
+  color: var(--danger);
+}
+
+.file-view-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+
+.file-view-code {
+  width: max-content;
+  min-width: 100%;
+  margin: 0;
+  padding: 12px 0 24px;
+  font:
+    12px/1.7 Consolas,
+    'Courier New',
+    monospace;
+  tab-size: 4;
+}
+
+.file-view-code code {
+  font: inherit;
+}
+
+.file-view-line {
+  display: flex;
+  min-height: 1.7em;
+  white-space: pre;
+}
+
+.file-view-line-number {
+  position: sticky;
+  left: 0;
+  flex: 0 0 5em;
+  padding: 0 12px;
+  text-align: right;
+  color: var(--soft-text);
+  background: var(--surface);
+  user-select: none;
+}
+
+.file-view-line-text {
+  flex: 1;
+  padding-right: 16px;
+}
+
+.file-view-line-target,
+.file-view-line-target .file-view-line-number {
+  background: #0969da12;
+}
+
+.file-view-line-target {
+  box-shadow: inset 3px 0 #0969da;
+}
+
+.file-view-panel button:focus-visible,
+.file-view-scroll:focus-visible {
+  outline: 2px solid #0969da;
+  outline-offset: -2px;
+}

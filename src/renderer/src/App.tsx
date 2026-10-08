@@ -3,9 +3,12 @@ import { Sidebar } from './components/layout/Sidebar'
 import { TitleBar } from './components/layout/TitleBar'
 import { ChatWorkspace } from './features/chat/ChatWorkspace'
 import { useConversation } from './features/conversation/useConversation'
+import { useFileView } from './features/files/useFileView'
+import { FileViewPanel } from './features/files/FileViewPanel'
 
 function App(): React.JSX.Element {
   const conversation = useConversation()
+  const fileView = useFileView(conversation)
   const [sidebarOpen, setSidebarOpen] = useState(() => window.innerWidth > 760)
 
   useEffect(() => {
@@ -50,8 +53,9 @@ function App(): React.JSX.Element {
           onRestore={conversation.restore}
         />
       )}
-      <div className="workspace-body">
-        <ChatWorkspace conversation={conversation} />
+      <div className={`workspace-body${fileView.state.status !== 'idle' ? ' with-file-view' : ''}`}>
+        <ChatWorkspace conversation={conversation} onOpenFile={fileView.open} />
+        <FileViewPanel state={fileView.state} onClose={fileView.close} />
       </div>
     </div>
   )

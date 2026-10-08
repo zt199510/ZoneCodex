@@ -119,7 +119,14 @@ export function ChangePreviewPanel({
   useEffect(() => {
     if (!visible || generation === null) return
     function onWindowKeyDown(event: KeyboardEvent): void {
-      if (event.key !== 'Escape') return
+      if (
+        event.key !== 'Escape' ||
+        event.defaultPrevented ||
+        document.activeElement?.closest('.file-view-panel') ||
+        (document.querySelector('.file-view-panel') &&
+          !document.activeElement?.closest('.change-preview-panel, .command-review-panel'))
+      )
+        return
       event.preventDefault()
       event.stopImmediatePropagation()
       close()

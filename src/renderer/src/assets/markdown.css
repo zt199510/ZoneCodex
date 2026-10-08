@@ -169,55 +169,80 @@
 }
 
 .markdown-code-block .hljs-comment,
-.markdown-code-block .hljs-quote {
+.file-view-code .hljs-comment,
+.markdown-code-block .hljs-quote,
+.file-view-code .hljs-quote {
   color: #7c8288;
 }
 
 .markdown-code-block .hljs-keyword,
+.file-view-code .hljs-keyword,
 .markdown-code-block .hljs-selector-tag,
+.file-view-code .hljs-selector-tag,
 .markdown-code-block .hljs-doctag,
-.markdown-code-block .hljs-type {
+.file-view-code .hljs-doctag,
+.markdown-code-block .hljs-type,
+.file-view-code .hljs-type {
   color: #72558c;
 }
 
 .markdown-code-block .hljs-string,
+.file-view-code .hljs-string,
 .markdown-code-block .hljs-regexp,
+.file-view-code .hljs-regexp,
 .markdown-code-block .hljs-template-tag,
-.markdown-code-block .hljs-template-variable {
+.file-view-code .hljs-template-tag,
+.markdown-code-block .hljs-template-variable,
+.file-view-code .hljs-template-variable {
   color: #55765f;
 }
 
 .markdown-code-block .hljs-number,
+.file-view-code .hljs-number,
 .markdown-code-block .hljs-literal,
+.file-view-code .hljs-literal,
 .markdown-code-block .hljs-symbol,
-.markdown-code-block .hljs-bullet {
+.file-view-code .hljs-symbol,
+.markdown-code-block .hljs-bullet,
+.file-view-code .hljs-bullet {
   color: #976642;
 }
 
 .markdown-code-block .hljs-title,
+.file-view-code .hljs-title,
 .markdown-code-block .hljs-section,
+.file-view-code .hljs-section,
 .markdown-code-block .hljs-selector-id,
-.markdown-code-block .hljs-selector-class {
+.file-view-code .hljs-selector-id,
+.markdown-code-block .hljs-selector-class,
+.file-view-code .hljs-selector-class {
   color: #48688b;
 }
 
 .markdown-code-block .hljs-attr,
+.file-view-code .hljs-attr,
 .markdown-code-block .hljs-attribute,
+.file-view-code .hljs-attribute,
 .markdown-code-block .hljs-variable,
-.markdown-code-block .hljs-built_in {
+.file-view-code .hljs-variable,
+.markdown-code-block .hljs-built_in,
+.file-view-code .hljs-built_in {
   color: #5a6068;
 }
 
-.markdown-code-block .hljs-meta {
+.markdown-code-block .hljs-meta,
+.file-view-code .hljs-meta {
   color: #797069;
 }
 
-.markdown-code-block .hljs-addition {
+.markdown-code-block .hljs-addition,
+.file-view-code .hljs-addition {
   color: #55765f;
   background: #edf4ef;
 }
 
-.markdown-code-block .hljs-deletion {
+.markdown-code-block .hljs-deletion,
+.file-view-code .hljs-deletion {
   color: #936461;
   background: #f7eded;
 }
@@ -276,6 +301,33 @@
 
 .markdown-link:hover {
   text-decoration-color: currentColor;
+}
+
+.markdown-file-reference {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 3px;
+  max-width: 100%;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 3px;
+  background: transparent;
+  font: inherit;
+  line-height: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.markdown-file-reference > svg {
+  align-self: center;
+  flex: 0 0 auto;
+}
+
+.markdown-file-reference:focus-visible,
+.markdown-link:focus-visible {
+  outline: 2px solid #4a9eff;
+  outline-offset: 2px;
 }
 
 .markdown-link-invalid {

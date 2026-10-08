@@ -10,11 +10,14 @@ import { ChangePreviewPanel } from '../review/ChangePreviewPanel'
 import { CommandReviewPanel } from '../review/CommandReviewPanel'
 import { CommitReceipt } from '../review/CommitReceipt'
 import { WorkspaceStatus } from '../project/WorkspaceStatus'
+import type { OpenFileView } from '../files/file-view-origin'
 
 export function ChatWorkspace({
-  conversation
+  conversation,
+  onOpenFile
 }: {
   conversation: ConversationController
+  onOpenFile: OpenFileView
 }): React.JSX.Element {
   const {
     draft,
@@ -84,6 +87,7 @@ export function ChatWorkspace({
           <EmptyState disabled={!conversation.canSend} onSuggestion={suggest} />
         ) : (
           <MessageList
+            onOpenFile={onOpenFile}
             key={conversation.activeConversationId}
             commandProposals={conversation.commandProposals}
             commandSnapshotId={conversation.contextSelection?.snapshotId ?? null}

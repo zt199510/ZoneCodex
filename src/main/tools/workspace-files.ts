@@ -89,6 +89,11 @@ function isSkippedPath(parts: readonly string[]): boolean {
   )
 }
 
+/** The viewer and model reads share the existing local read exclusions. */
+export function isLocalReadPathAllowed(target: string): boolean {
+  return !isSkippedPath(localPathParts(target))
+}
+
 function sameIdentity(left: Stats, right: Stats): boolean {
   return left.dev === right.dev && left.ino === right.ino
 }
@@ -204,7 +209,7 @@ export function createWorkspaceReadExecutor(
     checkAccess(signal)
     if (
       genericPaths
-        ? !options.isPathAllowed!(candidate) || isSkippedPath(localPathParts(candidate))
+        ? !options.isPathAllowed!(candidate) || !isLocalReadPathAllowed(candidate)
         : !insideLocalPath(canonicalRoot, candidate)
     ) {
       throw new AgentError('路径超出允许的文件范围')

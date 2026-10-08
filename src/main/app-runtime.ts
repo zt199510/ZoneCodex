@@ -16,6 +16,7 @@ import {
 import { hasProjectSelection, hasProjectSnapshot } from './project/attachment-access'
 import { hasWorkspaceSelection } from './project/workspace-access'
 import { registerProjectAccess, attachProjectAccessCleanup } from './project/project-ipc'
+import { registerFileView, attachFileViewCleanup } from './project/file-view-ipc'
 import { registerExecutionContext } from './execution/execution-ipc'
 import { clearExecutionPermissionState } from './execution/permission-state'
 import { approveStandaloneCommand } from './execution/action-authorization'
@@ -116,6 +117,7 @@ export function attachWindowRuntime(window: BrowserWindow): void {
   attachTerminalCleanup(window)
   // 注册项目快照授权清理处理器
   attachProjectAccessCleanup(window)
+  attachFileViewCleanup(window)
   window.webContents.on('did-start-loading', () => {
     clearExecutionApproval(window.id)
     cancelConversationTitleJob(window.id)
@@ -155,6 +157,7 @@ export function registerAppRuntime(): void {
     onAccessChanged: onProjectAccessChanged
   })
   registerChangePreview(isChangePreviewBusy)
+  registerFileView()
   registerChangePreparation(isChangePreparationBusy)
   registerChangeCommit(isChangeCommitBusy)
 

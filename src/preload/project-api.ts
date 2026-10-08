@@ -9,6 +9,7 @@ import {
   parseWorkspaceSelectionResult
 } from '../shared/project'
 import { parsePreviewChangeRequest, parsePreviewChangeResult } from '../shared/change-preview'
+import { parseFileViewRequest, parseFileViewResult, sameFileViewRequest } from '../shared/file-view'
 
 export const projectAPI: Pick<
   AppAPI,
@@ -24,7 +25,16 @@ export const projectAPI: Pick<
   | 'cancelPreparation'
   | 'previewChange'
   | 'revokeProjectFiles'
+  | 'readFileView'
 > = {
+  readFileView: async (request) => {
+    const checked = parseFileViewRequest(request)
+    if (!checked) throw new Error('文件查看请求格式不正确')
+    const result = parseFileViewResult(await ipcRenderer.invoke('project:read-file-view', checked))
+    if (!result || !sameFileViewRequest(checked, result))
+      throw new Error('文件查看结果无效，请重新打开')
+    return result
+  },
   selectProjectFiles: async (conversationId, replaceExisting = false) => {
     if (!isAgentId(conversationId)) throw new Error('会话 ID 格式不正确')
     if (typeof replaceExisting !== 'boolean') throw new Error('附件选择参数无效')

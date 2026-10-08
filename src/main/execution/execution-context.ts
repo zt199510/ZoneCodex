@@ -15,18 +15,18 @@ export function pathWithin(root: string, candidate: string): boolean {
   return offset === '' || (!isAbsolute(offset) && offset !== '..' && !offset.startsWith(`..${sep}`))
 }
 
-async function defaultDirectory(conversationId: string): Promise<string> {
+async function defaultDirectory(conversationId: string, create: boolean): Promise<string> {
   const base = join(app.getPath('userData'), 'chats')
-  await mkdir(base, { recursive: true })
+  if (create) await mkdir(base, { recursive: true })
   if ((await lstat(base)).isSymbolicLink()) throw new Error('默认运行目录不能是符号链接')
   const canonicalBase = await realpath(base)
   const conversationDirectory = join(canonicalBase, conversationId)
-  await mkdir(conversationDirectory, { recursive: true })
+  if (create) await mkdir(conversationDirectory, { recursive: true })
   if ((await lstat(conversationDirectory)).isSymbolicLink()) {
     throw new Error('会话运行目录不能是符号链接')
   }
   const directory = join(conversationDirectory, 'workspace')
-  await mkdir(directory, { recursive: true })
+  if (create) await mkdir(directory, { recursive: true })
   if ((await lstat(directory)).isSymbolicLink()) throw new Error('默认运行目录不能是符号链接')
   const canonical = await realpath(directory)
   if (!pathWithin(canonicalBase, canonical) || canonical !== resolve(directory)) {
@@ -42,7 +42,8 @@ export type ExecutionContext = {
 
 export async function resolveExecutionContext(
   windowId: number,
-  context: AgentRequestContext
+  context: AgentRequestContext,
+  options: { createDefaultDirectory?: boolean } = {}
 ): Promise<ExecutionContext> {
   if (!isAgentId(context.conversationId)) throw new Error('会话 ID 无效')
   const workspace = context.workspaceId
@@ -59,7 +60,7 @@ export async function resolveExecutionContext(
   }
   const cwd = workspace
     ? await realpath(workspace.root)
-    : await defaultDirectory(context.conversationId)
+    : await defaultDirectory(context.conversationId, options.createDefaultDirectory !== false)
   const info = await lstat(cwd)
   if (!info.isDirectory() || info.isSymbolicLink()) throw new Error('运行目录无效')
   if (workspace) {
