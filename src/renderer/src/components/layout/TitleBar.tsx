@@ -3,24 +3,28 @@ import { useWindowControls } from './useWindowControls'
 
 export function TitleBar({
   sidebarOpen,
+  showSidebarToggle = true,
   onToggleSidebar
 }: {
   sidebarOpen: boolean
+  showSidebarToggle?: boolean
   onToggleSidebar: () => void
 }): React.JSX.Element {
   const label = sidebarOpen ? '收起侧栏' : '展开侧栏'
   const controls = useWindowControls()
   return (
     <header className="title-bar" aria-label="窗口标题栏">
-      <button
-        className="icon-button"
-        onClick={onToggleSidebar}
-        aria-label={label}
-        title={label}
-        aria-expanded={sidebarOpen}
-      >
-        <Icon name="panel" />
-      </button>
+      {showSidebarToggle && (
+        <button
+          className="icon-button"
+          onClick={onToggleSidebar}
+          aria-label={label}
+          title={label}
+          aria-expanded={sidebarOpen}
+        >
+          <Icon name="panel" />
+        </button>
+      )}
       {controls.error && (
         <span className="window-error" role="status">
           {controls.error}

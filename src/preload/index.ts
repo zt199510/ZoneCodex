@@ -6,6 +6,7 @@ import { agentAPI } from './agent-api'
 import { projectAPI } from './project-api'
 import { windowAPI } from './window-api'
 import { terminalAPI } from './terminal-api'
+import { settingsAPI } from './settings-api'
 
 // 分组实现同一个平铺业务接口，页面不直接使用 Node API。
 const api: AppAPI = {
@@ -13,7 +14,8 @@ const api: AppAPI = {
   ...agentAPI,
   ...projectAPI,
   ...windowAPI,
-  ...terminalAPI
+  ...terminalAPI,
+  ...settingsAPI
 }
 
 // Use `contextBridge` APIs to expose Electron APIs to

@@ -189,8 +189,7 @@ export const agentAPI: Pick<
       typeof prompt !== 'string' ||
       !prompt.trim() ||
       prompt.trim().length > 2000 ||
-      (checkedContext.images?.length ?? (checkedContext.image ? 1 : null)) !==
-        getImageTurnNoticeCount(prompt) ||
+      (checkedContext.images?.length ?? null) !== getImageTurnNoticeCount(prompt) ||
       !stripImageTurnNotice(prompt)
     )
       throw new Error('图片与本轮问题不一致，或文字超过上限')

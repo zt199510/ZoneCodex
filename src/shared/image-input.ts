@@ -11,8 +11,6 @@ export const maxImagePixels = 16_000_000
 export const maxThumbnailBytes = 256 * 1024
 export const imageThumbnailDimension = 160
 export const IMAGE_TURN_NOTICE = '\n\n[本条消息附有一张图片，图片随会话保存。]'
-const LEGACY_IMAGE_TURN_NOTICE =
-  '\n\n[本轮附有一张临时图片；图片不随历史保存，重新问图请再次添加。]'
 
 export type ImageDescriptor = {
   imageId: string
@@ -328,8 +326,7 @@ export function parseImagePreviewResult(value: unknown): ImagePreviewResult | nu
 }
 
 export function getImageTurnNoticeCount(text: string): number | null {
-  if (text.includes(IMAGE_TURN_NOTICE.trim()) || text.includes(LEGACY_IMAGE_TURN_NOTICE.trim()))
-    return 1
+  if (text.includes(IMAGE_TURN_NOTICE.trim())) return 1
   const match = text.match(/\[本条消息附有([1-8])张图片，图片随会话保存。\]/)
   return match ? Number(match[1]) : null
 }
@@ -342,8 +339,6 @@ export function stripImageTurnNotice(text: string): string {
   return text
     .replace(/\[本条消息附有\d+张图片，图片随会话保存。\]/g, '')
     .split(IMAGE_TURN_NOTICE.trim())
-    .join('')
-    .split(LEGACY_IMAGE_TURN_NOTICE.trim())
     .join('')
     .trim()
 }

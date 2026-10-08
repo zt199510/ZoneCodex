@@ -1,9 +1,4 @@
-import {
-  getImageTurnNoticeCount,
-  parseImageDescriptor,
-  parseImageDescriptors,
-  type ImageDescriptor
-} from './image-input'
+import { getImageTurnNoticeCount, parseImageDescriptors, type ImageDescriptor } from './image-input'
 
 // 每轮用户消息随附的安全展示元数据；不包含文件正文、绝对根目录或授权标识。
 export type ChatAttachment = {
@@ -19,32 +14,27 @@ export type ChatMessage = {
   content: string
   status: 'pending' | 'complete' | 'failed' | 'cancelled'
   attachments?: ChatAttachment[]
-  image?: ImageDescriptor
   images?: ImageDescriptor[]
 }
 
-export function getMessageImages(
-  message: Pick<ChatMessage, 'image' | 'images'>
-): ImageDescriptor[] {
-  if (message.image !== undefined && message.images !== undefined)
-    throw new Error('消息包含冲突的图片表示')
-  return message.images ?? (message.image ? [message.image] : [])
+export function getMessageImages(message: Pick<ChatMessage, 'images'>): ImageDescriptor[] {
+  if (Object.prototype.hasOwnProperty.call(message, 'image'))
+    throw new Error('旧单图消息格式不受支持')
+  return message.images ?? []
 }
-// 聊天消息快照类型
-export type ConversationSnapshot = {
-  version: 1
-  messages: ChatMessage[]
-  workspacePath: string | null
-}
-// 加载会话结果类型
-export type LoadConversationResult =
-  { ok: true; snapshot: ConversationSnapshot; missing: boolean } | { ok: false; error: string }
 // 保存会话结果类型
 export type SaveConversationResult = { ok: true } | { ok: false; error: string }
 
 // 判断值是否为对象类型
 function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return false
+  const prototype = Object.getPrototypeOf(value)
+  if (prototype !== Object.prototype && prototype !== null) return false
+  return Reflect.ownKeys(value).every((key) => {
+    if (typeof key !== 'string') return false
+    const descriptor = Object.getOwnPropertyDescriptor(value, key)
+    return descriptor?.enumerable === true && Object.hasOwn(descriptor, 'value')
+  })
 }
 
 function isIntegerInRange(value: unknown, minimum: number, maximum: number): value is number {
@@ -109,25 +99,18 @@ function parseAttachments(value: unknown): ChatAttachment[] | null {
   }
   return attachments
 }
-// 解析会话快照
-export function parseSnapshot(value: unknown): ConversationSnapshot | null {
-  if (
-    !isRecord(value) ||
-    value.version !== 1 ||
-    !Array.isArray(value.messages) ||
-    value.messages.length > 1000
-  )
-    return null
-  const workspacePath = value.workspacePath
-  if (workspacePath !== null && (typeof workspacePath !== 'string' || workspacePath.length > 4096))
-    return null
-
+// 解析当前消息数组；会话格式由会话库统一定义。
+export function parseMessages(value: unknown): ChatMessage[] | null {
+  if (!Array.isArray(value) || value.length > 1000) return null
   const messages: ChatMessage[] = []
   const ids = new Set<string>()
   let total = 0
-  for (const item of value.messages) {
+  for (const item of value) {
     if (
       !isRecord(item) ||
+      Object.keys(item).some(
+        (key) => !['id', 'role', 'content', 'status', 'attachments', 'images'].includes(key)
+      ) ||
       typeof item.id !== 'string' ||
       !item.id ||
       item.id.length > 80 ||
@@ -147,25 +130,15 @@ export function parseSnapshot(value: unknown): ConversationSnapshot | null {
     if (content.length > 100_000 || (role === 'user' && content.length > 4000)) return null
     if (status === 'complete' && !content.trim()) return null
     let attachments: ChatAttachment[] | undefined
-    let image: ImageDescriptor | undefined
     let images: ImageDescriptor[] | undefined
-    if (
-      Object.prototype.hasOwnProperty.call(item, 'image') &&
-      Object.prototype.hasOwnProperty.call(item, 'images')
-    )
-      return null
-    if (Object.prototype.hasOwnProperty.call(item, 'image')) {
-      if (role !== 'user' || getImageTurnNoticeCount(content) !== 1) return null
-      const parsed = parseImageDescriptor(item.image)
-      if (!parsed) return null
-      image = parsed
-    }
     if (Object.prototype.hasOwnProperty.call(item, 'images')) {
       const parsed = parseImageDescriptors(item.images)
       if (role !== 'user' || !parsed || getImageTurnNoticeCount(content) !== parsed.length)
         return null
       images = parsed
     }
+    if (role === 'user' && getImageTurnNoticeCount(content) !== (images?.length ?? null))
+      return null
     if (Object.prototype.hasOwnProperty.call(item, 'attachments')) {
       if (role !== 'user') return null
       const parsed = parseAttachments(item.attachments)
@@ -181,9 +154,8 @@ export function parseSnapshot(value: unknown): ConversationSnapshot | null {
       content,
       status,
       ...(attachments ? { attachments } : {}),
-      ...(image ? { image } : {}),
       ...(images ? { images } : {})
     })
   }
-  return { version: 1, messages, workspacePath }
+  return messages
 }

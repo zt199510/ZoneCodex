@@ -1,9 +1,18 @@
 import type { PermissionMode, PermissionsState } from '../../shared/execution'
+import { getAppSettings } from '../settings/settings-service'
 
 const settings = new Map<number, PermissionsState>()
 
 export function getExecutionPermissionState(windowId: number): PermissionsState {
-  return { ...(settings.get(windowId) ?? { mode: 'default', revision: 0 }) }
+  const current = settings.get(windowId)
+  if (current) return { ...current }
+  const initial = { mode: getAppSettings().defaultPermissionMode, revision: 0 }
+  settings.set(windowId, initial)
+  return { ...initial }
+}
+
+export function initializeExecutionPermissionState(windowId: number): void {
+  getExecutionPermissionState(windowId)
 }
 
 export function setExecutionPermissionMode(

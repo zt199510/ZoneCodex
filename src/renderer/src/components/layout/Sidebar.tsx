@@ -1,12 +1,14 @@
 import { useState } from 'react'
 import { Icon } from '../ui/Icon'
 import type { Conversation } from '../../../../shared/conversation-library'
+import { ProfileMenu } from './ProfileMenu'
 
 type SidebarProps = {
   conversations: Conversation[]
   visibleConversations: Conversation[]
   activeConversationId: string | null
   disabled: boolean
+  hidden?: boolean
   search: string
   onSearch: (value: string) => void
   onCreate: () => void | Promise<unknown>
@@ -15,6 +17,7 @@ type SidebarProps = {
   onTogglePinned: (id: string) => boolean
   onArchive: (id: string) => void | Promise<unknown>
   onRestore: (id: string) => Promise<boolean>
+  onOpenSettings: (returnFocus?: HTMLElement) => void
 }
 
 type SidebarView = 'active' | 'archived'
@@ -28,6 +31,7 @@ export function Sidebar({
   visibleConversations,
   activeConversationId,
   disabled,
+  hidden = false,
   search,
   onSearch,
   onCreate,
@@ -35,7 +39,8 @@ export function Sidebar({
   onRename,
   onTogglePinned,
   onArchive,
-  onRestore
+  onRestore,
+  onOpenSettings
 }: SidebarProps): React.JSX.Element {
   const [view, setView] = useState<SidebarView>('active')
   const [editingId, setEditingId] = useState<string | null>(null)
@@ -65,7 +70,7 @@ export function Sidebar({
   }
 
   return (
-    <aside className="sidebar" aria-label="对话侧栏">
+    <aside className="sidebar" aria-label="对话侧栏" hidden={hidden} inert={hidden || undefined}>
       <nav className="conversation-nav" aria-label="对话导航">
         <div className="section-label">
           <span className="sidebar-heading">会话</span>
@@ -266,13 +271,7 @@ export function Sidebar({
           <p>各会话独立保留消息，生成结束后自动保存。</p>
           <p>未发送草稿按会话暂存，刷新后清空；生成或保存期间请等待。</p>
         </details>
-        <div className="local-profile">
-          <span className="profile-avatar">Z</span>
-          <div>
-            <strong>个人工作空间</strong>
-            <small>本地存储 · ZoneCodex</small>
-          </div>
-        </div>
+        <ProfileMenu hidden={hidden} onOpenSettings={onOpenSettings} />
       </div>
     </aside>
   )

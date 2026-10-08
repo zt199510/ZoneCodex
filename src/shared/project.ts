@@ -1,6 +1,5 @@
 import { parseExecutionInfo, type ExecutionInfo } from './execution'
 import {
-  parseImageReference,
   parseImageReferences,
   parseImageHistoryReferences,
   maxRequestImages,
@@ -70,7 +69,6 @@ export type AgentRequestContext = {
   conversationId: string
   workspaceId?: string
   attachment?: { snapshotId: string; allowUpload: true }
-  image?: ImageReference
   images?: ImageReference[]
   imageHistory?: ImageHistoryReference[]
   execution?: ExecutionInfo
@@ -262,13 +260,11 @@ export function parseAgentRequestContext(value: unknown): AgentRequestContext | 
           key !== 'conversationId' &&
           key !== 'workspaceId' &&
           key !== 'attachment' &&
-          key !== 'image' &&
           key !== 'images' &&
           key !== 'imageHistory' &&
           key !== 'execution'
       ) ||
-      (hasOwn(value, 'workspaceId') && !isAgentId(value.workspaceId)) ||
-      (hasOwn(value, 'image') && hasOwn(value, 'images'))
+      (hasOwn(value, 'workspaceId') && !isAgentId(value.workspaceId))
     )
       return null
     const context: AgentRequestContext = { conversationId: value.conversationId }
@@ -289,11 +285,6 @@ export function parseAgentRequestContext(value: unknown): AgentRequestContext | 
         return null
       context.attachment = { snapshotId: attachment.snapshotId, allowUpload: true }
     }
-    if (hasOwn(value, 'image')) {
-      const image = parseImageReference(value.image)
-      if (!image) return null
-      context.image = image
-    }
     if (hasOwn(value, 'images')) {
       const images = parseImageReferences(value.images)
       if (!images) return null
@@ -304,10 +295,7 @@ export function parseAgentRequestContext(value: unknown): AgentRequestContext | 
       if (!imageHistory) return null
       context.imageHistory = imageHistory
     }
-    if (
-      (context.images?.length ?? (context.image ? 1 : 0)) + (context.imageHistory?.length ?? 0) >
-      maxRequestImages
-    )
+    if ((context.images?.length ?? 0) + (context.imageHistory?.length ?? 0) > maxRequestImages)
       return null
     return context
   } catch {

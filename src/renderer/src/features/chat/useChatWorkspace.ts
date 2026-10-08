@@ -109,6 +109,7 @@ export function useChatWorkspace(conversation: ConversationController): ChatWork
   }
 
   function settleScroll(area: HTMLDivElement): void {
+    if (!area.getClientRects().length) return
     let top = area.scrollTop
     if (followBottom.current) top = area.scrollHeight - area.clientHeight
     else {

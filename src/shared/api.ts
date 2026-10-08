@@ -35,6 +35,7 @@ import type {
   CommandExecutionEvent
 } from './command-preparation'
 import type { TaskRecord } from './task'
+import type { AppSettings, SettingsChange, TaskRootSelection } from './settings'
 import type {
   ExecutionApproval,
   ExecutionInfo,
@@ -47,6 +48,10 @@ export type StreamDelta = AgentDelta
 
 // 应用 API 接口类型
 export interface AppAPI {
+  getSettings: () => Promise<AppSettings>
+  updateSettings: (change: SettingsChange) => Promise<AppSettings>
+  selectTaskRoot: () => Promise<TaskRootSelection>
+  bindConversationDirectory: (conversationId: string) => Promise<string>
   selectImage: (conversationId: string) => Promise<ImageSelectionResult>
   importImage: (conversationId: string, request: ImageImportRequest) => Promise<ImageImportResult>
   readImagePreview: (conversationId: string, imageId: string) => Promise<ImagePreviewResult>

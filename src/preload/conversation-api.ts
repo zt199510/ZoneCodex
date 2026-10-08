@@ -2,6 +2,7 @@ import { ipcRenderer } from 'electron'
 import type { AppAPI } from '../shared/api'
 import { parseLibrary } from '../shared/conversation-library'
 import { isAgentId } from '../shared/agent'
+import { isAbsoluteLocalDirectory } from '../shared/settings'
 import {
   parseConversationTitleOutcome,
   parseConversationTitleRequest
@@ -9,8 +10,18 @@ import {
 
 export const conversationAPI: Pick<
   AppAPI,
-  'loadConversation' | 'saveConversation' | 'generateConversationTitle' | 'cancelConversationTitle'
+  | 'loadConversation'
+  | 'saveConversation'
+  | 'generateConversationTitle'
+  | 'cancelConversationTitle'
+  | 'bindConversationDirectory'
 > = {
+  bindConversationDirectory: async (conversationId) => {
+    if (!isAgentId(conversationId)) throw new Error('会话 ID 无效')
+    const directory = await ipcRenderer.invoke('conversation:bind-directory', conversationId)
+    if (!isAbsoluteLocalDirectory(directory)) throw new Error('会话任务目录绑定结果格式不正确')
+    return directory
+  },
   loadConversation: async () => {
     const result: unknown = await ipcRenderer.invoke('conversation:load')
     if (typeof result === 'object' && result !== null && 'ok' in result) {

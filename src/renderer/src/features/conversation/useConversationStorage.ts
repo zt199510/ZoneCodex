@@ -10,7 +10,6 @@ type StorageOptions = {
   operations: OperationControl
   closePending: boolean
   isClosePending: () => boolean
-
 }
 
 //创建了一个类型 ConversationStorage，表示会话存储的状态和操作，包括是否准备好、是否有未保存的修改、是否暂停、错误信息、状态描述和保存函数。
@@ -21,6 +20,7 @@ export type ConversationStorage = {
   error: string | null
   status: string
   save: (reason?: 'normal' | 'close') => Promise<boolean>
+  saveSnapshot: (snapshot: ConversationLibrary) => Promise<boolean>
 }
 //创建了一个自定义 Hook 函数 useConversationStorage，接收 StorageOptions 作为参数，返回 ConversationStorage。
 export function useConversationStorage({
@@ -69,34 +69,60 @@ export function useConversationStorage({
     }
   }, [setSnapshot, finish])
 
-  const save = useCallback(async (reason: 'normal' | 'close' = 'normal'): Promise<boolean> => {
-    if (!mounted.current || !ready ||
-      (reason === 'normal' && isClosePending()) || !begin('saving')) return false
-    setError(null)
-    const submittedSignature = JSON.stringify(snapshot)
-    try {
-      const result = await window.api.saveConversation(snapshot)
-      if (!mounted.current) return false
-      if (!result.ok) {
-        setError(result.error)
-        setPaused(true)
+  const persist = useCallback(
+    async (submitted: ConversationLibrary): Promise<boolean> => {
+      if (!mounted.current || !ready) return false
+      setError(null)
+      const submittedSignature = JSON.stringify(submitted)
+      try {
+        const result = await window.api.saveConversation(submitted)
+        if (!mounted.current) return false
+        if (!result.ok) {
+          setError(result.error)
+          setPaused(true)
+          return false
+        }
+        setSavedSignature(submittedSignature)
+        setHasFile(true)
+        setPaused(false)
+        return true
+      } catch {
+        if (mounted.current) {
+          setError('保存结果未确认，请重试保存。')
+          setPaused(true)
+        }
         return false
       }
-      setSavedSignature(submittedSignature)
-      setHasFile(true)
-      setPaused(false)
-      return true
-    } catch {
-      if (mounted.current) {
-        setError('保存结果未确认，请重试保存。')
-        setPaused(true)
-      }
-      return false
-    } finally {
-      if (mounted.current) finish('saving')
-    }
-  }, [ready, snapshot, begin, finish, isClosePending])
+    },
+    [ready]
+  )
 
+  const save = useCallback(
+    async (reason: 'normal' | 'close' = 'normal'): Promise<boolean> => {
+      if (
+        !mounted.current ||
+        !ready ||
+        (reason === 'normal' && isClosePending()) ||
+        !begin('saving')
+      )
+        return false
+      try {
+        return await persist(snapshot)
+      } finally {
+        if (mounted.current) finish('saving')
+      }
+    },
+    [ready, snapshot, begin, finish, isClosePending, persist]
+  )
+
+  // Creation owns the selecting operation until its directory binding is durable.
+  const saveSnapshot = useCallback(
+    async (submitted: ConversationLibrary): Promise<boolean> => {
+      if (isClosePending() || operations.getOperation() !== 'selecting') return false
+      return persist(submitted)
+    },
+    [isClosePending, operations, persist]
+  )
 
   useEffect(() => {
     if (!ready || !dirty || operation !== 'idle' || paused || closePending) return
@@ -107,7 +133,6 @@ export function useConversationStorage({
       window.clearTimeout(timer)
     }
   }, [ready, dirty, signature, operation, paused, closePending, save])
-
 
   const status = !ready
     ? error
@@ -123,5 +148,5 @@ export function useConversationStorage({
             ? '已同步到本地'
             : '尚未保存'
 
-  return { ready, dirty, paused, error, status, save }
+  return { ready, dirty, paused, error, status, save, saveSnapshot }
 }

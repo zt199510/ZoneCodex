@@ -69,9 +69,7 @@ export function registerFileView(): void {
           conversationId: request.conversationId,
           ...(source.workspaceId ? { workspaceId: source.workspaceId } : {})
         }
-        const execution = await resolveExecutionContext(window.id, context, {
-          createDefaultDirectory: false
-        })
+        const execution = await resolveExecutionContext(window.id, context)
         assertWindow()
         if (
           !isAbsoluteFilePath(request.reference.path) &&

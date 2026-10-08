@@ -24,8 +24,6 @@ export type ToolRun = {
   items: ProtocolItem[]
 }
 
-export type LegacyToolRun = Omit<ToolRun, 'scope'>
-
 function isRecord(value: unknown): value is Record<string, unknown> {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) return false
   const prototype = Object.getPrototypeOf(value)
@@ -291,30 +289,29 @@ export function parseIncompleteToolTurn(
 }
 
 // messages 应先通过会话消息校验；这里检查工具轮次与消息的关联。
-function parseToolRunsInternal(
-  value: unknown,
-  messages: readonly ChatMessage[],
-  version: 3 | 4
-): Array<ParsedToolRun> | null {
+export function parseToolRuns(value: unknown, messages: readonly ChatMessage[]): ToolRun[] | null {
   if (!Array.isArray(value) || value.length > 100) return null
   const positions = new Map(messages.map((message, index) => [message.id, index]))
   if (positions.size !== messages.length) return null
   const requestIds = new Set<string>()
   const usedMessages = new Set<string>()
-  const result: ParsedToolRun[] = []
+  const result: ToolRun[] = []
   let previousIndex = -1
   for (const raw of value) {
     // 一轮的协议和 trace 均有界；JSON 校验同时拒绝访问器与非 JSON 字段。
     // 外层数组和 ToolRun 对象比协议数组多两层；协议本身仍由下面的解析器限深。
     const cloned = cloneJsonArray([raw], 1, 160000, 32)
     const item = cloned?.[0]
-    if (!isRecord(item)) return null
-    const scope =
-      version === 3
-        ? 'scope' in item
-          ? null
-          : ({ kind: 'time' } as ToolScope)
-        : parseToolScope(item.scope)
+    if (
+      !isRecord(item) ||
+      Object.keys(item).length !== 7 ||
+      Object.keys(item).some(
+        (key) =>
+          !['requestId', 'userId', 'assistantId', 'mode', 'scope', 'trace', 'items'].includes(key)
+      )
+    )
+      return null
+    const scope = parseToolScope(item.scope)
     if (
       !isId(item.requestId) ||
       !isId(item.userId) ||
@@ -322,7 +319,7 @@ function parseToolRunsInternal(
       requestIds.has(item.requestId) ||
       usedMessages.has(item.userId) ||
       usedMessages.has(item.assistantId) ||
-      (item.mode !== 'mock' && item.mode !== 'live') ||
+      item.mode !== 'live' ||
       !Array.isArray(item.trace) ||
       item.trace.length > 30 ||
       !item.trace.every((line): line is string => typeof line === 'string' && line.length <= 500) ||
@@ -367,45 +364,13 @@ function parseToolRunsInternal(
       requestId: item.requestId,
       userId: item.userId,
       assistantId: item.assistantId,
-      // 历史版本允许本地模拟记录；当前运行时统一按真实模型处理。
-      mode: 'live',
+      mode: item.mode,
       scope,
       trace: item.trace,
       items
     })
   }
   return result
-}
-
-type ParsedToolRun = {
-  requestId: string
-  userId: string
-  assistantId: string
-  mode: AgentMode
-  scope: ToolScope
-  trace: string[]
-  items: ProtocolItem[]
-}
-
-export function parseToolRunsV3(
-  value: unknown,
-  messages: readonly ChatMessage[]
-): LegacyToolRun[] | null {
-  const parsed = parseToolRunsInternal(value, messages, 3)
-  return (
-    parsed?.map((run) => ({
-      requestId: run.requestId,
-      userId: run.userId,
-      assistantId: run.assistantId,
-      mode: run.mode,
-      trace: run.trace,
-      items: run.items
-    })) ?? null
-  )
-}
-
-export function parseToolRuns(value: unknown, messages: readonly ChatMessage[]): ToolRun[] | null {
-  return parseToolRunsInternal(value, messages, 4)
 }
 
 // 只接受完整的轮次；返回深拷贝，保留 output 原有字段。
@@ -433,7 +398,7 @@ export function selectToolContext(
   for (let index = messages.length - 1; index >= 1; index -= 2) {
     const assistant = messages[index]
     const user = messages[index - 1]
-    // Old temporary images cannot be reconstructed from their text marker.
+    // 图片标记必须有对应的原图组，不能仅凭文字重建图片历史。
     if (
       user.role === 'user' &&
       hasImageTurnNotice(user.content) &&

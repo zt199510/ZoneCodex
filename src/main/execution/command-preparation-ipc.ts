@@ -29,6 +29,7 @@ const prepared = new Map<
   { preparedId: string; windowId: number; grantId: string; source: CommandSource; expires: number }
 >()
 const selecting = new Map<number, string>()
+const preparing = new Map<number, string>()
 const err = (error: string): { status: 'error'; error: string } => ({
   status: 'error',
   error: error.slice(0, 500)
@@ -111,12 +112,16 @@ export function registerCommandPreparation(
       grants.delete(req.grantId)
       return { status: 'expired' as const, error: '目录审查已过期' }
     }
+    if (selecting.has(w.id) || preparing.has(w.id)) return err('目录操作正在进行')
+    const token = randomUUID()
+    preparing.set(w.id, token)
     try {
       const fresh = await inspectCommandDirectory(g.directory)
       if (
         w.isDestroyed() ||
         event.sender.isDestroyed() ||
         event.sender.mainFrame !== event.senderFrame ||
+        preparing.get(w.id) !== token ||
         grants.get(req.grantId) !== g ||
         !isSourceAllowed(w.id, req.source)
       ) {
@@ -146,6 +151,8 @@ export function registerCommandPreparation(
       }
     } catch (e) {
       return err(e instanceof Error ? e.message : '检查执行准备失败')
+    } finally {
+      if (preparing.get(w.id) === token) preparing.delete(w.id)
     }
   })
   ipcMain.handle('command-directory:release', (event, id: unknown) => {
@@ -169,6 +176,10 @@ export function cleanupCommandPreparation(windowId: number): void {
   for (const [id, g] of grants) if (g.windowId === windowId) grants.delete(id)
   for (const [id, p] of prepared) if (p.windowId === windowId) prepared.delete(id)
   selecting.delete(windowId)
+  preparing.delete(windowId)
+}
+export function hasCommandDirectoryOperation(windowId: number): boolean {
+  return selecting.has(windowId) || preparing.has(windowId)
 }
 export function hasCommandPreparation(id: string): boolean {
   return [...prepared.values()].some((p) => p.preparedId === id && p.expires > Date.now())

@@ -1,7 +1,6 @@
-import { app } from 'electron'
 import { createHash } from 'node:crypto'
-import { lstat, mkdir, realpath } from 'node:fs/promises'
-import { isAbsolute, join, relative, resolve, sep } from 'node:path'
+import { lstat, realpath } from 'node:fs/promises'
+import { isAbsolute, relative, resolve, sep } from 'node:path'
 import type { AgentRequestContext } from '../../shared/project'
 import type { ExecutionInfo } from '../../shared/execution'
 import { decideLocalPermission, type LocalPermissionDecision } from '../../shared/permission-policy'
@@ -9,30 +8,15 @@ import { captureProjectAccess } from '../project/attachment-access'
 import { captureWorkspaceAccess } from '../project/workspace-access'
 import { isAgentId } from '../../shared/agent'
 import { getExecutionPermissionState } from './permission-state'
+import { getAppSettings } from '../settings/settings-service'
+import {
+  captureConversationDirectory,
+  validateConversationDirectory
+} from '../settings/conversation-directory'
 
 export function pathWithin(root: string, candidate: string): boolean {
   const offset = relative(resolve(root), resolve(candidate))
   return offset === '' || (!isAbsolute(offset) && offset !== '..' && !offset.startsWith(`..${sep}`))
-}
-
-async function defaultDirectory(conversationId: string, create: boolean): Promise<string> {
-  const base = join(app.getPath('userData'), 'chats')
-  if (create) await mkdir(base, { recursive: true })
-  if ((await lstat(base)).isSymbolicLink()) throw new Error('默认运行目录不能是符号链接')
-  const canonicalBase = await realpath(base)
-  const conversationDirectory = join(canonicalBase, conversationId)
-  if (create) await mkdir(conversationDirectory, { recursive: true })
-  if ((await lstat(conversationDirectory)).isSymbolicLink()) {
-    throw new Error('会话运行目录不能是符号链接')
-  }
-  const directory = join(conversationDirectory, 'workspace')
-  if (create) await mkdir(directory, { recursive: true })
-  if ((await lstat(directory)).isSymbolicLink()) throw new Error('默认运行目录不能是符号链接')
-  const canonical = await realpath(directory)
-  if (!pathWithin(canonicalBase, canonical) || canonical !== resolve(directory)) {
-    throw new Error('默认运行目录已变化')
-  }
-  return canonical
 }
 
 export type ExecutionContext = {
@@ -42,9 +26,9 @@ export type ExecutionContext = {
 
 export async function resolveExecutionContext(
   windowId: number,
-  context: AgentRequestContext,
-  options: { createDefaultDirectory?: boolean } = {}
+  context: AgentRequestContext
 ): Promise<ExecutionContext> {
+  getAppSettings()
   if (!isAgentId(context.conversationId)) throw new Error('会话 ID 无效')
   const workspace = context.workspaceId
     ? captureWorkspaceAccess(windowId, context.conversationId)
@@ -58,9 +42,14 @@ export async function resolveExecutionContext(
   ) {
     throw new Error('附件授权已失效')
   }
+  const boundDirectory = captureConversationDirectory(windowId, context.conversationId)
+  if (!boundDirectory) throw new Error('会话任务目录尚未保存，请重新保存会话后发送')
   const cwd = workspace
     ? await realpath(workspace.root)
-    : await defaultDirectory(context.conversationId, options.createDefaultDirectory !== false)
+    : await validateConversationDirectory(context.conversationId, boundDirectory).catch((error) => {
+        if (error instanceof Error && error.message.startsWith('会话')) throw error
+        throw new Error('会话任务目录不可访问，请恢复原文件夹或检查权限后重试')
+      })
   const info = await lstat(cwd)
   if (!info.isDirectory() || info.isSymbolicLink()) throw new Error('运行目录无效')
   if (workspace) {
@@ -75,6 +64,8 @@ export async function resolveExecutionContext(
   ) {
     throw new Error('附件授权已失效')
   }
+  if (captureConversationDirectory(windowId, context.conversationId) !== boundDirectory)
+    throw new Error('会话任务目录绑定已失效')
   const permissions = getExecutionPermissionState(windowId)
   const writableRoots = [cwd]
   const scopeId = createHash('sha256')
@@ -95,6 +86,7 @@ export function executionStillCurrent(
   context: AgentRequestContext,
   execution: ExecutionContext
 ): boolean {
+  if (!captureConversationDirectory(windowId, context.conversationId)) return false
   const current = getExecutionPermissionState(windowId)
   if (current.mode !== execution.info.mode || current.revision !== execution.info.revision)
     return false
@@ -102,6 +94,10 @@ export function executionStillCurrent(
     const workspace = captureWorkspaceAccess(windowId, context.conversationId)
     if (workspace?.workspaceId !== context.workspaceId || workspace.root !== execution.info.cwd)
       return false
+  } else if (
+    captureConversationDirectory(windowId, context.conversationId) !== execution.info.cwd
+  ) {
+    return false
   }
   return (
     !context.attachment ||

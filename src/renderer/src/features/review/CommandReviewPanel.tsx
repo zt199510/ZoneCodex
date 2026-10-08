@@ -19,6 +19,7 @@ export function CommandReviewPanel({
     const escape = (event: KeyboardEvent): void => {
       if (
         event.key === 'Escape' &&
+        !!closeRef.current?.getClientRects().length &&
         !event.defaultPrevented &&
         !document.activeElement?.closest('.file-view-panel')
       ) {

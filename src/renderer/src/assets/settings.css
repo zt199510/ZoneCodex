@@ -1,0 +1,194 @@
+.workspace-body[hidden],
+.settings-page[hidden] {
+  display: none !important;
+}
+
+.settings-page {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  padding: 0;
+  color: var(--text);
+  background: var(--surface);
+  overflow: hidden;
+}
+
+.settings-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 18px 32px;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.settings-header h1 {
+  font-size: 18px;
+  font-weight: 600;
+}
+
+.settings-back {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.settings-content {
+  flex: 1;
+  min-height: 0;
+  padding: 32px max(32px, calc((100% - 760px) / 2));
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.settings-page-title {
+  font-size: 20px;
+  font-weight: 600;
+  margin-bottom: 24px;
+}
+
+.settings-section + .settings-section {
+  margin-top: 25px;
+}
+
+.settings-section h3 {
+  margin: 0 0 8px;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.settings-description,
+.settings-row-copy small,
+.settings-notice,
+.settings-feedback {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.7;
+}
+
+.settings-permissions {
+  display: grid;
+  gap: 4px;
+  margin: 12px 0 0;
+  padding: 0;
+  border: 0;
+  min-width: 0;
+}
+
+.settings-permission-option {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.settings-permission-option:has(input:checked) {
+  border-color: #bccfc1;
+  background: #f5f8f5;
+}
+
+.settings-permission-option input {
+  margin: 4px 0 0;
+  accent-color: var(--accent);
+}
+
+.settings-permission-option strong,
+.settings-permission-option small,
+.settings-row-copy strong,
+.settings-row-copy small {
+  display: block;
+}
+
+.settings-permission-option strong,
+.settings-row-copy strong {
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.settings-permission-option small {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.settings-permissions:disabled .settings-permission-option {
+  cursor: not-allowed;
+  opacity: 0.65;
+}
+
+.settings-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  padding: 14px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.settings-row-copy {
+  flex: 1;
+  min-width: 0;
+}
+
+.settings-path {
+  overflow-wrap: anywhere;
+  margin: 6px 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.settings-row .quiet-button {
+  flex-shrink: 0;
+  font-size: 12px;
+}
+
+.settings-row select {
+  max-width: 100%;
+  padding: 7px 9px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  font: inherit;
+  font-size: 12px;
+  color: var(--text);
+  background: var(--surface);
+}
+
+.settings-feedback {
+  display: grid;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.settings-feedback button {
+  justify-self: start;
+}
+
+.settings-error {
+  color: var(--danger);
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 760px) {
+  .settings-header {
+    padding: 15px 16px;
+  }
+
+  .settings-content {
+    padding: 24px;
+  }
+}
+
+@media (max-width: 540px) {
+  .settings-row {
+    flex-wrap: wrap;
+    gap: 10px;
+  }
+
+  .settings-row-copy {
+    flex-basis: 100%;
+  }
+}

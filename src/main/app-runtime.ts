@@ -3,9 +3,9 @@ import type { BrowserWindow } from 'electron'
 import type { CommandSource } from '../shared/command-preparation'
 import { decideCommandPermission } from '../shared/permission-policy'
 import { registerWindowControls, observeWindowState } from './window/window-controls'
-import { registerCloseGuard, attachCloseGuard } from './window/close-guard'
+import { registerCloseGuard, attachCloseGuard, hasPendingClose } from './window/close-guard'
 import { registerExternalLinks } from './window/external-links'
-import { registerConversationStorage } from './storage/conversation-ipc'
+import { registerConversationStorage, hasConversationSave } from './storage/conversation-ipc'
 import { registerLocalTerminal, attachTerminalCleanup } from './terminal/local-terminal'
 import { registerAgentRequest } from './agent/agent-ipc'
 import { abortProjectJob, abortImageJob, hasAgentJob, isAgentBusy } from './agent/agent-runner'
@@ -20,9 +20,16 @@ import { registerFileView, attachFileViewCleanup } from './project/file-view-ipc
 import { configureImageAccess, hasImageSelection } from './project/image-access'
 import { registerImageAccess, attachImageAccessCleanup } from './project/image-ipc'
 import { registerExecutionContext } from './execution/execution-ipc'
-import { clearExecutionPermissionState } from './execution/permission-state'
+import {
+  clearExecutionPermissionState,
+  initializeExecutionPermissionState
+} from './execution/permission-state'
 import { approveStandaloneCommand } from './execution/action-authorization'
-import { clearExecutionApproval, registerExecutionApproval } from './execution/execution-approval'
+import {
+  clearExecutionApproval,
+  hasExecutionApproval,
+  registerExecutionApproval
+} from './execution/execution-approval'
 import {
   registerChangeCommit,
   hasChangeCommit,
@@ -37,6 +44,7 @@ import {
 } from './execution/change-preparation-ipc'
 import {
   cleanupCommandPreparation,
+  hasCommandDirectoryOperation,
   registerCommandPreparation
 } from './execution/command-preparation-ipc'
 import {
@@ -50,9 +58,37 @@ import {
   discardTaskWindow,
   registerTaskLifecycle
 } from './execution/task-registry'
+import {
+  attachSettingsCleanup,
+  hasSettingsMutation,
+  registerSettings
+} from './settings/settings-ipc'
+import { hasConversationDirectoryOperation } from './settings/conversation-directory'
+
+function isSettingsConsumerBusy(windowId: number): boolean {
+  return hasSettingsMutation() || hasConversationDirectoryOperation(windowId)
+}
+
+function isSettingsChangeBusy(windowId: number): boolean {
+  return (
+    hasConversationSave(windowId) ||
+    hasPendingClose(windowId) ||
+    hasAgentJob(windowId) ||
+    hasExecutionApproval(windowId) ||
+    hasProjectSelection(windowId) ||
+    hasWorkspaceSelection(windowId) ||
+    hasImageSelection(windowId) ||
+    hasChangePreparation(windowId) ||
+    hasChangeCommit(windowId) ||
+    hasCommandDirectoryOperation(windowId) ||
+    hasCommandExecution(windowId) ||
+    hasConversationDirectoryOperation(windowId)
+  )
+}
 
 function isAgentPreparationActive(windowId: number): boolean {
   return (
+    isSettingsConsumerBusy(windowId) ||
     hasChangePreparation(windowId) ||
     hasChangeCommit(windowId) ||
     hasCommandExecution(windowId) ||
@@ -62,6 +98,7 @@ function isAgentPreparationActive(windowId: number): boolean {
 }
 
 function isLegacyCommandSourceAllowed(windowId: number, source: CommandSource): boolean {
+  if (isSettingsConsumerBusy(windowId)) return false
   const snapshotId = hasProjectSnapshot(windowId, source.snapshotId) ? source.snapshotId : ''
   return decideCommandPermission(
     { template: source.template, reason: '已通过提案解析' },
@@ -71,6 +108,7 @@ function isLegacyCommandSourceAllowed(windowId: number, source: CommandSource): 
 
 function isProjectAccessBusy(windowId: number): boolean {
   return (
+    isSettingsConsumerBusy(windowId) ||
     hasAgentJob(windowId) ||
     hasChangePreparation(windowId) ||
     hasChangeCommit(windowId) ||
@@ -81,6 +119,7 @@ function isProjectAccessBusy(windowId: number): boolean {
 
 function isChangePreviewBusy(windowId: number): boolean {
   return (
+    isSettingsConsumerBusy(windowId) ||
     hasAgentJob(windowId) ||
     hasProjectSelection(windowId) ||
     hasChangeCommit(windowId) ||
@@ -90,6 +129,7 @@ function isChangePreviewBusy(windowId: number): boolean {
 
 function isChangePreparationBusy(windowId: number): boolean {
   return (
+    isSettingsConsumerBusy(windowId) ||
     hasAgentJob(windowId) ||
     hasProjectSelection(windowId) ||
     hasImageSelection(windowId) ||
@@ -101,6 +141,7 @@ function isChangePreparationBusy(windowId: number): boolean {
 
 function isChangeCommitBusy(windowId: number): boolean {
   return (
+    isSettingsConsumerBusy(windowId) ||
     hasAgentJob(windowId) ||
     hasProjectSelection(windowId) ||
     hasImageSelection(windowId) ||
@@ -120,6 +161,12 @@ function onProjectAccessChanged(windowId: number, snapshotId?: string): void {
 
 /** Cross-feature cleanup retains the original listener order and per-resource owners. */
 export function attachWindowRuntime(window: BrowserWindow): void {
+  attachSettingsCleanup(window)
+  try {
+    initializeExecutionPermissionState(window.id)
+  } catch {
+    // Keep the settings error visible in the window; dependent operations remain blocked.
+  }
   // 观察窗口状态变化
   observeWindowState(window)
   // 注册关闭确认处理器
@@ -149,6 +196,7 @@ export function attachWindowRuntime(window: BrowserWindow): void {
 }
 
 export function registerAppRuntime(): void {
+  registerSettings(isSettingsChangeBusy)
   registerWindowControls()
   registerTaskLifecycle()
   registerExecutionApproval()
@@ -172,6 +220,7 @@ export function registerAppRuntime(): void {
   registerFileView()
   configureImageAccess({
     isBusy: (id) =>
+      isSettingsConsumerBusy(id) ||
       hasAgentJob(id) ||
       hasProjectSelection(id) ||
       hasWorkspaceSelection(id) ||

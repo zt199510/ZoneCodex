@@ -121,6 +121,7 @@ export function ChangePreviewPanel({
     function onWindowKeyDown(event: KeyboardEvent): void {
       if (
         event.key !== 'Escape' ||
+        !closeButton.current?.getClientRects().length ||
         event.defaultPrevented ||
         document.activeElement?.closest('.file-view-panel') ||
         (document.querySelector('.file-view-panel') &&

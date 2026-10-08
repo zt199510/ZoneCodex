@@ -15,8 +15,6 @@ import { ImageAttachment } from '../project/ImageAttachment'
 import type { RuntimeImage } from '../project/useImageSelection'
 import {
   appendImageTurnNotice,
-  getImageTurnNoticeCount,
-  hasImageTurnNotice,
   stripImageTurnNotice,
   type ImageDescriptor
 } from '../../../../shared/image-input'
@@ -71,24 +69,18 @@ export function MessageList({
     <ol className="message-list" aria-label="聊天记录">
       {messages.map((message) => {
         const descriptors = message.role === 'user' ? getMessageImages(message) : []
-        const imageTurn =
-          message.role === 'user' && (descriptors.length > 0 || hasImageTurnNotice(message.content))
+        const imageTurn = descriptors.length > 0
         const userContent = imageTurn ? stripImageTurnNotice(message.content) : message.content
         const images = message.role === 'user' ? (messageImages[message.id] ?? []) : []
         const imageErrors = messageImageErrors[message.id] ?? {}
         const unavailable = descriptors.some(
           (descriptor) => !images.some((view) => view.image.imageId === descriptor.imageId)
         )
-        const imageNotice = imageTurn
-          ? descriptors.length
-            ? unavailable
-              ? Object.keys(imageErrors).length
-                ? '图片组中有不可用图片，请重新添加后发送。'
-                : '正在恢复图片组…'
-              : undefined
-            : '旧图片未保存；再次询问请重新添加。'
+        const imageNotice = unavailable
+          ? Object.keys(imageErrors).length
+            ? '图片组中有不可用图片，请重新添加后发送。'
+            : '正在恢复图片组…'
           : undefined
-        const imageCount = descriptors.length || getImageTurnNoticeCount(message.content) || 1
         const entries = message.role === 'assistant' ? toolActivity[message.id] : undefined
         const command = message.role === 'assistant' ? commandProposals[message.id] : undefined
         const activity = entries?.length ? entries : undefined
@@ -168,7 +160,8 @@ export function MessageList({
                 initialValue={userContent}
                 imageNotice={imageNotice}
                 maxLength={
-                  editMaxLength - (imageTurn ? appendImageTurnNotice('', imageCount).length : 0)
+                  editMaxLength -
+                  (imageTurn ? appendImageTurnNotice('', descriptors.length).length : 0)
                 }
                 disabled={editDisabled}
                 onCancel={() => setEditingId(null)}
@@ -227,12 +220,7 @@ export function MessageList({
                   message.role === 'assistant' ? (
                     <MarkdownContent content={message.content} onOpenFile={onOpenMessageFile} />
                   ) : message.role === 'user' ? (
-                    <>
-                      <UserMessageContent content={userContent} onOpenFile={onOpenMessageFile} />
-                      {imageNotice && !descriptors.length && (
-                        <p className="message-image-notice message-image-expired">{imageNotice}</p>
-                      )}
-                    </>
+                    <UserMessageContent content={userContent} onOpenFile={onOpenMessageFile} />
                   ) : (
                     message.content
                   )

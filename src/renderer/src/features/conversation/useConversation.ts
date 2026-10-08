@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from 'react'
+import { useCallback, useLayoutEffect, useRef, useState } from 'react'
 import type { ChatMessage } from '../../../../shared/conversation'
 import { getMessageImages } from '../../../../shared/conversation'
 import type { ToolRun } from '../../../../shared/agent-history'
@@ -45,6 +45,7 @@ export type ConversationController = ConversationReviewController & {
   canEdit: boolean
   canSend: boolean
   canNavigate: boolean
+  canChangeSettings: boolean
   storage: ConversationStorage
   chatError: string | null
   create: () => Promise<boolean>
@@ -75,10 +76,15 @@ export type ConversationController = ConversationReviewController & {
 
 export function useConversation(): ConversationController {
   const [snapshot, setSnapshot] = useState<ConversationLibrary>({
-    version: 6,
+    version: 7,
     activeConversationId: null,
     conversations: []
   })
+  const snapshotRef = useRef(snapshot)
+  useLayoutEffect(() => {
+    snapshotRef.current = snapshot
+  }, [snapshot])
+  const creatingRef = useRef(false)
   const [closePending, setClosePendingState] = useState(false)
   const [capacityError, setCapacityError] = useState<string | null>(null)
   const [conversationError, setConversationError] = useState<string | null>(null)
@@ -373,41 +379,60 @@ export function useConversation(): ConversationController {
   )
 
   async function createId(inheritDraft = false): Promise<string | null> {
-    if (!canChange() || snapshot.conversations.length >= 100) return null
-    if (!(await revokeSelectionForChange())) return null
-    if (!(await images.release())) return null
-    if (active) {
-      if (!(await workspace.release())) return null
-      invalidateTitle(active.id)
-    }
-    const id = crypto.randomUUID()
-    if (inheritDraft) setDraftInheritanceTarget(id)
-    setSnapshot((previous) => {
-      if (previous.conversations.length >= 100) return previous
-      return {
-        ...previous,
-        activeConversationId: id,
-        conversations: [
-          ...previous.conversations,
-          {
-            id,
-            title: `新会话 ${previous.conversations.length + 1}`,
-            pinned: false,
-            archived: false,
-            messages: [],
-            toolRuns: [],
-            workspace: null,
-            tasks: []
-          }
-        ]
+    if (creatingRef.current || !canChange() || snapshotRef.current.conversations.length >= 100)
+      return null
+    creatingRef.current = true
+    try {
+      if (!(await revokeSelectionForChange())) return null
+      if (!(await images.release())) return null
+      if (active) {
+        if (!(await workspace.release())) return null
+        invalidateTitle(active.id)
       }
-    })
-    setCapacityError(null)
-    setConversationError(null)
-    clearProjectError()
-    request.clearError()
-    request.clearActivity()
-    return id
+      if (closePendingRef.current || !operations.begin('selecting')) return null
+      try {
+        const id = crypto.randomUUID()
+        const defaultDirectory = await window.api.bindConversationDirectory(id)
+        if (closePendingRef.current) return null
+        const previous = snapshotRef.current
+        if (previous.conversations.length >= 100) return null
+        const next: ConversationLibrary = {
+          ...previous,
+          activeConversationId: id,
+          conversations: [
+            ...previous.conversations,
+            {
+              id,
+              defaultDirectory,
+              title: `新会话 ${previous.conversations.length + 1}`,
+              pinned: false,
+              archived: false,
+              messages: [],
+              toolRuns: [],
+              workspace: null,
+              tasks: []
+            }
+          ]
+        }
+        if (!(await storage.saveSnapshot(next)) || closePendingRef.current) return null
+        snapshotRef.current = next
+        setSnapshot(next)
+        if (inheritDraft) setDraftInheritanceTarget(id)
+        setCapacityError(null)
+        setConversationError(null)
+        clearProjectError()
+        request.clearError()
+        request.clearActivity()
+        return id
+      } finally {
+        operations.finish('selecting')
+      }
+    } catch (cause) {
+      setConversationError(cause instanceof Error ? cause.message : '创建会话失败，请重试。')
+      return null
+    } finally {
+      creatingRef.current = false
+    }
   }
 
   async function create(): Promise<boolean> {
@@ -548,7 +573,8 @@ export function useConversation(): ConversationController {
     return true
   }
 
-  const canNavigate = storage.ready && operations.operation === 'idle' && !closePending
+  const canChangeSettings = operations.operation === 'idle' && !closePending
+  const canNavigate = storage.ready && canChangeSettings
   const canEdit = canNavigate && active !== null
   // 满容量的新会话无法再创建；容量检查失败后也要让所有提交入口保持拒绝，
   // 直到用户新建、清理或归档记录后由对应操作清除错误。
@@ -587,6 +613,7 @@ export function useConversation(): ConversationController {
     retryMessage,
     operation: operations.operation,
     canNavigate,
+    canChangeSettings,
     canEdit,
     canSend,
     storage,
@@ -635,40 +662,14 @@ export function useConversation(): ConversationController {
         setConversationError('消息为空或超过长度上限，请缩短问题后再发送。')
         return false
       }
-      const submit = (): boolean => {
-        if (!active && snapshot.conversations.length >= 100) {
-          setCapacityError('会话数量已达到上限，请整理已有会话后再发送。')
-          return false
-        }
-        const target =
-          active ??
-          (() => {
-            const id = crypto.randomUUID()
-            return {
-              id,
-              title: `新会话 ${snapshot.conversations.length + 1}`,
-              pinned: false,
-              archived: false,
-              messages: [],
-              toolRuns: [],
-              workspace: null,
-              tasks: []
-            }
-          })()
-        const nextSnapshot = active
-          ? snapshot
-          : {
-              ...snapshot,
-              activeConversationId: target.id,
-              conversations: [...snapshot.conversations, target]
-            }
+      const submitTo = (target: Conversation): boolean => {
+        const nextSnapshot = snapshotRef.current
         const capacityMessage = getCapacityError(nextSnapshot, target, true)
         if (capacityMessage) {
           setCapacityError(capacityMessage)
           return false
         }
         preparation.cancel()
-        if (!active) setSnapshot(nextSnapshot)
         const hadUserMessage = target.messages.some((message) => message.role === 'user')
         const fallbackTitle =
           !hadUserMessage && isPlaceholderConversationTitle(target.title)
@@ -688,7 +689,6 @@ export function useConversation(): ConversationController {
           undefined,
           group.map((image) => image.image.imageId)
         )
-        if (!accepted && !active) setSnapshot(snapshot)
         if (accepted) {
           if (fallbackTitle) {
             updateConversation(target.id, (conversation) =>
@@ -704,6 +704,13 @@ export function useConversation(): ConversationController {
         }
         return accepted
       }
+      if (!active) {
+        return createId(true).then((id) => {
+          const target = snapshotRef.current.conversations.find((item) => item.id === id)
+          return target ? submitTo(target) : false
+        })
+      }
+      const submit = (): boolean => submitTo(active)
       return group.length ? images.withPrepared(group, submit) : submit()
     },
     editAndSend,

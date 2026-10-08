@@ -1,10 +1,12 @@
 import { app, BrowserWindow, ipcMain } from 'electron'
 import type { IpcMainInvokeEvent, WebContents } from 'electron'
-import { join } from 'node:path'
-import { existsSync } from 'node:fs'
 import * as pty from 'node-pty'
 import { isTerminalId, isTerminalSize } from '../../shared/terminal'
 import type { TerminalEvent, TerminalResult } from '../../shared/terminal'
+import { getIpcWindow } from '../ipc-source'
+import { getAppSettings } from '../settings/settings-service'
+import { resolveTerminalShell } from '../settings/terminal-shell'
+import { hasSettingsMutation } from '../settings/settings-ipc'
 
 // 终端会话管理
 type Session = {
@@ -16,12 +18,7 @@ type Session = {
 const sessions = new Map<number, Session>()
 // 获取终端请求的窗口来源
 function ownerOf(event: IpcMainInvokeEvent): WebContents {
-  if (
-    !BrowserWindow.fromWebContents(event.sender) ||
-    event.senderFrame !== event.sender.mainFrame
-  ) {
-    throw new Error('不支持的终端请求来源')
-  }
+  getIpcWindow(event, '不支持的终端请求来源', { windowMustBeLive: true, senderMustBeLive: true })
   return event.sender
 }
 // 向窗口发送终端事件
@@ -73,15 +70,9 @@ export function registerLocalTerminal(): void {
     if (process.platform !== 'win32') return { ok: false, error: '本课仅支持 Windows' }
 
     try {
-      const shell = join(
-        process.env.SystemRoot ?? 'C:\\Windows',
-        'System32',
-        'WindowsPowerShell',
-        'v1.0',
-        'powershell.exe'
-      )
-      if (!existsSync(shell)) return { ok: false, error: '未找到 Windows PowerShell' }
-      const child = pty.spawn(shell, ['-NoLogo', '-NoProfile'], {
+      if (hasSettingsMutation()) return { ok: false, error: '设置正在保存，请稍后创建终端' }
+      const shell = resolveTerminalShell(getAppSettings().terminalShell)
+      const child = pty.spawn(shell.program, shell.args, {
         name: 'xterm-256color',
         cols: size.cols,
         rows: size.rows,

@@ -1,7 +1,7 @@
 import { mkdir, readFile, writeFile, rename, rm } from 'node:fs/promises'
 import { join } from 'node:path'
 import { randomUUID } from 'node:crypto'
-import { parseLibrary, readLibrary } from '../../shared/conversation-library'
+import { parseLibrary } from '../../shared/conversation-library'
 import type { ConversationLibrary, LoadLibraryResult } from '../../shared/conversation-library'
 import type { SaveConversationResult } from '../../shared/conversation'
 
@@ -10,12 +10,6 @@ import type { SaveConversationResult } from '../../shared/conversation'
  * @param directory 存储目录
  * @returns 会话存储实例
  */
-type Existing = {
-  bytes: Buffer
-  library: ConversationLibrary
-  sourceVersion: 1 | 2 | 3 | 4 | 5 | 6
-}
-
 /**
  * 创建一个会话存储实例
  * @param directory 存储目录
@@ -37,7 +31,7 @@ export function createConversationStore(directory: string): {
     return next
   }
 
-  async function readExisting(): Promise<Existing | null> {
+  async function readExisting(): Promise<ConversationLibrary | null> {
     let bytes: Buffer
     try {
       bytes = await readFile(file)
@@ -58,19 +52,13 @@ export function createConversationStore(directory: string): {
       typeof value !== 'object' ||
       value === null ||
       !('version' in value) ||
-      (value.version !== 1 &&
-        value.version !== 2 &&
-        value.version !== 3 &&
-        value.version !== 4 &&
-        value.version !== 5 &&
-        value.version !== 6)
+      value.version !== 7
     ) {
-      throw new Error('文件格式或版本不支持')
+      throw new Error('会话格式不支持：只读取当前格式，旧记录未被覆盖或删除。')
     }
-    const sourceVersion = value.version
-    const library = readLibrary(value, sourceVersion === 1 ? randomUUID() : '')
-    if (!library) throw new Error('文件格式或版本不支持')
-    return { bytes, library, sourceVersion }
+    const library = parseLibrary(value)
+    if (!library) throw new Error('会话格式不支持：只读取当前格式，旧记录未被覆盖或删除。')
+    return library
   }
 
   /**
@@ -112,27 +100,22 @@ export function createConversationStore(directory: string): {
             return {
               ok: true,
               missing: true,
-              snapshot: { version: 6, activeConversationId: null, conversations: [] }
+              snapshot: { version: 7, activeConversationId: null, conversations: [] }
             }
           }
-          const snapshot = recoverPending(saved.library)
-          // 旧版本先备份原始字节，再统一写入版本 6；不会恢复目录或执行许可。
-          if (saved.sourceVersion !== snapshot.version) {
-            const backup = join(
-              directory,
-              `conversation-v${saved.sourceVersion}-${randomUUID()}.bak`
-            )
-            await writeFile(backup, saved.bytes, { flag: 'wx' })
-            await writeLibrary(snapshot)
-          } else if (JSON.stringify(snapshot) !== JSON.stringify(saved.library)) {
+          const snapshot = recoverPending(saved)
+          if (JSON.stringify(snapshot) !== JSON.stringify(saved)) {
             // 将启动恢复结果持久化，返回值可以直接作为已保存基线。
             await writeLibrary(snapshot)
           }
           return { ok: true, missing: false, snapshot }
-        } catch {
+        } catch (error) {
           return {
             ok: false,
-            error: '读取或迁移失败：请检查文件格式、备份权限和磁盘。不要删除原记录。'
+            error:
+              error instanceof Error && error.message.startsWith('会话格式不支持')
+                ? error.message
+                : '读取失败：请检查会话格式、文件权限和磁盘。原记录未被覆盖或删除。'
           }
         }
       }),
@@ -145,10 +128,8 @@ export function createConversationStore(directory: string): {
         return Promise.resolve({ ok: false, error: '会话库格式或长度不符合保存要求。' })
       return serial(async (): Promise<SaveConversationResult> => {
         try {
-          const existing = await readExisting()
-          // 旧版本必须先走 load 的备份迁移流程，save 不绕过它。
-          if (existing && existing.sourceVersion !== snapshot.version)
-            throw new Error('请先加载旧记录')
+          // Read before replacement so an unsupported existing file cannot be overwritten.
+          await readExisting()
           await beforeWrite?.(snapshot)
           await writeLibrary(snapshot)
           return { ok: true }

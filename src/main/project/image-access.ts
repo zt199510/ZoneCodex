@@ -227,16 +227,6 @@ export function bindImageMessageGroup(
   return true
 }
 
-/** Legacy single-image callers use the same trusted message-group binding. */
-export function bindImageMessage(
-  windowId: number,
-  conversationId: string,
-  imageId: string,
-  messageId: string
-): boolean {
-  return bindImageMessageGroup(windowId, conversationId, [imageId], messageId)
-}
-
 function assetInUse(conversationId: string, imageId: string): boolean {
   if (committed.has(assetKey(conversationId, imageId))) return true
   for (const windowBindings of bindings.values()) {

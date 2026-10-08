@@ -117,8 +117,7 @@ export async function runAgentRequest(
     return { status: 'error', error: '请先完成当前操作', trace }
   }
   const controller = new AbortController()
-  const imageReferences =
-    checkedContext.images ?? (checkedContext.image ? [checkedContext.image] : [])
+  const imageReferences = checkedContext.images ?? []
   const capturedImages: CapturedImage[] = []
   const historyImages: CapturedImageInput[] = []
   const job: Job = {

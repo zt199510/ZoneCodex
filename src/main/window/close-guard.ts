@@ -6,6 +6,11 @@ type Guard = { requestId: string | null; allowOnce: boolean }
 // 关闭确认处理器映射
 const guards = new WeakMap<BrowserWindow, Guard>()
 let isCommitting: (windowId: number) => boolean = () => false
+
+export function hasPendingClose(windowId: number): boolean {
+  const window = BrowserWindow.fromId(windowId)
+  return Boolean(window && guards.get(window)?.requestId)
+}
 // 注册关闭确认处理器
 export function registerCloseGuard(isBusy: (windowId: number) => boolean = () => false): void {
   isCommitting = isBusy

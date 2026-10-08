@@ -45,7 +45,10 @@ function returnFocus(trigger?: HTMLElement): void {
 }
 
 /** Reading has its own request generation and never occupies the conversation operation lock. */
-export function useFileView(conversation: ConversationController): {
+export function useFileView(
+  conversation: ConversationController,
+  activePage = true
+): {
   state: FileViewState
   open: OpenFileView
   close: () => void
@@ -162,7 +165,7 @@ export function useFileView(conversation: ConversationController): {
       : state
 
   useEffect(() => {
-    if (visibleState.status === 'idle') return
+    if (!activePage || visibleState.status === 'idle') return
     function onKeyDown(event: KeyboardEvent): void {
       if (
         event.key !== 'Escape' ||
@@ -177,7 +180,7 @@ export function useFileView(conversation: ConversationController): {
     }
     window.addEventListener('keydown', onKeyDown, true)
     return () => window.removeEventListener('keydown', onKeyDown, true)
-  }, [visibleState.status, close])
+  }, [activePage, visibleState.status, close])
 
   return { state: visibleState, open, close }
 }
