@@ -4,6 +4,7 @@ import type { SaveConversationResult } from './conversation'
 import type { FileViewRequest, FileViewResult } from './file-view'
 import type {
   ImageImportRequest,
+  ImageImportResult,
   ImageSelectionResult,
   ImagePreviewResult,
   ImagePreparationResult
@@ -47,10 +48,7 @@ export type StreamDelta = AgentDelta
 // 应用 API 接口类型
 export interface AppAPI {
   selectImage: (conversationId: string) => Promise<ImageSelectionResult>
-  importImage: (
-    conversationId: string,
-    request: ImageImportRequest
-  ) => Promise<ImageSelectionResult>
+  importImage: (conversationId: string, request: ImageImportRequest) => Promise<ImageImportResult>
   readImagePreview: (conversationId: string, imageId: string) => Promise<ImagePreviewResult>
   prepareImage: (conversationId: string, imageId: string) => Promise<ImagePreparationResult>
   revokeImage: (conversationId: string, imageId: string) => Promise<boolean>

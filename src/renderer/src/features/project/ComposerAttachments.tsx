@@ -5,6 +5,7 @@ import type {
   AnchorMeasurement,
   AnchorPositionStyle
 } from '../../components/ui/useAnchoredPosition'
+import { maxImagesPerMessage } from '../../../../shared/image-input'
 
 function attachmentMenuStyle({
   rect,
@@ -177,7 +178,7 @@ export function ComposerAttachments({
             </svg>
             <span>
               <strong>图片</strong>
-              <small>单张 PNG/JPEG，也可粘贴截图</small>
+              <small>PNG/JPEG，最多 {maxImagesPerMessage} 张；也可粘贴或拖入</small>
             </span>
           </button>
         )}

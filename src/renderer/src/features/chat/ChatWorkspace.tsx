@@ -112,6 +112,7 @@ export function ChatWorkspace({
           <MessageList
             onOpenFile={onOpenFile}
             messageImages={conversation.images?.messages}
+            messageImageErrors={conversation.images?.messageErrors}
             onPreviewImage={openImage}
             key={conversation.activeConversationId}
             commandProposals={conversation.commandProposals}

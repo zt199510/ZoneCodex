@@ -1,8 +1,13 @@
 import type { AgentMode } from './agent'
-import type { ChatMessage } from './conversation'
+import { getMessageImages, type ChatMessage } from './conversation'
 import { parseToolScope, sameToolScope, isToolAllowed } from './project'
 import type { ToolScope } from './project'
-import { hasImageTurnNotice } from './image-input'
+import {
+  hasImageTurnNotice,
+  getImageTurnNoticeCount,
+  parseImageHistoryReferences,
+  type ImageHistoryReference
+} from './image-input'
 
 export type JsonValue =
   null | boolean | number | string | JsonValue[] | { [key: string]: JsonValue }
@@ -171,20 +176,31 @@ export function parseProtocolTurn(
 // 多轮历史可以为空；每轮都必须完整，且整条历史不能复用 call_id。
 export function parseToolHistory(
   value: unknown,
-  scope: ToolScope = { kind: 'time' }
+  scope: ToolScope = { kind: 'time' },
+  imageHistory: readonly ImageHistoryReference[] = []
 ): ProtocolItem[] | null {
   const checkedScope = parseToolScope(scope)
   if (!checkedScope) return null
   const items = cloneJsonArray(value, 300, 64000)
   if (!items || !items.every((item): item is ProtocolItem => isRecord(item))) return null
-  if (items.length === 0) return []
+  const references = imageHistory.length ? parseImageHistoryReferences(imageHistory) : []
+  if (!references) return null
+  if (items.length === 0) return references.length ? null : []
+  const imageIndices = new Map<number, number>()
+  for (const reference of references)
+    imageIndices.set(reference.index, (imageIndices.get(reference.index) ?? 0) + 1)
   const result: ProtocolItem[] = []
   const calls = new Set<string>()
   let start = 0
   for (let index = 1; index <= items.length; index++) {
     if (index < items.length && items[index].role !== 'user') continue
     const first = items[start]
-    if (typeof first.content === 'string' && hasImageTurnNotice(first.content)) return null
+    if (
+      typeof first.content !== 'string' ||
+      getImageTurnNoticeCount(first.content) !== (imageIndices.get(start) ?? null)
+    )
+      return null
+    imageIndices.delete(start)
     const turn = parseProtocolTurn(items.slice(start, index), checkedScope)
     if (!turn) return null
     for (const item of turn) {
@@ -196,7 +212,7 @@ export function parseToolHistory(
     result.push(...turn)
     start = index
   }
-  return result
+  return imageIndices.size ? null : result
 }
 
 // Display evidence for an unfinished request is never reusable model history.
@@ -399,15 +415,31 @@ export function selectToolHistory(
   mode: AgentMode,
   scope: ToolScope = { kind: 'time' }
 ): ProtocolItem[] {
+  return selectToolContext(messages, runs, mode, scope).history
+}
+
+export function selectToolContext(
+  messages: readonly ChatMessage[],
+  runs: readonly ToolRun[],
+  mode: AgentMode,
+  scope: ToolScope = { kind: 'time' }
+): { history: ProtocolItem[]; imageHistory: ImageHistoryReference[] } {
   const checkedScope = parseToolScope(scope)
   if (!checkedScope) throw new Error('工具范围无效，请重新选择工具模式。')
-  const selected: ToolRun[] = []
+  const hasSavedImages = messages.some(
+    (message) => message.role === 'user' && getMessageImages(message).length > 0
+  )
+  const selected: Array<{ user: ChatMessage; items: ProtocolItem[] }> = []
   for (let index = messages.length - 1; index >= 1; index -= 2) {
     const assistant = messages[index]
     const user = messages[index - 1]
-    // Image pixels are deliberately absent from v6. Even failed image turns
-    // terminate history reuse before the ordinary failed-turn skip.
-    if (user.role === 'user' && hasImageTurnNotice(user.content)) break
+    // Old temporary images cannot be reconstructed from their text marker.
+    if (
+      user.role === 'user' &&
+      hasImageTurnNotice(user.content) &&
+      getMessageImages(user).length === 0
+    )
+      break
     const run = runs.find((item) => item.assistantId === assistant.id)
     if (
       assistant.role === 'assistant' &&
@@ -424,15 +456,45 @@ export function selectToolHistory(
       user.status !== 'complete' ||
       !run ||
       run.userId !== user.id ||
-      run.mode !== mode ||
-      !sameToolScope(run.scope, checkedScope)
+      run.mode !== mode
     )
       break
-    selected.unshift(run)
+    if (sameToolScope(run.scope, checkedScope)) {
+      selected.unshift({ user, items: run.items })
+    } else if (hasSavedImages) {
+      // Retain the visual conversation across runtime changes without replaying
+      // tools from an expired attachment/workspace or restoring its permissions.
+      selected.unshift({
+        user,
+        items: [
+          { role: 'user', content: user.content },
+          {
+            type: 'message',
+            role: 'assistant',
+            phase: 'final_answer',
+            content: [{ type: 'output_text', text: assistant.content }]
+          }
+        ]
+      })
+    } else break
   }
-  const items = selected.flatMap((run) => run.items)
+  const items: ProtocolItem[] = []
+  const imageHistory: ImageHistoryReference[] = []
+  for (const turn of selected) {
+    if (turn.items[0]?.role !== 'user' || turn.items[0]?.content !== turn.user.content)
+      throw new Error('图片与历史消息的协议位置不一致，请重新打开会话。')
+    for (const image of getMessageImages(turn.user))
+      imageHistory.push({
+        index: items.length,
+        messageId: turn.user.id,
+        imageId: image.imageId
+      })
+    items.push(...turn.items)
+  }
   if (items.length > 300 || JSON.stringify(items).length > 64000) {
     throw new Error('工具上下文已达到本课上限，请新建会话并重新说明问题。')
   }
-  return structuredClone(items)
+  const history = parseToolHistory(items, checkedScope, imageHistory)
+  if (!history) throw new Error('图片与工具历史不一致或达到上限，请新建会话并重新说明问题。')
+  return { history, imageHistory }
 }

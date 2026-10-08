@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { parseIncompleteToolTurn, selectToolHistory } from '../../../../shared/agent-history'
+import { parseIncompleteToolTurn, selectToolContext } from '../../../../shared/agent-history'
 import type { ProtocolItem, ToolRun } from '../../../../shared/agent-history'
 import type { AgentRequestContext, ProjectSelection, Workspace } from '../../../../shared/project'
 import { toolScopeForAgentRequest } from '../../../../shared/project'
@@ -14,7 +14,12 @@ import {
 import { applyConversationTaskEvent } from '../conversation/useConversationTasks'
 import type { OperationControl } from '../conversation/useOperation'
 import { resolveAgentRequest } from './agent-request'
-import { appendImageTurnNotice, stripImageTurnNotice } from '../../../../shared/image-input'
+import {
+  appendImageTurnNotice,
+  maxImagesPerMessage,
+  stripImageTurnNotice,
+  type ImageDescriptor
+} from '../../../../shared/image-input'
 
 export type ToolActivity = Record<string, string[]>
 
@@ -46,7 +51,7 @@ type ActiveRequest = {
   attachments: ChatAttachment[]
   taskId: string
   startedAt: number
-  imageId?: string
+  imageIds?: readonly string[]
 }
 type ChatRetrySource = {
   conversationId: string
@@ -58,7 +63,7 @@ type ChatRetrySource = {
   workspaceId: string | null
   permissions: PermissionsState
   execution?: ExecutionInfo
-  imageId?: string
+  imageIds?: readonly string[]
 }
 type UpdateMessages = (
   conversationId: string,
@@ -80,7 +85,8 @@ type ChatRequestOptions = {
   getPermissions: () => PermissionsState | null
   observeExecution: (execution: ExecutionInfo) => void
   isImageAvailable?: (imageId: string) => boolean
-  onImageAccepted?: (messageId: string, imageId: string) => void
+  getImageDescriptor?: (imageId: string) => ImageDescriptor | null
+  onImagesAccepted?: (messageId: string, imageIds: readonly string[]) => void
 }
 type ChatRequest = {
   error: string | null
@@ -95,11 +101,11 @@ type ChatRequest = {
     onAccepted?: (accepted: AcceptedChatRequest) => void,
     messageAttachments?: readonly ChatAttachment[],
     expectedExecution?: ExecutionInfo,
-    imageId?: string
+    imageIds?: readonly string[]
   ) => boolean
   canRetry: (assistantId: string) => boolean
   retry: (assistantId: string) => boolean
-  getRetryImage: (assistantId: string) => string | null
+  getRetryImages: (assistantId: string) => readonly string[]
   stop: () => Promise<void>
   clearError: () => void
   clearActivity: () => void
@@ -125,7 +131,8 @@ export function useChatRequest({
   getPermissions,
   observeExecution,
   isImageAvailable,
-  onImageAccepted
+  getImageDescriptor,
+  onImagesAccepted
 }: ChatRequestOptions): ChatRequest {
   const { begin, finish } = operations
   const [error, setError] = useState<string | null>(null)
@@ -348,12 +355,15 @@ export function useChatRequest({
       // Keep the original project and attachment fields; only the execution
       // information comes from the main-process resolver.
       const scope = toolScopeForAgentRequest(active.context)
-      active.history = selectToolHistory(
+      const selected = selectToolContext(
         active.sourceMessages,
         active.sourceToolRuns,
         'live',
         scope
       )
+      active.history = selected.history
+      if (selected.imageHistory.length)
+        active.context = { ...active.context, imageHistory: selected.imageHistory }
       const source = retrySources.current.get(active.assistantId)
       if (source) source.execution = execution
       updateConversation(active.conversationId, (previous) => ({
@@ -421,10 +431,15 @@ export function useChatRequest({
     onAccepted?: (accepted: AcceptedChatRequest) => void,
     messageAttachments: readonly ChatAttachment[] = [],
     expectedExecution?: ExecutionInfo,
-    imageId?: string
+    imageIds: readonly string[] = []
   ): boolean {
-    const question = imageId ? stripImageTurnNotice(rawContent).trim() : rawContent.trim()
-    const content = imageId ? appendImageTurnNotice(question) : question
+    const frozenImageIds = [...imageIds]
+    const question = frozenImageIds.length
+      ? stripImageTurnNotice(rawContent).trim()
+      : rawContent.trim()
+    const content = frozenImageIds.length
+      ? appendImageTurnNotice(question, frozenImageIds.length)
+      : question
     // `begin` 仍是最终的原子互斥点；这里的同步检查让保存、选文件或生成期间
     // 的调用在解析附件和历史之前就被拒绝，避免产生任何请求副作用。
     if (
@@ -435,8 +450,21 @@ export function useChatRequest({
       activeRequest.current
     )
       return false
-    if (imageId && !isImageAvailable?.(imageId)) {
-      setError('原图片已失效，请重新添加图片后发送。')
+    if (
+      frozenImageIds.length > maxImagesPerMessage ||
+      new Set(frozenImageIds).size !== frozenImageIds.length ||
+      frozenImageIds.some((imageId) => !isImageAvailable?.(imageId))
+    ) {
+      setError('原图片组已失效或超过上限，请核对后重新添加图片。')
+      return false
+    }
+    const images: ImageDescriptor[] = []
+    for (const imageId of frozenImageIds) {
+      const image = getImageDescriptor?.(imageId)
+      if (image) images.push({ ...image })
+    }
+    if (images.length !== frozenImageIds.length) {
+      setError('原图片组不可用，请重新添加后发送。')
       return false
     }
     if (rawContent.length > maxPromptLength || content.length > maxPromptLength) {
@@ -451,7 +479,11 @@ export function useChatRequest({
     let request: ReturnType<typeof resolveAgentRequest>
     try {
       request = resolveAgentRequest(targetConversationId, sourceWorkspace, sourceProjectSelection)
-      if (imageId) request.context = { ...request.context, image: { imageId } }
+      if (frozenImageIds.length)
+        request.context = {
+          ...request.context,
+          images: frozenImageIds.map((imageId) => ({ imageId }))
+        }
     } catch (error) {
       setError(error instanceof Error ? error.message : '工具上下文无效，请重新说明问题。')
       return false
@@ -483,8 +515,13 @@ export function useChatRequest({
       attachments,
       taskId: crypto.randomUUID(),
       startedAt: performance.now(),
-      ...(imageId ? { imageId } : {})
+      ...(frozenImageIds.length ? { imageIds: frozenImageIds } : {})
     }
+    if (active.context.images)
+      active.context.images = active.context.images.map((image) => ({
+        ...image,
+        messageId: active.userId
+      }))
     activeRequest.current = active
     setError(null)
     setToolActivity((previous) => ({ ...previous, [active.assistantId]: ['正在处理请求…'] }))
@@ -497,6 +534,7 @@ export function useChatRequest({
           role: 'user',
           content,
           status: 'pending',
+          ...(images.length ? { images } : {}),
           ...(active.attachments.length > 0 ? { attachments: active.attachments } : {})
         },
         { id: active.assistantId, role: 'assistant', content: '', status: 'pending' }
@@ -506,9 +544,9 @@ export function useChatRequest({
       conversationId: active.conversationId,
       messageId: active.userId,
       content,
-      ...(imageId ? { titleContent: question } : {})
+      ...(frozenImageIds.length ? { titleContent: question } : {})
     })
-    if (imageId) onImageAccepted?.(active.userId, imageId)
+    if (frozenImageIds.length) onImagesAccepted?.(active.userId, frozenImageIds)
     retrySources.current.set(active.assistantId, {
       conversationId: active.conversationId,
       prompt: content,
@@ -518,7 +556,7 @@ export function useChatRequest({
       attachments,
       workspaceId: sourceWorkspace?.workspaceId ?? null,
       permissions: { ...permissions },
-      ...(imageId ? { imageId } : {})
+      ...(frozenImageIds.length ? { imageIds: frozenImageIds } : {})
     })
     void run(active)
     return true
@@ -532,7 +570,8 @@ export function useChatRequest({
       source.snapshotId === (projectSelection?.snapshotId ?? null) &&
       source.workspaceId === (workspace?.workspaceId ?? null) &&
       samePermissions(source.permissions, getPermissions()) &&
-      (!source.imageId || isImageAvailable?.(source.imageId)) &&
+      (!source.imageIds?.length ||
+        source.imageIds.every((imageId) => isImageAvailable?.(imageId))) &&
       operations.isIdle() &&
       !activeRequest.current
     )
@@ -551,7 +590,7 @@ export function useChatRequest({
       undefined,
       source.attachments,
       source.execution,
-      source.imageId
+      source.imageIds
     )
     if (accepted) retrySources.current.delete(assistantId)
     return accepted
@@ -581,7 +620,7 @@ export function useChatRequest({
     send,
     canRetry,
     retry,
-    getRetryImage: (assistantId) => retrySources.current.get(assistantId)?.imageId ?? null,
+    getRetryImages: (assistantId) => retrySources.current.get(assistantId)?.imageIds ?? [],
     stop,
     clearError: () => setError(null),
     clearActivity: () => {

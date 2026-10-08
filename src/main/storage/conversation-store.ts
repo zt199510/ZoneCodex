@@ -23,7 +23,10 @@ type Existing = {
  */
 export function createConversationStore(directory: string): {
   load: () => Promise<LoadLibraryResult>
-  save: (value: unknown) => Promise<SaveConversationResult>
+  save: (
+    value: unknown,
+    beforeWrite?: (snapshot: ConversationLibrary) => Promise<void>
+  ) => Promise<SaveConversationResult>
 } {
   const file = join(directory, 'conversation.json')
   let queue: Promise<unknown> = Promise.resolve()
@@ -133,7 +136,10 @@ export function createConversationStore(directory: string): {
           }
         }
       }),
-    save: (value: unknown): Promise<SaveConversationResult> => {
+    save: (
+      value: unknown,
+      beforeWrite?: (snapshot: ConversationLibrary) => Promise<void>
+    ): Promise<SaveConversationResult> => {
       const snapshot = parseLibrary(value)
       if (!snapshot)
         return Promise.resolve({ ok: false, error: '会话库格式或长度不符合保存要求。' })
@@ -143,6 +149,7 @@ export function createConversationStore(directory: string): {
           // 旧版本必须先走 load 的备份迁移流程，save 不绕过它。
           if (existing && existing.sourceVersion !== snapshot.version)
             throw new Error('请先加载旧记录')
+          await beforeWrite?.(snapshot)
           await writeLibrary(snapshot)
           return { ok: true }
         } catch {

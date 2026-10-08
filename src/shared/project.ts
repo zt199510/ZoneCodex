@@ -1,5 +1,12 @@
 import { parseExecutionInfo, type ExecutionInfo } from './execution'
-import { parseImageReference } from './image-input'
+import {
+  parseImageReference,
+  parseImageReferences,
+  parseImageHistoryReferences,
+  maxRequestImages,
+  type ImageReference,
+  type ImageHistoryReference
+} from './image-input'
 
 export type ToolScope =
   | { kind: 'time'; workspaceId?: string; executionId?: string }
@@ -63,7 +70,9 @@ export type AgentRequestContext = {
   conversationId: string
   workspaceId?: string
   attachment?: { snapshotId: string; allowUpload: true }
-  image?: { imageId: string }
+  image?: ImageReference
+  images?: ImageReference[]
+  imageHistory?: ImageHistoryReference[]
   execution?: ExecutionInfo
 }
 
@@ -254,9 +263,12 @@ export function parseAgentRequestContext(value: unknown): AgentRequestContext | 
           key !== 'workspaceId' &&
           key !== 'attachment' &&
           key !== 'image' &&
+          key !== 'images' &&
+          key !== 'imageHistory' &&
           key !== 'execution'
       ) ||
-      (hasOwn(value, 'workspaceId') && !isAgentId(value.workspaceId))
+      (hasOwn(value, 'workspaceId') && !isAgentId(value.workspaceId)) ||
+      (hasOwn(value, 'image') && hasOwn(value, 'images'))
     )
       return null
     const context: AgentRequestContext = { conversationId: value.conversationId }
@@ -282,6 +294,21 @@ export function parseAgentRequestContext(value: unknown): AgentRequestContext | 
       if (!image) return null
       context.image = image
     }
+    if (hasOwn(value, 'images')) {
+      const images = parseImageReferences(value.images)
+      if (!images) return null
+      context.images = images
+    }
+    if (hasOwn(value, 'imageHistory')) {
+      const imageHistory = parseImageHistoryReferences(value.imageHistory)
+      if (!imageHistory) return null
+      context.imageHistory = imageHistory
+    }
+    if (
+      (context.images?.length ?? (context.image ? 1 : 0)) + (context.imageHistory?.length ?? 0) >
+      maxRequestImages
+    )
+      return null
     return context
   } catch {
     return null

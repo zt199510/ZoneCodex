@@ -1,5 +1,6 @@
 import { useCallback, useRef, useState } from 'react'
 import type { ChatMessage } from '../../../../shared/conversation'
+import { getMessageImages } from '../../../../shared/conversation'
 import type { ToolRun } from '../../../../shared/agent-history'
 import {
   createConversationTitle,
@@ -177,6 +178,7 @@ export function useConversation(): ConversationController {
   })
   const images = useImageSelection({
     conversationId: activeConversationId,
+    messages,
     operations,
     canChange,
     ensureConversation: async () => activeConversationId ?? createId(true)
@@ -215,9 +217,13 @@ export function useConversation(): ConversationController {
     getPermissions: executionPermissions.getState,
     observeExecution: executionPermissions.observe,
     isImageAvailable: images.isAvailable,
-    onImageAccepted: (messageId, imageId) => {
-      const image = images.getImage(imageId)
-      if (image) images.bind(messageId, image)
+    getImageDescriptor: (imageId) => images.getImage(imageId)?.image ?? null,
+    onImagesAccepted: (messageId, imageIds) => {
+      const group = imageIds.flatMap((imageId) => {
+        const image = images.getImage(imageId)
+        return image ? [image] : []
+      })
+      if (group.length === imageIds.length) images.bind(messageId, group)
     }
   })
 
@@ -244,11 +250,14 @@ export function useConversation(): ConversationController {
         if (accepted) markSent()
         return accepted
       }
-      const imageId = request.getRetryImage(messageId)
-      if (!imageId) return submit()
-      const image = images.getImage(imageId)
-      if (!image) return false
-      return images.withPrepared(image, submit)
+      const imageIds = request.getRetryImages(messageId)
+      if (!imageIds.length) return submit()
+      const group = imageIds.flatMap((imageId) => {
+        const image = images.getImage(imageId)
+        return image ? [image] : []
+      })
+      if (group.length !== imageIds.length) return false
+      return images.withPrepared(group, submit)
     },
     [canRetryMessage, images, markSent, request]
   )
@@ -268,15 +277,21 @@ export function useConversation(): ConversationController {
         return false
       }
       const editedMessage = active.messages[index]
-      const image = hasImageTurnNotice(editedMessage.content) ? images.getMessage(messageId) : null
-      if (hasImageTurnNotice(editedMessage.content) && !image) {
-        images.setError('原图片已失效，请重新添加图片后发送，原消息已保留。')
+      const descriptors = getMessageImages(editedMessage)
+      const imageTurn = descriptors.length > 0 || hasImageTurnNotice(editedMessage.content)
+      const group = imageTurn ? images.getMessage(messageId) : null
+      if (imageTurn && !group) {
+        images.setError(
+          descriptors.length > 0 && !Object.keys(images.messageErrors[messageId] ?? {}).length
+            ? '图片组正在恢复，请稍后再试。'
+            : '原图片组不可用，请重新添加图片后发送，原消息已保留。'
+        )
         return false
       }
-      const checkedContent = image ? stripImageTurnNotice(content).trim() : content
+      const checkedContent = group ? stripImageTurnNotice(content).trim() : content
       if (
         !checkedContent ||
-        (image ? appendImageTurnNotice(checkedContent) : checkedContent).length > 2000
+        (group ? appendImageTurnNotice(checkedContent, group.length) : checkedContent).length > 2000
       ) {
         images.setError('消息过长或为空，请缩短问题后再发送。')
         return false
@@ -320,14 +335,17 @@ export function useConversation(): ConversationController {
           },
           messageAttachments,
           undefined,
-          image?.image.imageId
+          group?.map((image) => image.image.imageId)
         )
         if (accepted) {
           commandReview.close()
           markSent()
           const keep = new Set([...keptIds])
           if (acceptedMessageId) keep.add(acceptedMessageId)
-          images.retainMessages(keep, image?.image.imageId)
+          images.retainMessages(
+            keep,
+            group?.map((image) => image.image.imageId)
+          )
         } else {
           updateConversation(active.id, (previous) => ({
             ...previous,
@@ -337,7 +355,7 @@ export function useConversation(): ConversationController {
         }
         return accepted
       }
-      return image ? images.withPrepared(image, submit) : submit()
+      return group ? images.withPrepared(group, submit) : submit()
     },
     [
       active,
@@ -608,9 +626,12 @@ export function useConversation(): ConversationController {
     getOperation: operations.getOperation,
     send: (content) => {
       if (!canSubmit) return false
-      const image = images.pending
-      const question = image ? stripImageTurnNotice(content).trim() : content.trim()
-      if (!question || (image ? appendImageTurnNotice(question) : question).length > 2000) {
+      const group = [...images.pending]
+      const question = group.length ? stripImageTurnNotice(content).trim() : content.trim()
+      if (
+        !question ||
+        (group.length ? appendImageTurnNotice(question, group.length) : question).length > 2000
+      ) {
         setConversationError('消息为空或超过长度上限，请缩短问题后再发送。')
         return false
       }
@@ -665,7 +686,7 @@ export function useConversation(): ConversationController {
             : undefined,
           pendingSelection?.files ?? [],
           undefined,
-          image?.image.imageId
+          group.map((image) => image.image.imageId)
         )
         if (!accepted && !active) setSnapshot(snapshot)
         if (accepted) {
@@ -683,7 +704,7 @@ export function useConversation(): ConversationController {
         }
         return accepted
       }
-      return image ? images.withPrepared(image, submit) : submit()
+      return group.length ? images.withPrepared(group, submit) : submit()
     },
     editAndSend,
     toolActivity: visibleActivity,

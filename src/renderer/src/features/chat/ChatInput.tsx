@@ -1,6 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
-import type { ClipboardEvent, FormEvent, KeyboardEvent, ReactNode } from 'react'
-import { MAX_IMAGE_BYTES } from '../../../../shared/image-input'
+import type { ClipboardEvent, DragEvent, FormEvent, KeyboardEvent, ReactNode } from 'react'
 import { Icon } from '../../components/ui/Icon'
 
 type ChatInputProps = {
@@ -14,7 +13,8 @@ type ChatInputProps = {
   tools: ReactNode
   attachments?: ReactNode
   draftKey?: string | null
-  onPasteImage?: (file: File) => void
+  onPasteImages?: (files: readonly File[]) => void
+  onDropImages?: (files: readonly File[]) => void
   onImageError?: (error: string) => void
 }
 
@@ -29,7 +29,8 @@ export function ChatInput({
   tools,
   attachments,
   draftKey,
-  onPasteImage,
+  onPasteImages,
+  onDropImages,
   onImageError
 }: ChatInputProps): React.JSX.Element {
   const textarea = useRef<HTMLTextAreaElement>(null)
@@ -38,6 +39,11 @@ export function ChatInput({
   const mounted = useRef(true)
   const submitting = useRef(false)
   const [preparing, setPreparing] = useState(false)
+  const dragContext = JSON.stringify([draftKey, disabled, isSending, preparing])
+  const [dragState, setDragState] = useState({ context: dragContext, active: false })
+  if (dragState.context !== dragContext) setDragState({ context: dragContext, active: false })
+  const draggingImages = dragState.context === dragContext && dragState.active
+  const dragDepth = useRef(0)
   const latestDraft = useRef({ value, key: draftKey, version: 0 })
   useEffect(() => {
     mounted.current = true
@@ -66,6 +72,12 @@ export function ChatInput({
     }
     wasSending.current = isSending
   }, [disabled, isSending])
+  useEffect(() => {
+    dragDepth.current = 0
+  }, [dragContext])
+  function setDraggingImages(active: boolean): void {
+    setDragState({ context: dragContext, active })
+  }
   function submit(event: FormEvent): void {
     event.preventDefault()
     if (disabled || submitting.current || !value.trim() || value.length > maxLength) return
@@ -95,7 +107,7 @@ export function ChatInput({
     }
   }
   function onPaste(event: ClipboardEvent<HTMLTextAreaElement>): void {
-    if (!onPasteImage) return
+    if (!onPasteImages) return
     const images = Array.from(event.clipboardData.items).filter(
       (item) => item.kind === 'file' && item.type.startsWith('image/')
     )
@@ -105,20 +117,48 @@ export function ChatInput({
       onImageError?.('请等待当前操作结束后再添加图片。')
       return
     }
-    if (images.length !== 1) {
-      onImageError?.('每条消息只支持一张图片，请分次添加。')
+    const files = images.map((item) => item.getAsFile())
+    if (files.some((file) => !file)) {
+      onImageError?.('无法读取粘贴图片，请重新添加。')
       return
     }
-    const file = images[0].getAsFile()
-    if (!file || !['image/png', 'image/jpeg'].includes(file.type)) {
-      onImageError?.('只支持 PNG 或 JPEG 图片。')
+    onPasteImages(files as File[])
+  }
+  function hasFiles(event: DragEvent<HTMLFormElement>): boolean {
+    return Array.from(event.dataTransfer.types).includes('Files')
+  }
+  function onDragEnter(event: DragEvent<HTMLFormElement>): void {
+    if (!onDropImages || !hasFiles(event)) return
+    event.preventDefault()
+    dragDepth.current += 1
+    if (!disabled && !isSending && !submitting.current) setDraggingImages(true)
+  }
+  function onDragOver(event: DragEvent<HTMLFormElement>): void {
+    if (!onDropImages || !hasFiles(event)) return
+    event.preventDefault()
+    event.dataTransfer.dropEffect = disabled || isSending || submitting.current ? 'none' : 'copy'
+  }
+  function onDragLeave(event: DragEvent<HTMLFormElement>): void {
+    if (!dragDepth.current) return
+    event.preventDefault()
+    dragDepth.current = Math.max(0, dragDepth.current - 1)
+    if (!dragDepth.current) setDraggingImages(false)
+  }
+  function onDrop(event: DragEvent<HTMLFormElement>): void {
+    if (!onDropImages || !hasFiles(event)) return
+    event.preventDefault()
+    dragDepth.current = 0
+    setDraggingImages(false)
+    if (disabled || isSending || submitting.current) {
+      onImageError?.('请等待当前操作结束后再添加图片。')
       return
     }
-    if (!file.size || file.size > MAX_IMAGE_BYTES) {
-      onImageError?.('图片不能为空，单张图片最多 5 MiB。')
+    const files = Array.from(event.dataTransfer.files)
+    if (!files.length) {
+      onImageError?.('无法读取拖入图片，请重新添加。')
       return
     }
-    onPasteImage(file)
+    onDropImages(files)
   }
   function onKeyDown(event: KeyboardEvent<HTMLTextAreaElement>): void {
     // 中文输入法正在确认候选词时，Enter 不能触发发送。
@@ -134,8 +174,20 @@ export function ChatInput({
     }
   }
   return (
-    <form className="composer" onSubmit={submit}>
+    <form
+      className={`composer${draggingImages ? ' composer-image-drop' : ''}`}
+      onSubmit={submit}
+      onDragEnter={onDragEnter}
+      onDragOver={onDragOver}
+      onDragLeave={onDragLeave}
+      onDrop={onDrop}
+    >
       {attachments}
+      {draggingImages && (
+        <div className="composer-drop-hint" aria-live="polite">
+          松开以添加 PNG/JPEG 图片
+        </div>
+      )}
       <label className="sr-only" htmlFor="chat-input">
         发送消息
       </label>

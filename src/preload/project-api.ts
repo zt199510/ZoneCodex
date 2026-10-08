@@ -12,6 +12,7 @@ import { parsePreviewChangeRequest, parsePreviewChangeResult } from '../shared/c
 import { parseFileViewRequest, parseFileViewResult, sameFileViewRequest } from '../shared/file-view'
 import {
   parseImageImportRequest,
+  parseImageImportResult,
   parseImageSelectionResult,
   parseImagePreviewResult,
   parseImagePreparationResult
@@ -50,7 +51,7 @@ export const projectAPI: Pick<
   importImage: async (conversationId, request) => {
     const checked = parseImageImportRequest(request)
     if (!isAgentId(conversationId) || !checked) throw new Error('图片导入参数无效')
-    const result = parseImageSelectionResult(
+    const result = parseImageImportResult(
       await ipcRenderer.invoke('image:import', conversationId, checked)
     )
     if (!result) throw new Error('图片导入结果无效')

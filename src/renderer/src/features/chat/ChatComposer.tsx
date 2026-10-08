@@ -5,7 +5,7 @@ import { ComposerPermissions } from '../execution/ComposerPermissions'
 import { ComposerAttachments } from '../project/ComposerAttachments'
 import { AttachmentCards } from '../project/AttachmentCards'
 import { ImageAttachment } from '../project/ImageAttachment'
-import { IMAGE_TURN_NOTICE, type ImageDescriptor } from '../../../../shared/image-input'
+import { appendImageTurnNotice, type ImageDescriptor } from '../../../../shared/image-input'
 import { ChatInput } from './ChatInput'
 
 export function ChatComposer({
@@ -42,11 +42,21 @@ export function ChatComposer({
         }}
         disabled={!conversation.canSend || Boolean(images?.busy)}
         isSending={operation === 'generating'}
-        maxLength={2000 - (images?.pending ? IMAGE_TURN_NOTICE.length : 0)}
-        onPasteImage={
+        maxLength={
+          2000 -
+          (images?.pending.length ? appendImageTurnNotice('', images.pending.length).length : 0)
+        }
+        onPasteImages={
           images
-            ? (file) => {
-                void images.paste(file)
+            ? (files) => {
+                void images.paste(files)
+              }
+            : undefined
+        }
+        onDropImages={
+          images
+            ? (files) => {
+                void images.paste(files)
               }
             : undefined
         }
@@ -84,18 +94,20 @@ export function ChatComposer({
               disabled={!conversation.canEdit}
               onRemove={conversation.removeFile}
             />
-            {images?.pending && (
-              <div className="composer-image">
-                <ImageAttachment
-                  image={images.pending.image}
-                  src={images.pending.thumbnailSrc}
-                  disabled={!conversation.canEdit || images.busy}
-                  onPreview={onPreviewImage}
-                  onRemove={() => {
-                    void images.remove()
-                  }}
-                />
-                <small className="composer-image-notice">图片不随聊天历史保存。</small>
+            {Boolean(images?.pending.length) && (
+              <div className="composer-image" aria-label="待发送图片">
+                {images?.pending.map((view) => (
+                  <ImageAttachment
+                    key={view.image.imageId}
+                    image={view.image}
+                    src={view.thumbnailSrc}
+                    disabled={!conversation.canEdit || images.busy}
+                    onPreview={onPreviewImage}
+                    onRemove={() => {
+                      void images.remove(view.image.imageId)
+                    }}
+                  />
+                ))}
               </div>
             )}
           </>

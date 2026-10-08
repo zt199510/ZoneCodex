@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import type { ChatMessage } from '../../../../shared/conversation'
+import { getMessageImages, type ChatMessage } from '../../../../shared/conversation'
 import type { ToolRun } from '../../../../shared/agent-history'
 import type { MessageCommandProposal } from '../../../../shared/command-proposal'
 import type { MessageChangeProposal } from '../../../../shared/change-proposal'
@@ -14,7 +14,8 @@ import { MessageChangeProposalCard, MessageCommandProposalCard } from './Message
 import { ImageAttachment } from '../project/ImageAttachment'
 import type { RuntimeImage } from '../project/useImageSelection'
 import {
-  IMAGE_TURN_NOTICE,
+  appendImageTurnNotice,
+  getImageTurnNoticeCount,
   hasImageTurnNotice,
   stripImageTurnNotice,
   type ImageDescriptor
@@ -39,6 +40,7 @@ export function MessageList({
   canRetryAssistant,
   onOpenFile,
   messageImages = {},
+  messageImageErrors = {},
   onPreviewImage
 }: {
   messages: readonly ChatMessage[]
@@ -58,7 +60,8 @@ export function MessageList({
   onRetryAssistant?: (message: ChatMessage) => void
   canRetryAssistant?: (message: ChatMessage) => boolean
   onOpenFile?: OpenFileView
-  messageImages?: Readonly<Record<string, RuntimeImage>>
+  messageImages?: Readonly<Record<string, readonly RuntimeImage[]>>
+  messageImageErrors?: Readonly<Record<string, Readonly<Record<string, string>>>>
   onPreviewImage?: (image: ImageDescriptor, trigger: HTMLButtonElement) => void
 }): React.JSX.Element {
   const [editingId, setEditingId] = useState<string | null>(null)
@@ -67,14 +70,25 @@ export function MessageList({
   return (
     <ol className="message-list" aria-label="聊天记录">
       {messages.map((message) => {
-        const imageTurn = message.role === 'user' && hasImageTurnNotice(message.content)
+        const descriptors = message.role === 'user' ? getMessageImages(message) : []
+        const imageTurn =
+          message.role === 'user' && (descriptors.length > 0 || hasImageTurnNotice(message.content))
         const userContent = imageTurn ? stripImageTurnNotice(message.content) : message.content
-        const image = message.role === 'user' ? messageImages[message.id] : undefined
+        const images = message.role === 'user' ? (messageImages[message.id] ?? []) : []
+        const imageErrors = messageImageErrors[message.id] ?? {}
+        const unavailable = descriptors.some(
+          (descriptor) => !images.some((view) => view.image.imageId === descriptor.imageId)
+        )
         const imageNotice = imageTurn
-          ? image
-            ? '图片不随聊天历史保存；再次询问请重新添加。'
-            : '图片已失效；再次询问请重新添加。'
+          ? descriptors.length
+            ? unavailable
+              ? Object.keys(imageErrors).length
+                ? '图片组中有不可用图片，请重新添加后发送。'
+                : '正在恢复图片组…'
+              : undefined
+            : '旧图片未保存；再次询问请重新添加。'
           : undefined
+        const imageCount = descriptors.length || getImageTurnNoticeCount(message.content) || 1
         const entries = message.role === 'assistant' ? toolActivity[message.id] : undefined
         const command = message.role === 'assistant' ? commandProposals[message.id] : undefined
         const activity = entries?.length ? entries : undefined
@@ -153,7 +167,9 @@ export function MessageList({
               <MessageEditor
                 initialValue={userContent}
                 imageNotice={imageNotice}
-                maxLength={editMaxLength - (imageTurn ? IMAGE_TURN_NOTICE.length : 0)}
+                maxLength={
+                  editMaxLength - (imageTurn ? appendImageTurnNotice('', imageCount).length : 0)
+                }
                 disabled={editDisabled}
                 onCancel={() => setEditingId(null)}
                 onSend={(content) => onSendEditedMessage(message.id, content)}
@@ -162,13 +178,24 @@ export function MessageList({
               <div
                 className={`message-content${message.role === 'assistant' ? ' message-answer' : ''}`}
               >
-                {image && (
-                  <ImageAttachment
-                    image={image.image}
-                    src={image.thumbnailSrc}
-                    compact
-                    onPreview={onPreviewImage}
-                  />
+                {descriptors.length > 0 && (
+                  <div className="message-images" aria-label="本轮图片">
+                    {descriptors.map((descriptor) => {
+                      const view = images.find((item) => item.image.imageId === descriptor.imageId)
+                      return (
+                        <ImageAttachment
+                          key={descriptor.imageId}
+                          image={descriptor}
+                          src={view?.thumbnailSrc}
+                          notice={
+                            view ? undefined : (imageErrors[descriptor.imageId] ?? '正在恢复图片…')
+                          }
+                          compact
+                          onPreview={onPreviewImage}
+                        />
+                      )
+                    })}
+                  </div>
                 )}
                 {message.role === 'user' &&
                   message.attachments &&
@@ -202,12 +229,8 @@ export function MessageList({
                   ) : message.role === 'user' ? (
                     <>
                       <UserMessageContent content={userContent} onOpenFile={onOpenMessageFile} />
-                      {imageNotice && (
-                        <p
-                          className={`message-image-notice${image ? '' : ' message-image-expired'}`}
-                        >
-                          {imageNotice}
-                        </p>
+                      {imageNotice && !descriptors.length && (
+                        <p className="message-image-notice message-image-expired">{imageNotice}</p>
                       )}
                     </>
                   ) : (

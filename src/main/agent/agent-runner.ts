@@ -9,13 +9,26 @@ import {
   type ToolScope
 } from '../../shared/project'
 import { sameExecutionInfo } from '../../shared/execution'
-import { hasImageTurnNotice, stripImageTurnNotice } from '../../shared/image-input'
+import {
+  getImageTurnNoticeCount,
+  stripImageTurnNotice,
+  maxRequestImageBytes,
+  maxRequestImages
+} from '../../shared/image-input'
 import { isTaskId } from '../../shared/task'
 import { AgentError } from '../errors'
 import { runToolLoop } from './tool-loop'
 import { createLiveResponse } from '../model/response-client'
-import { withImageInput } from '../model/image-input'
-import { captureImageAccess, hasImageSelection, type CapturedImage } from '../project/image-access'
+import { withConversationImageInput, type CapturedImageInput } from '../model/image-input'
+import {
+  captureImageAccess,
+  captureSavedImageAccess,
+  bindImageMessageGroup,
+  verifyImageRequestGroup,
+  verifyImageMessageGroup,
+  hasImageSelection,
+  type CapturedImage
+} from '../project/image-access'
 import { buildAgentRequest } from './agent-instructions'
 import { createAgentToolExecutor } from './agent-tools'
 import { captureProjectAccess, hasProjectSelection } from '../project/attachment-access'
@@ -37,7 +50,7 @@ import {
 } from '../execution/action-authorization'
 import { inspectWindowsCommandBackend } from '../execution/windows-command-backend'
 
-type Job = { id: string; controller: AbortController; snapshotId?: string; imageId?: string }
+type Job = { id: string; controller: AbortController; snapshotId?: string; imageIds: Set<string> }
 const jobs = new Map<number, Job>()
 
 export function hasAgentJob(windowId: number): boolean {
@@ -51,7 +64,7 @@ export function abortProjectJob(windowId: number, snapshotId: string): void {
 
 export function abortImageJob(windowId: number, imageId: string): void {
   const job = jobs.get(windowId)
-  if (job?.imageId === imageId) job.controller.abort()
+  if (job?.imageIds.has(imageId)) job.controller.abort()
 }
 
 export function isAgentBusy(
@@ -104,12 +117,18 @@ export async function runAgentRequest(
     return { status: 'error', error: '请先完成当前操作', trace }
   }
   const controller = new AbortController()
-  let capturedImage: CapturedImage | null = null
+  const imageReferences =
+    checkedContext.images ?? (checkedContext.image ? [checkedContext.image] : [])
+  const capturedImages: CapturedImage[] = []
+  const historyImages: CapturedImageInput[] = []
   const job: Job = {
     id,
     controller,
     snapshotId: checkedContext.attachment?.snapshotId,
-    imageId: checkedContext.image?.imageId
+    imageIds: new Set([
+      ...imageReferences.map((image) => image.imageId),
+      ...(checkedContext.imageHistory ?? []).map((image) => image.imageId)
+    ])
   }
   const cancel = (): void => controller.abort()
   jobs.set(windowId, job)
@@ -118,18 +137,40 @@ export async function runAgentRequest(
   sender.once('destroyed', cancel)
   try {
     if (
-      Boolean(checkedContext.image) !== hasImageTurnNotice(prompt) ||
+      getImageTurnNoticeCount(prompt) !== (imageReferences.length || null) ||
+      imageReferences.length + (checkedContext.imageHistory?.length ?? 0) > maxRequestImages ||
       !stripImageTurnNotice(prompt)
     )
       return { status: 'error', error: '图片与本轮问题不一致，请重新添加后发送', trace }
-    if (checkedContext.image) {
-      capturedImage = captureImageAccess(
+    if (
+      imageReferences.length &&
+      !verifyImageRequestGroup(
         windowId,
         checkedContext.conversationId,
-        checkedContext.image.imageId
+        imageReferences.map((image) => image.imageId)
       )
-      if (!capturedImage)
-        return { status: 'error', error: '原图片未确认或已失效，请重新添加后发送', trace }
+    )
+      return { status: 'error', error: '原图片组与本轮请求不一致，请重新添加后发送', trace }
+    for (const reference of imageReferences) {
+      const captured = captureImageAccess(
+        windowId,
+        checkedContext.conversationId,
+        reference.imageId
+      )
+      if (!captured)
+        return { status: 'error', error: '原图片组未全部确认或已失效，请重新添加后发送', trace }
+      capturedImages.push(captured)
+    }
+    if (imageReferences.length && imageReferences[0].messageId) {
+      if (
+        !bindImageMessageGroup(
+          windowId,
+          checkedContext.conversationId,
+          imageReferences.map((image) => image.imageId),
+          imageReferences[0].messageId
+        )
+      )
+        return { status: 'error', error: '图片组与用户消息不一致，请重新发送', trace }
     }
     const workspaceId = checkedContext.workspaceId
     const workspace =
@@ -201,9 +242,54 @@ export async function runAgentRequest(
     const projectExecutor = projectSnapshot
       ? createChangeProposalExecutor(projectSnapshot, checkedContext.conversationId)
       : undefined
-    const checkedHistory = parseToolHistory(history, checkedScope)
+    const checkedHistory = parseToolHistory(history, checkedScope, checkedContext.imageHistory)
     const executeCommandProposal = createCommandProposalExecutor()
     if (!checkedHistory) return { status: 'error', error: '工具历史参数无效', trace }
+    let imageBytes = capturedImages.reduce((total, captured) => total + captured.image.bytes, 0)
+    const historicalGroups = new Map<number, { messageId: string; imageIds: string[] }>()
+    for (const reference of checkedContext.imageHistory ?? []) {
+      const group = historicalGroups.get(reference.index)
+      if (group) group.imageIds.push(reference.imageId)
+      else
+        historicalGroups.set(reference.index, {
+          messageId: reference.messageId,
+          imageIds: [reference.imageId]
+        })
+    }
+    for (const group of historicalGroups.values()) {
+      if (
+        !(await verifyImageMessageGroup(
+          windowId,
+          checkedContext.conversationId,
+          group.imageIds,
+          group.messageId
+        ))
+      )
+        return { status: 'error', error: '历史图片组与原消息不一致，请重新添加后发送', trace }
+    }
+    for (const reference of checkedContext.imageHistory ?? []) {
+      const captured = await captureSavedImageAccess(
+        windowId,
+        checkedContext.conversationId,
+        reference.imageId,
+        reference.messageId
+      )
+      if (!captured)
+        return { status: 'error', error: '历史图片不可用，请重新添加图片后发送', trace }
+      historyImages.push({
+        index: reference.index,
+        prompt: checkedHistory[reference.index].content as string,
+        captured
+      })
+      controller.signal.throwIfAborted()
+      imageBytes += captured.image.bytes
+      if (imageBytes > maxRequestImageBytes)
+        return {
+          status: 'error',
+          error: '本次图片上下文超过20 MiB，请新建会话后添加所需图片',
+          trace
+        }
+    }
     if (
       jobs.get(windowId) !== job ||
       isPreparationActive(windowId) ||
@@ -238,7 +324,8 @@ export async function runAgentRequest(
     try {
       appendTrace('模式：真实模型 SSE')
       const assertWorkspaceAccess = (): boolean => {
-        capturedImage?.assertCurrent()
+        for (const captured of capturedImages) captured.assertCurrent()
+        for (const image of historyImages) image.captured.assertCurrent()
         return (
           !controller.signal.aborted && executionStillCurrent(windowId, checkedContext, execution)
         )
@@ -252,7 +339,7 @@ export async function runAgentRequest(
         workspaceId,
         execution: execution.info,
         commandSandboxAvailable: commandBackend !== null,
-        imagePresent: capturedImage !== null
+        imagePresent: capturedImages.length > 0 || historyImages.length > 0
       })
       const authorizationOptions: Parameters<typeof createWorkspaceAuthorization>[0] = {
         windowId,
@@ -392,10 +479,17 @@ export async function runAgentRequest(
       const liveResponse = createLiveResponse(agentRequest.tools, agentRequest.instructions)
       const completed = await runToolLoop(
         prompt.trim(),
-        capturedImage
-          ? withImageInput(
+        capturedImages.length || historyImages.length
+          ? withConversationImageInput(
               liveResponse,
-              capturedImage,
+              [
+                ...historyImages,
+                ...capturedImages.map((captured) => ({
+                  index: checkedHistory.length,
+                  prompt: prompt.trim(),
+                  captured
+                }))
+              ],
               checkedHistory.length,
               prompt.trim(),
               assertWorkspaceAccess
@@ -480,7 +574,8 @@ export async function runAgentRequest(
         }
   } finally {
     controller.abort()
-    capturedImage?.finish()
+    for (const captured of capturedImages) captured.finish()
+    for (const image of historyImages) image.captured.finish()
     if (jobs.get(windowId) === job) jobs.delete(windowId)
     sender.removeListener('did-start-loading', cancel)
     sender.removeListener('render-process-gone', cancel)

@@ -1,3 +1,10 @@
+import {
+  getImageTurnNoticeCount,
+  parseImageDescriptor,
+  parseImageDescriptors,
+  type ImageDescriptor
+} from './image-input'
+
 // 每轮用户消息随附的安全展示元数据；不包含文件正文、绝对根目录或授权标识。
 export type ChatAttachment = {
   path: string
@@ -12,6 +19,16 @@ export type ChatMessage = {
   content: string
   status: 'pending' | 'complete' | 'failed' | 'cancelled'
   attachments?: ChatAttachment[]
+  image?: ImageDescriptor
+  images?: ImageDescriptor[]
+}
+
+export function getMessageImages(
+  message: Pick<ChatMessage, 'image' | 'images'>
+): ImageDescriptor[] {
+  if (message.image !== undefined && message.images !== undefined)
+    throw new Error('消息包含冲突的图片表示')
+  return message.images ?? (message.image ? [message.image] : [])
 }
 // 聊天消息快照类型
 export type ConversationSnapshot = {
@@ -130,6 +147,25 @@ export function parseSnapshot(value: unknown): ConversationSnapshot | null {
     if (content.length > 100_000 || (role === 'user' && content.length > 4000)) return null
     if (status === 'complete' && !content.trim()) return null
     let attachments: ChatAttachment[] | undefined
+    let image: ImageDescriptor | undefined
+    let images: ImageDescriptor[] | undefined
+    if (
+      Object.prototype.hasOwnProperty.call(item, 'image') &&
+      Object.prototype.hasOwnProperty.call(item, 'images')
+    )
+      return null
+    if (Object.prototype.hasOwnProperty.call(item, 'image')) {
+      if (role !== 'user' || getImageTurnNoticeCount(content) !== 1) return null
+      const parsed = parseImageDescriptor(item.image)
+      if (!parsed) return null
+      image = parsed
+    }
+    if (Object.prototype.hasOwnProperty.call(item, 'images')) {
+      const parsed = parseImageDescriptors(item.images)
+      if (role !== 'user' || !parsed || getImageTurnNoticeCount(content) !== parsed.length)
+        return null
+      images = parsed
+    }
     if (Object.prototype.hasOwnProperty.call(item, 'attachments')) {
       if (role !== 'user') return null
       const parsed = parseAttachments(item.attachments)
@@ -139,7 +175,15 @@ export function parseSnapshot(value: unknown): ConversationSnapshot | null {
     total += content.length
     if (total > 1_000_000) return null
     ids.add(id)
-    messages.push({ id, role, content, status, ...(attachments ? { attachments } : {}) })
+    messages.push({
+      id,
+      role,
+      content,
+      status,
+      ...(attachments ? { attachments } : {}),
+      ...(image ? { image } : {}),
+      ...(images ? { images } : {})
+    })
   }
   return { version: 1, messages, workspacePath }
 }

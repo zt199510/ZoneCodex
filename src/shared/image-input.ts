@@ -3,11 +3,15 @@ import { isAgentId } from './agent'
 export const MAX_IMAGE_BYTES = 5 * 1024 * 1024
 export const maxImageBytes = MAX_IMAGE_BYTES
 export const maxWindowImageBytes = 20 * 1024 * 1024
+export const maxRequestImageBytes = maxWindowImageBytes
+export const maxImagesPerMessage = 8
+export const maxRequestImages = 100
 export const maxImageDimension = 4096
 export const maxImagePixels = 16_000_000
 export const maxThumbnailBytes = 256 * 1024
 export const imageThumbnailDimension = 160
-export const IMAGE_TURN_NOTICE =
+export const IMAGE_TURN_NOTICE = '\n\n[本条消息附有一张图片，图片随会话保存。]'
+const LEGACY_IMAGE_TURN_NOTICE =
   '\n\n[本轮附有一张临时图片；图片不随历史保存，重新问图请再次添加。]'
 
 export type ImageDescriptor = {
@@ -19,8 +23,13 @@ export type ImageDescriptor = {
   height: number
 }
 export type ImageImportRequest = { bytes: Uint8Array; name: string }
-export type ImageReference = { imageId: string }
+export type ImageReference = { imageId: string; messageId?: string }
+export type ImageHistoryReference = { index: number; messageId: string; imageId: string }
 export type ImageSelectionResult =
+  | { status: 'selected'; images: ImageDescriptor[] }
+  | { status: 'cancelled' }
+  | { status: 'error'; error: string }
+export type ImageImportResult =
   | { status: 'selected'; image: ImageDescriptor }
   | { status: 'cancelled' }
   | { status: 'error'; error: string }
@@ -47,6 +56,18 @@ function exact(value: Record<string, unknown>, keys: readonly string[]): boolean
 
 function integer(value: unknown, max: number): value is number {
   return typeof value === 'number' && Number.isInteger(value) && value > 0 && value <= max
+}
+
+function imageArray(value: unknown, max: number): value is unknown[] {
+  if (!Array.isArray(value) || value.length < 1 || value.length > max) return false
+  const keys = Reflect.ownKeys(value)
+  if (keys.length !== value.length + 1) return false
+  return keys.every((key) => {
+    if (key === 'length') return true
+    if (typeof key !== 'string' || !/^(0|[1-9]\d*)$/.test(key)) return false
+    const descriptor = Object.getOwnPropertyDescriptor(value, key)
+    return descriptor?.enumerable === true && Object.hasOwn(descriptor, 'value')
+  })
 }
 
 export function validImageName(value: unknown): value is string {
@@ -91,9 +112,104 @@ export function parseImageDescriptor(value: unknown): ImageDescriptor | null {
 
 export function parseImageReference(value: unknown): ImageReference | null {
   try {
-    return record(value) && exact(value, ['imageId']) && isAgentId(value.imageId)
-      ? { imageId: value.imageId }
-      : null
+    if (
+      !record(value) ||
+      !exact(value, Object.hasOwn(value, 'messageId') ? ['imageId', 'messageId'] : ['imageId']) ||
+      !isAgentId(value.imageId) ||
+      (Object.hasOwn(value, 'messageId') && !isAgentId(value.messageId))
+    )
+      return null
+    return {
+      imageId: value.imageId,
+      ...(typeof value.messageId === 'string' ? { messageId: value.messageId } : {})
+    }
+  } catch {
+    return null
+  }
+}
+
+export function parseImageDescriptors(value: unknown): ImageDescriptor[] | null {
+  try {
+    if (!imageArray(value, maxImagesPerMessage)) return null
+    const images: ImageDescriptor[] = []
+    const identities = new Set<string>()
+    let totalBytes = 0
+    for (const item of value) {
+      const image = parseImageDescriptor(item)
+      if (!image || identities.has(image.imageId)) return null
+      totalBytes += image.bytes
+      if (totalBytes > maxRequestImageBytes) return null
+      identities.add(image.imageId)
+      images.push(image)
+    }
+    return images
+  } catch {
+    return null
+  }
+}
+
+export function parseImageReferences(value: unknown): ImageReference[] | null {
+  try {
+    if (!imageArray(value, maxImagesPerMessage)) return null
+    const references: ImageReference[] = []
+    const identities = new Set<string>()
+    for (const item of value) {
+      const reference = parseImageReference(item)
+      if (
+        !reference ||
+        identities.has(reference.imageId) ||
+        (references.length > 0 && reference.messageId !== references[0].messageId)
+      )
+        return null
+      identities.add(reference.imageId)
+      references.push(reference)
+    }
+    return references
+  } catch {
+    return null
+  }
+}
+
+export function parseImageHistoryReferences(value: unknown): ImageHistoryReference[] | null {
+  try {
+    if (!imageArray(value, maxRequestImages)) return null
+    const messages = new Set<string>()
+    const identities = new Set<string>()
+    const references: ImageHistoryReference[] = []
+    let previousIndex = -1
+    let messageId: string | undefined
+    let groupCount = 0
+    for (const item of value) {
+      if (
+        !record(item) ||
+        !exact(item, ['index', 'messageId', 'imageId']) ||
+        typeof item.index !== 'number' ||
+        !Number.isInteger(item.index) ||
+        item.index < 0 ||
+        item.index >= 300 ||
+        item.index < previousIndex ||
+        !isAgentId(item.messageId) ||
+        !isAgentId(item.imageId)
+      )
+        return null
+      if (item.index !== previousIndex) {
+        if (messages.has(item.messageId)) return null
+        messages.add(item.messageId)
+        identities.clear()
+        messageId = item.messageId
+        previousIndex = item.index
+        groupCount = 0
+      }
+      if (
+        item.messageId !== messageId ||
+        identities.has(item.imageId) ||
+        ++groupCount > maxImagesPerMessage
+      )
+        return null
+      identities.add(item.imageId)
+      references.push({ index: item.index, messageId: item.messageId, imageId: item.imageId })
+    }
+    return references
   } catch {
     return null
   }
@@ -125,6 +241,21 @@ function errorResult(value: Record<string, unknown>): { status: 'error'; error: 
 }
 
 export function parseImageSelectionResult(value: unknown): ImageSelectionResult | null {
+  try {
+    if (!record(value)) return null
+    if (value.status === 'error') return errorResult(value)
+    if (value.status === 'cancelled')
+      return exact(value, ['status']) ? { status: 'cancelled' } : null
+    const images = parseImageDescriptors(value.images)
+    return value.status === 'selected' && exact(value, ['status', 'images']) && images
+      ? { status: 'selected', images }
+      : null
+  } catch {
+    return null
+  }
+}
+
+export function parseImageImportResult(value: unknown): ImageImportResult | null {
   try {
     if (!record(value)) return null
     if (value.status === 'error') return errorResult(value)
@@ -196,14 +327,30 @@ export function parseImagePreviewResult(value: unknown): ImagePreviewResult | nu
   }
 }
 
+export function getImageTurnNoticeCount(text: string): number | null {
+  if (text.includes(IMAGE_TURN_NOTICE.trim()) || text.includes(LEGACY_IMAGE_TURN_NOTICE.trim()))
+    return 1
+  const match = text.match(/\[本条消息附有([1-8])张图片，图片随会话保存。\]/)
+  return match ? Number(match[1]) : null
+}
+
 export function hasImageTurnNotice(text: string): boolean {
-  return text.includes(IMAGE_TURN_NOTICE.trim())
+  return getImageTurnNoticeCount(text) !== null
 }
 
 export function stripImageTurnNotice(text: string): string {
-  return text.split(IMAGE_TURN_NOTICE.trim()).join('').trim()
+  return text
+    .replace(/\[本条消息附有\d+张图片，图片随会话保存。\]/g, '')
+    .split(IMAGE_TURN_NOTICE.trim())
+    .join('')
+    .split(LEGACY_IMAGE_TURN_NOTICE.trim())
+    .join('')
+    .trim()
 }
 
-export function appendImageTurnNotice(text: string): string {
-  return `${stripImageTurnNotice(text)}${IMAGE_TURN_NOTICE}`
+export function appendImageTurnNotice(text: string, count = 1): string {
+  if (!integer(count, maxImagesPerMessage)) throw new Error('图片数量超过本条消息上限')
+  const notice =
+    count === 1 ? IMAGE_TURN_NOTICE : `\n\n[本条消息附有${count}张图片，图片随会话保存。]`
+  return `${stripImageTurnNotice(text)}${notice}`
 }

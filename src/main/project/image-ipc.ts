@@ -69,7 +69,7 @@ export function attachImageAccessCleanup(window: BrowserWindow): void {
     remove()
   })
   window.once('closed', () => {
-    cleanup()
+    cleanupImageAccess(window.id, true)
     remove()
   })
 }

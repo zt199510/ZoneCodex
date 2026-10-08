@@ -5,6 +5,7 @@ export function ImageAttachment({
   src,
   disabled = false,
   compact = false,
+  notice,
   onPreview,
   onRemove
 }: {
@@ -12,6 +13,7 @@ export function ImageAttachment({
   src?: string | null
   disabled?: boolean
   compact?: boolean
+  notice?: string
   onPreview?: (image: ImageDescriptor, trigger: HTMLButtonElement) => void
   onRemove?: () => void
 }): React.JSX.Element {
@@ -32,7 +34,7 @@ export function ImageAttachment({
         {trustedSrc ? (
           <img src={trustedSrc} alt={image.name} decoding="async" />
         ) : (
-          <span className="image-attachment-placeholder">图片预览不可用</span>
+          <span className="image-attachment-placeholder">{notice ?? '图片预览不可用'}</span>
         )}
       </button>
       <div className="image-attachment-copy">
