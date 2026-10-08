@@ -10,6 +10,12 @@ import {
 } from '../shared/project'
 import { parsePreviewChangeRequest, parsePreviewChangeResult } from '../shared/change-preview'
 import { parseFileViewRequest, parseFileViewResult, sameFileViewRequest } from '../shared/file-view'
+import {
+  parseImageImportRequest,
+  parseImageSelectionResult,
+  parseImagePreviewResult,
+  parseImagePreparationResult
+} from '../shared/image-input'
 
 export const projectAPI: Pick<
   AppAPI,
@@ -26,7 +32,60 @@ export const projectAPI: Pick<
   | 'previewChange'
   | 'revokeProjectFiles'
   | 'readFileView'
+  | 'selectImage'
+  | 'importImage'
+  | 'readImagePreview'
+  | 'prepareImage'
+  | 'revokeImage'
+  | 'revokeConversationImages'
 > = {
+  selectImage: async (conversationId) => {
+    if (!isAgentId(conversationId)) throw new Error('会话 ID 格式不正确')
+    const result = parseImageSelectionResult(
+      await ipcRenderer.invoke('image:select', conversationId)
+    )
+    if (!result) throw new Error('图片选择结果无效')
+    return result
+  },
+  importImage: async (conversationId, request) => {
+    const checked = parseImageImportRequest(request)
+    if (!isAgentId(conversationId) || !checked) throw new Error('图片导入参数无效')
+    const result = parseImageSelectionResult(
+      await ipcRenderer.invoke('image:import', conversationId, checked)
+    )
+    if (!result) throw new Error('图片导入结果无效')
+    return result
+  },
+  readImagePreview: async (conversationId, imageId) => {
+    if (!isAgentId(conversationId) || !isAgentId(imageId)) throw new Error('图片参数无效')
+    const result = parseImagePreviewResult(
+      await ipcRenderer.invoke('image:preview', conversationId, imageId)
+    )
+    if (!result || (result.status === 'ready' && result.image.imageId !== imageId))
+      throw new Error('图片预览结果无效')
+    return result
+  },
+  prepareImage: async (conversationId, imageId) => {
+    if (!isAgentId(conversationId) || !isAgentId(imageId)) throw new Error('图片参数无效')
+    const result = parseImagePreparationResult(
+      await ipcRenderer.invoke('image:prepare', conversationId, imageId)
+    )
+    if (!result || (result.status === 'ready' && result.image.imageId !== imageId))
+      throw new Error('图片准备结果无效')
+    return result
+  },
+  revokeImage: async (conversationId, imageId) => {
+    if (!isAgentId(conversationId) || !isAgentId(imageId)) return false
+    const result: unknown = await ipcRenderer.invoke('image:revoke', conversationId, imageId)
+    if (typeof result !== 'boolean') throw new Error('图片移除结果无效')
+    return result
+  },
+  revokeConversationImages: async (conversationId) => {
+    if (!isAgentId(conversationId)) return false
+    const result: unknown = await ipcRenderer.invoke('image:revoke-conversation', conversationId)
+    if (typeof result !== 'boolean') throw new Error('图片释放结果无效')
+    return result
+  },
   readFileView: async (request) => {
     const checked = parseFileViewRequest(request)
     if (!checked) throw new Error('文件查看请求格式不正确')

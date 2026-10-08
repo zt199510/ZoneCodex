@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { ChatHeader } from '../../components/layout/ChatHeader'
 import type { ConversationController } from '../conversation/useConversation'
 import { ClearConversationDialog } from './ClearConversationDialog'
@@ -11,6 +12,8 @@ import { CommandReviewPanel } from '../review/CommandReviewPanel'
 import { CommitReceipt } from '../review/CommitReceipt'
 import { WorkspaceStatus } from '../project/WorkspaceStatus'
 import type { OpenFileView } from '../files/file-view-origin'
+import { ImagePreview } from '../project/ImagePreview'
+import type { ImageDescriptor } from '../../../../shared/image-input'
 
 export function ChatWorkspace({
   conversation,
@@ -39,6 +42,26 @@ export function ChatWorkspace({
     openProposal,
     openCommand
   } = useChatWorkspace(conversation)
+  const [imagePreview, setImagePreview] = useState<{
+    conversationId: string | null
+    imageId: string
+    trigger: HTMLButtonElement
+  } | null>(null)
+  const previewImage =
+    imagePreview?.conversationId === conversation.activeConversationId
+      ? conversation.images?.getImage(imagePreview.imageId)
+      : null
+  const openImage = (image: ImageDescriptor, trigger: HTMLButtonElement): void => {
+    if (!conversation.images?.isAvailable(image.imageId)) {
+      conversation.images?.setError('图片已失效，请重新添加。')
+      return
+    }
+    setImagePreview({
+      conversationId: conversation.activeConversationId,
+      imageId: image.imageId,
+      trigger
+    })
+  }
   const { storage, messages, operation } = conversation
   const errors = [storage.error, conversation.chatError].filter(Boolean)
   return (
@@ -88,6 +111,8 @@ export function ChatWorkspace({
         ) : (
           <MessageList
             onOpenFile={onOpenFile}
+            messageImages={conversation.images?.messages}
+            onPreviewImage={openImage}
             key={conversation.activeConversationId}
             commandProposals={conversation.commandProposals}
             commandSnapshotId={conversation.contextSelection?.snapshotId ?? null}
@@ -138,7 +163,17 @@ export function ChatWorkspace({
         executionApprovalPending={executionApprovalPending}
         onPendingChange={setExecutionApprovalPending}
         anchorRef={composerRegionRef}
+        onPreviewImage={openImage}
       />
+      {previewImage && imagePreview && (
+        <ImagePreview
+          key={previewImage.image.imageId}
+          image={previewImage.image}
+          src={previewImage.src}
+          returnFocus={imagePreview.trigger}
+          onClose={() => setImagePreview(null)}
+        />
+      )}
       <ClearConversationDialog
         open={confirmClear}
         disabled={!conversation.canEdit}

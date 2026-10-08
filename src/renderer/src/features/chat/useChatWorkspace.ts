@@ -50,7 +50,7 @@ export type ChatWorkspaceController = {
   previewTriggerRef: RefObject<HTMLButtonElement | null>
   commandTriggerRef: RefObject<HTMLButtonElement | null>
   onScroll: (event: UIEvent<HTMLDivElement>) => void
-  send: (content: string) => boolean
+  send: (content: string) => boolean | Promise<boolean>
   suggest: (prompt: string) => void
   copyMessage: (message: ChatMessage) => Promise<boolean>
   openProposal: (proposal: MessageChangeProposal, trigger: HTMLButtonElement) => void
@@ -61,6 +61,7 @@ export function useChatWorkspace(conversation: ConversationController): ChatWork
   const [draft, setDraftState] = useState('')
   const drafts = useRef(new Map<string | null, string>())
   const currentDraft = useRef('')
+  const draftVersion = useRef(0)
   const currentConversationId = useRef<string | null>(conversation.activeConversationId)
   const [confirmClear, setConfirmClear] = useState(false)
   const [executionApprovalPending, setExecutionApprovalPending] = useState(false)
@@ -83,9 +84,14 @@ export function useChatWorkspace(conversation: ConversationController): ChatWork
     const previousConversationId = currentConversationId.current
     if (nextConversationId === previousConversationId) return
     drafts.current.set(previousConversationId, currentDraft.current)
-    const nextDraft = drafts.current.get(nextConversationId) ?? ''
+    const nextDraft =
+      drafts.current.get(nextConversationId) ??
+      (previousConversationId === null && conversation.draftInheritanceTarget === nextConversationId
+        ? currentDraft.current
+        : '')
     currentConversationId.current = nextConversationId
     currentDraft.current = nextDraft
+    draftVersion.current++
     followBottom.current = true
     anchor.current = []
     adjustedScrollTop.current = null
@@ -93,10 +99,11 @@ export function useChatWorkspace(conversation: ConversationController): ChatWork
     scrollDirection.current = null
     setConfirmClear(false)
     setDraftState(nextDraft)
-  }, [conversation.activeConversationId])
+  }, [conversation.activeConversationId, conversation.draftInheritanceTarget])
 
   function setDraft(value: string): void {
     currentDraft.current = value
+    draftVersion.current++
     drafts.current.set(currentConversationId.current, value)
     setDraftState(value)
   }
@@ -227,16 +234,27 @@ export function useChatWorkspace(conversation: ConversationController): ChatWork
     if (area) settleScroll(area)
   }, [messages, conversation.toolRuns, conversation.toolActivity])
 
-  function send(content: string): boolean {
-    const accepted = conversation.send(content)
-    if (accepted) {
-      setDraft('')
-      followBottom.current = true
-      anchor.current = []
-      lastScrollInput.current = -Infinity
-      scrollDirection.current = null
+  function send(content: string): boolean | Promise<boolean> {
+    const draftAtSend = currentDraft.current
+    const versionAtSend = draftVersion.current
+    const conversationAtSend = currentConversationId.current
+    const settle = (accepted: boolean): boolean => {
+      if (accepted) {
+        if (
+          currentConversationId.current === conversationAtSend &&
+          draftVersion.current === versionAtSend &&
+          currentDraft.current === draftAtSend
+        )
+          setDraft('')
+        followBottom.current = true
+        anchor.current = []
+        lastScrollInput.current = -Infinity
+        scrollDirection.current = null
+      }
+      return accepted
     }
-    return accepted
+    const result = conversation.send(content)
+    return typeof result === 'boolean' ? settle(result) : result.then(settle)
   }
   function suggest(prompt: string): void {
     setDraft(prompt)

@@ -10,6 +10,12 @@ import {
 import type { Conversation, ConversationLibrary } from '../../../../shared/conversation-library'
 import { useChatRequest, type ToolActivity } from '../chat/useChatRequest'
 import { useProjectSelection } from '../project/useProjectSelection'
+import { useImageSelection, type ImageSelectionController } from '../project/useImageSelection'
+import {
+  appendImageTurnNotice,
+  hasImageTurnNotice,
+  stripImageTurnNotice
+} from '../../../../shared/image-input'
 import { getCapacityError } from './capacity'
 import type { ProjectSelection, SavedWorkspace } from '../../../../shared/project'
 import { useConversationStorage, type ConversationStorage } from './useConversationStorage'
@@ -30,9 +36,10 @@ export type ConversationController = ConversationReviewController & {
   conversations: Conversation[]
   visibleConversations: Conversation[]
   activeConversationId: string | null
+  draftInheritanceTarget: string | null
   messages: ChatMessage[]
   canRetryMessage: (messageId: string) => boolean
-  retryMessage: (messageId: string) => boolean
+  retryMessage: (messageId: string) => boolean | Promise<boolean>
   operation: Operation
   canEdit: boolean
   canSend: boolean
@@ -54,8 +61,9 @@ export type ConversationController = ConversationReviewController & {
   contextSelection: ProjectSelection | null
   workspace: WorkspaceController
   executionPermissions: ExecutionPermissionsController
-  send: (content: string) => boolean
-  editAndSend: (messageId: string, content: string) => boolean
+  images: ImageSelectionController
+  send: (content: string) => boolean | Promise<boolean>
+  editAndSend: (messageId: string, content: string) => boolean | Promise<boolean>
   stop: () => Promise<void>
   setClosePending: (value: boolean) => void
   getOperation: () => Operation
@@ -74,6 +82,7 @@ export function useConversation(): ConversationController {
   const [capacityError, setCapacityError] = useState<string | null>(null)
   const [conversationError, setConversationError] = useState<string | null>(null)
   const [search, setSearch] = useState('')
+  const [draftInheritanceTarget, setDraftInheritanceTarget] = useState<string | null>(null)
   const closePendingRef = useRef(false)
   const {
     invalidate: invalidateTitle,
@@ -166,6 +175,12 @@ export function useConversation(): ConversationController {
     operations,
     canChange
   })
+  const images = useImageSelection({
+    conversationId: activeConversationId,
+    operations,
+    canChange,
+    ensureConversation: async () => activeConversationId ?? createId(true)
+  })
 
   const {
     commandProposals,
@@ -198,7 +213,12 @@ export function useConversation(): ConversationController {
     projectSelection,
     workspace: workspace.runtime,
     getPermissions: executionPermissions.getState,
-    observeExecution: executionPermissions.observe
+    observeExecution: executionPermissions.observe,
+    isImageAvailable: images.isAvailable,
+    onImageAccepted: (messageId, imageId) => {
+      const image = images.getImage(imageId)
+      if (image) images.bind(messageId, image)
+    }
   })
 
   const canRetryMessage = useCallback(
@@ -217,17 +237,24 @@ export function useConversation(): ConversationController {
   )
 
   const retryMessage = useCallback(
-    (messageId: string): boolean => {
+    (messageId: string): boolean | Promise<boolean> => {
       if (!canRetryMessage(messageId)) return false
-      const accepted = request.retry(messageId)
-      if (accepted) markSent()
-      return accepted
+      const submit = (): boolean => {
+        const accepted = request.retry(messageId)
+        if (accepted) markSent()
+        return accepted
+      }
+      const imageId = request.getRetryImage(messageId)
+      if (!imageId) return submit()
+      const image = images.getImage(imageId)
+      if (!image) return false
+      return images.withPrepared(image, submit)
     },
-    [canRetryMessage, markSent, request]
+    [canRetryMessage, images, markSent, request]
   )
 
   const editAndSend = useCallback(
-    (messageId: string, rawContent: string): boolean => {
+    (messageId: string, rawContent: string): boolean | Promise<boolean> => {
       if (!active || !canSubmit) return false
       const content = rawContent.trim()
       const index = active.messages.findIndex(
@@ -241,6 +268,19 @@ export function useConversation(): ConversationController {
         return false
       }
       const editedMessage = active.messages[index]
+      const image = hasImageTurnNotice(editedMessage.content) ? images.getMessage(messageId) : null
+      if (hasImageTurnNotice(editedMessage.content) && !image) {
+        images.setError('原图片已失效，请重新添加图片后发送，原消息已保留。')
+        return false
+      }
+      const checkedContent = image ? stripImageTurnNotice(content).trim() : content
+      if (
+        !checkedContent ||
+        (image ? appendImageTurnNotice(checkedContent) : checkedContent).length > 2000
+      ) {
+        images.setError('消息过长或为空，请缩短问题后再发送。')
+        return false
+      }
       const messageAttachments = editedMessage.attachments ?? pendingSelection?.files ?? []
       const trimmedMessages = active.messages.slice(0, index)
       const keptIds = new Set(trimmedMessages.map((message) => message.id))
@@ -259,44 +299,71 @@ export function useConversation(): ConversationController {
         setCapacityError(capacityMessage)
         return false
       }
-      preparation.cancel()
-      commandReview.close()
-      setCapacityError(null)
-      setSnapshot(nextSnapshot)
-      const accepted = request.send(
-        content,
-        trimmedMessages,
-        trimmedToolRuns,
-        undefined,
-        undefined,
-        workspace.runtime,
-        undefined,
-        messageAttachments
-      )
-      if (accepted) markSent()
-      return accepted
+      const submit = (): boolean => {
+        preparation.cancel()
+        setCapacityError(null)
+        updateConversation(active.id, (previous) => ({
+          ...previous,
+          messages: trimmedMessages,
+          toolRuns: trimmedToolRuns
+        }))
+        let acceptedMessageId: string | null = null
+        const accepted = request.send(
+          checkedContent,
+          trimmedMessages,
+          trimmedToolRuns,
+          undefined,
+          undefined,
+          workspace.runtime,
+          (acceptedRequest) => {
+            acceptedMessageId = acceptedRequest.messageId
+          },
+          messageAttachments,
+          undefined,
+          image?.image.imageId
+        )
+        if (accepted) {
+          commandReview.close()
+          markSent()
+          const keep = new Set([...keptIds])
+          if (acceptedMessageId) keep.add(acceptedMessageId)
+          images.retainMessages(keep, image?.image.imageId)
+        } else {
+          updateConversation(active.id, (previous) => ({
+            ...previous,
+            messages: active.messages,
+            toolRuns: active.toolRuns
+          }))
+        }
+        return accepted
+      }
+      return image ? images.withPrepared(image, submit) : submit()
     },
     [
       active,
       canSubmit,
+      images,
       commandReview,
       markSent,
       pendingSelection,
       preparation,
       request,
       snapshot,
+      updateConversation,
       workspace
     ]
   )
 
-  async function create(): Promise<boolean> {
-    if (!canChange() || snapshot.conversations.length >= 100) return false
-    if (!(await revokeSelectionForChange())) return false
+  async function createId(inheritDraft = false): Promise<string | null> {
+    if (!canChange() || snapshot.conversations.length >= 100) return null
+    if (!(await revokeSelectionForChange())) return null
+    if (!(await images.release())) return null
     if (active) {
-      if (!(await workspace.release())) return false
+      if (!(await workspace.release())) return null
       invalidateTitle(active.id)
     }
     const id = crypto.randomUUID()
+    if (inheritDraft) setDraftInheritanceTarget(id)
     setSnapshot((previous) => {
       if (previous.conversations.length >= 100) return previous
       return {
@@ -322,7 +389,11 @@ export function useConversation(): ConversationController {
     clearProjectError()
     request.clearError()
     request.clearActivity()
-    return true
+    return id
+  }
+
+  async function create(): Promise<boolean> {
+    return (await createId()) !== null
   }
 
   async function select(id: string): Promise<boolean> {
@@ -331,6 +402,7 @@ export function useConversation(): ConversationController {
       return false
     }
     if (id === active?.id) return true
+    if (!(await images.release())) return false
     if (active && !(await workspace.release())) return false
     if (!(await revokeSelectionForChange())) return false
     if (active) invalidateTitle(active.id)
@@ -390,6 +462,7 @@ export function useConversation(): ConversationController {
     const target = snapshot.conversations.find((item) => item.id === id)
     if (!target || target.archived) return false
     if (id === active?.id) {
+      if (!(await images.release())) return false
       if (!(await workspace.release())) return false
       if (!(await revokeSelectionForChange())) return false
     }
@@ -420,6 +493,7 @@ export function useConversation(): ConversationController {
       return false
     }
     if (!snapshot.conversations.some((item) => item.id === id && item.archived)) return false
+    if (id !== active?.id && !(await images.release())) return false
     if (active && !(await workspace.release())) return false
     if (id !== active?.id && !(await revokeSelectionForChange())) return false
     invalidateTitle(id)
@@ -440,6 +514,7 @@ export function useConversation(): ConversationController {
   async function clear(): Promise<boolean> {
     if (!canChange() || !active) return false
     if (!(await revokeSelectionForChange())) return false
+    if (!(await images.release())) return false
     invalidateTitle(active.id)
     updateConversation(active.id, (previous) => ({
       ...previous,
@@ -488,6 +563,7 @@ export function useConversation(): ConversationController {
     commandReview,
     conversations: snapshot.conversations,
     activeConversationId: snapshot.activeConversationId,
+    draftInheritanceTarget,
     messages,
     canRetryMessage,
     retryMessage,
@@ -499,6 +575,7 @@ export function useConversation(): ConversationController {
     chatError:
       conversationError ??
       capacityError ??
+      images.error ??
       projectError ??
       executionPermissions.error ??
       request.error,
@@ -526,75 +603,87 @@ export function useConversation(): ConversationController {
     contextSelection: projectSelection,
     workspace,
     executionPermissions,
+    images,
     setClosePending,
     getOperation: operations.getOperation,
     send: (content) => {
       if (!canSubmit) return false
-      if (!active && snapshot.conversations.length >= 100) {
-        setCapacityError('会话数量已达到上限，请整理已有会话后再发送。')
+      const image = images.pending
+      const question = image ? stripImageTurnNotice(content).trim() : content.trim()
+      if (!question || (image ? appendImageTurnNotice(question) : question).length > 2000) {
+        setConversationError('消息为空或超过长度上限，请缩短问题后再发送。')
         return false
       }
-      const target =
-        active ??
-        (() => {
-          const id = crypto.randomUUID()
-          return {
-            id,
-            title: `新会话 ${snapshot.conversations.length + 1}`,
-            pinned: false,
-            archived: false,
-            messages: [],
-            toolRuns: [],
-            workspace: null,
-            tasks: []
-          }
-        })()
-      const nextSnapshot = active
-        ? snapshot
-        : {
-            ...snapshot,
-            activeConversationId: target.id,
-            conversations: [...snapshot.conversations, target]
-          }
-      const capacityMessage = getCapacityError(nextSnapshot, target, true)
-      if (capacityMessage) {
-        setCapacityError(capacityMessage)
-        return false
-      }
-      preparation.cancel()
-      if (!active) setSnapshot(nextSnapshot)
-      const hadUserMessage = target.messages.some((message) => message.role === 'user')
-      const fallbackTitle =
-        !hadUserMessage && isPlaceholderConversationTitle(target.title)
-          ? createConversationTitle(content)
-          : ''
-      const accepted = request.send(
-        content,
-        target.messages,
-        target.toolRuns,
-        target.id,
-        undefined,
-        workspace.runtime,
-        fallbackTitle
-          ? (acceptedRequest) => startTitleGeneration(acceptedRequest, fallbackTitle)
-          : undefined,
-        pendingSelection?.files ?? []
-      )
-      if (!accepted && !active) setSnapshot(snapshot)
-      if (accepted) {
-        if (fallbackTitle) {
-          updateConversation(target.id, (conversation) =>
-            isPlaceholderConversationTitle(conversation.title)
-              ? { ...conversation, title: fallbackTitle }
-              : conversation
-          )
+      const submit = (): boolean => {
+        if (!active && snapshot.conversations.length >= 100) {
+          setCapacityError('会话数量已达到上限，请整理已有会话后再发送。')
+          return false
         }
-        commandReview.close()
-        setCapacityError(null)
-        setConversationError(null)
-        markSent()
+        const target =
+          active ??
+          (() => {
+            const id = crypto.randomUUID()
+            return {
+              id,
+              title: `新会话 ${snapshot.conversations.length + 1}`,
+              pinned: false,
+              archived: false,
+              messages: [],
+              toolRuns: [],
+              workspace: null,
+              tasks: []
+            }
+          })()
+        const nextSnapshot = active
+          ? snapshot
+          : {
+              ...snapshot,
+              activeConversationId: target.id,
+              conversations: [...snapshot.conversations, target]
+            }
+        const capacityMessage = getCapacityError(nextSnapshot, target, true)
+        if (capacityMessage) {
+          setCapacityError(capacityMessage)
+          return false
+        }
+        preparation.cancel()
+        if (!active) setSnapshot(nextSnapshot)
+        const hadUserMessage = target.messages.some((message) => message.role === 'user')
+        const fallbackTitle =
+          !hadUserMessage && isPlaceholderConversationTitle(target.title)
+            ? createConversationTitle(question)
+            : ''
+        const accepted = request.send(
+          question,
+          target.messages,
+          target.toolRuns,
+          target.id,
+          undefined,
+          workspace.runtime,
+          fallbackTitle
+            ? (acceptedRequest) => startTitleGeneration(acceptedRequest, fallbackTitle)
+            : undefined,
+          pendingSelection?.files ?? [],
+          undefined,
+          image?.image.imageId
+        )
+        if (!accepted && !active) setSnapshot(snapshot)
+        if (accepted) {
+          if (fallbackTitle) {
+            updateConversation(target.id, (conversation) =>
+              isPlaceholderConversationTitle(conversation.title)
+                ? { ...conversation, title: fallbackTitle }
+                : conversation
+            )
+          }
+          commandReview.close()
+          setCapacityError(null)
+          setConversationError(null)
+          markSent()
+        }
+        return accepted
       }
-      return accepted
+      return image ? images.withPrepared(image, submit) : submit()
     },
     editAndSend,
     toolActivity: visibleActivity,

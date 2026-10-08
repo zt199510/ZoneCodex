@@ -8,7 +8,7 @@ import { registerExternalLinks } from './window/external-links'
 import { registerConversationStorage } from './storage/conversation-ipc'
 import { registerLocalTerminal, attachTerminalCleanup } from './terminal/local-terminal'
 import { registerAgentRequest } from './agent/agent-ipc'
-import { abortProjectJob, hasAgentJob, isAgentBusy } from './agent/agent-runner'
+import { abortProjectJob, abortImageJob, hasAgentJob, isAgentBusy } from './agent/agent-runner'
 import {
   cancelConversationTitleJob,
   registerConversationTitleRequest
@@ -17,6 +17,8 @@ import { hasProjectSelection, hasProjectSnapshot } from './project/attachment-ac
 import { hasWorkspaceSelection } from './project/workspace-access'
 import { registerProjectAccess, attachProjectAccessCleanup } from './project/project-ipc'
 import { registerFileView, attachFileViewCleanup } from './project/file-view-ipc'
+import { configureImageAccess, hasImageSelection } from './project/image-access'
+import { registerImageAccess, attachImageAccessCleanup } from './project/image-ipc'
 import { registerExecutionContext } from './execution/execution-ipc'
 import { clearExecutionPermissionState } from './execution/permission-state'
 import { approveStandaloneCommand } from './execution/action-authorization'
@@ -54,6 +56,7 @@ function isAgentPreparationActive(windowId: number): boolean {
     hasChangePreparation(windowId) ||
     hasChangeCommit(windowId) ||
     hasCommandExecution(windowId) ||
+    hasImageSelection(windowId) ||
     hasWorkspaceSelection(windowId)
   )
 }
@@ -71,18 +74,25 @@ function isProjectAccessBusy(windowId: number): boolean {
     hasAgentJob(windowId) ||
     hasChangePreparation(windowId) ||
     hasChangeCommit(windowId) ||
-    hasCommandExecution(windowId)
+    hasCommandExecution(windowId) ||
+    hasImageSelection(windowId)
   )
 }
 
 function isChangePreviewBusy(windowId: number): boolean {
-  return hasAgentJob(windowId) || hasProjectSelection(windowId) || hasChangeCommit(windowId)
+  return (
+    hasAgentJob(windowId) ||
+    hasProjectSelection(windowId) ||
+    hasChangeCommit(windowId) ||
+    hasImageSelection(windowId)
+  )
 }
 
 function isChangePreparationBusy(windowId: number): boolean {
   return (
     hasAgentJob(windowId) ||
     hasProjectSelection(windowId) ||
+    hasImageSelection(windowId) ||
     hasWorkspaceSelection(windowId) ||
     hasChangeCommit(windowId) ||
     hasCommandExecution(windowId)
@@ -93,6 +103,7 @@ function isChangeCommitBusy(windowId: number): boolean {
   return (
     hasAgentJob(windowId) ||
     hasProjectSelection(windowId) ||
+    hasImageSelection(windowId) ||
     hasWorkspaceSelection(windowId) ||
     hasChangePreparation(windowId) ||
     hasCommandExecution(windowId)
@@ -118,6 +129,7 @@ export function attachWindowRuntime(window: BrowserWindow): void {
   // 注册项目快照授权清理处理器
   attachProjectAccessCleanup(window)
   attachFileViewCleanup(window)
+  attachImageAccessCleanup(window)
   window.webContents.on('did-start-loading', () => {
     clearExecutionApproval(window.id)
     cancelConversationTitleJob(window.id)
@@ -158,6 +170,17 @@ export function registerAppRuntime(): void {
   })
   registerChangePreview(isChangePreviewBusy)
   registerFileView()
+  configureImageAccess({
+    isBusy: (id) =>
+      hasAgentJob(id) ||
+      hasProjectSelection(id) ||
+      hasWorkspaceSelection(id) ||
+      hasChangePreparation(id) ||
+      hasChangeCommit(id) ||
+      hasCommandExecution(id),
+    abortImageJob
+  })
+  registerImageAccess()
   registerChangePreparation(isChangePreparationBusy)
   registerChangeCommit(isChangeCommitBusy)
 

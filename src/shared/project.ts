@@ -1,4 +1,5 @@
 import { parseExecutionInfo, type ExecutionInfo } from './execution'
+import { parseImageReference } from './image-input'
 
 export type ToolScope =
   | { kind: 'time'; workspaceId?: string; executionId?: string }
@@ -62,6 +63,7 @@ export type AgentRequestContext = {
   conversationId: string
   workspaceId?: string
   attachment?: { snapshotId: string; allowUpload: true }
+  image?: { imageId: string }
   execution?: ExecutionInfo
 }
 
@@ -235,13 +237,23 @@ export function parseToolScope(value: unknown): ToolScope | null {
 
 export function parseAgentRequestContext(value: unknown): AgentRequestContext | null {
   try {
-    if (!isPlainRecord(value) || !isAgentId(value.conversationId)) return null
+    if (
+      !isPlainRecord(value) ||
+      Reflect.ownKeys(value).some((key) => {
+        if (typeof key !== 'string') return true
+        const descriptor = Object.getOwnPropertyDescriptor(value, key)
+        return descriptor?.enumerable !== true || !Object.hasOwn(descriptor, 'value')
+      }) ||
+      !isAgentId(value.conversationId)
+    )
+      return null
     if (
       Object.keys(value).some(
         (key) =>
           key !== 'conversationId' &&
           key !== 'workspaceId' &&
           key !== 'attachment' &&
+          key !== 'image' &&
           key !== 'execution'
       ) ||
       (hasOwn(value, 'workspaceId') && !isAgentId(value.workspaceId))
@@ -264,6 +276,11 @@ export function parseAgentRequestContext(value: unknown): AgentRequestContext | 
       )
         return null
       context.attachment = { snapshotId: attachment.snapshotId, allowUpload: true }
+    }
+    if (hasOwn(value, 'image')) {
+      const image = parseImageReference(value.image)
+      if (!image) return null
+      context.image = image
     }
     return context
   } catch {

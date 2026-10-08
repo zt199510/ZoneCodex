@@ -21,9 +21,13 @@ function attachmentMenuStyle({
 }
 
 export function ComposerAttachments({
-  conversation: c
+  conversation: c,
+  onSelectImage,
+  imageBusy = false
 }: {
   conversation: ConversationController
+  onSelectImage?: () => void
+  imageBusy?: boolean
 }): React.JSX.Element {
   const id = useId()
   const trigger = useRef<HTMLButtonElement>(null)
@@ -33,6 +37,7 @@ export function ComposerAttachments({
   const selection = c.contextSelection
   const count = selection?.files.length ?? 0
   const busy = c.operation === 'selecting'
+  const canSelectImage = Boolean(onSelectImage) && c.canNavigate && c.canSend
 
   const getAnchor = useCallback(
     () => trigger.current?.closest<HTMLElement>('.composer') ?? null,
@@ -79,7 +84,7 @@ export function ComposerAttachments({
         aria-label="添加附件"
         aria-expanded={open}
         aria-controls={id}
-        disabled={!c.canEdit}
+        disabled={!c.canEdit && !canSelectImage}
         title="添加附件"
       >
         <svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none">
@@ -147,6 +152,35 @@ export function ComposerAttachments({
             <small>直接多选文本或代码文件，最多 8 个</small>
           </span>
         </button>
+        {onSelectImage && (
+          <button
+            type="button"
+            className="attachment-picker image-picker"
+            disabled={!canSelectImage || busy || imageBusy}
+            onClick={() => {
+              close()
+              onSelectImage()
+            }}
+          >
+            <svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none">
+              <rect
+                x="3"
+                y="3"
+                width="18"
+                height="18"
+                rx="3"
+                stroke="currentColor"
+                strokeWidth="1.5"
+              />
+              <circle cx="8" cy="8" r="1.5" stroke="currentColor" strokeWidth="1.5" />
+              <path d="m4 17 5-5 4 4 3-3 4 5" stroke="currentColor" strokeWidth="1.5" />
+            </svg>
+            <span>
+              <strong>图片</strong>
+              <small>单张 PNG/JPEG，也可粘贴截图</small>
+            </span>
+          </button>
+        )}
         {count > 0 && (
           <button
             type="button"

@@ -4,6 +4,8 @@ import { ExecutionApproval } from '../execution/ExecutionApproval'
 import { ComposerPermissions } from '../execution/ComposerPermissions'
 import { ComposerAttachments } from '../project/ComposerAttachments'
 import { AttachmentCards } from '../project/AttachmentCards'
+import { ImageAttachment } from '../project/ImageAttachment'
+import { IMAGE_TURN_NOTICE, type ImageDescriptor } from '../../../../shared/image-input'
 import { ChatInput } from './ChatInput'
 
 export function ChatComposer({
@@ -13,33 +15,55 @@ export function ChatComposer({
   onSend,
   executionApprovalPending,
   onPendingChange,
-  anchorRef
+  anchorRef,
+  onPreviewImage
 }: {
   conversation: ConversationController
   draft: string
   onChange: (value: string) => void
-  onSend: (content: string) => boolean
+  onSend: (content: string) => boolean | Promise<boolean>
   executionApprovalPending: boolean
   onPendingChange: (pending: boolean) => void
   anchorRef: RefObject<HTMLDivElement | null>
+  onPreviewImage?: (image: ImageDescriptor, trigger: HTMLButtonElement) => void
 }): React.JSX.Element {
   const { storage, operation } = conversation
+  const images = conversation.images
   return (
     <div className="composer-region" ref={anchorRef}>
       <ExecutionApproval anchorRef={anchorRef} onPendingChange={onPendingChange} />
       <ChatInput
         value={draft}
+        draftKey={conversation.activeConversationId}
         onChange={onChange}
         onSend={onSend}
         onStop={() => {
           void conversation.stop()
         }}
-        disabled={!conversation.canSend}
+        disabled={!conversation.canSend || Boolean(images?.busy)}
         isSending={operation === 'generating'}
-        maxLength={2000}
+        maxLength={2000 - (images?.pending ? IMAGE_TURN_NOTICE.length : 0)}
+        onPasteImage={
+          images
+            ? (file) => {
+                void images.paste(file)
+              }
+            : undefined
+        }
+        onImageError={images?.setError}
         tools={
           <div className="composer-tools">
-            <ComposerAttachments conversation={conversation} />
+            <ComposerAttachments
+              conversation={conversation}
+              onSelectImage={
+                images
+                  ? () => {
+                      void images.select()
+                    }
+                  : undefined
+              }
+              imageBusy={images?.busy}
+            />
             <ComposerPermissions
               permissions={conversation.executionPermissions}
               conversationId={conversation.activeConversationId}
@@ -54,11 +78,27 @@ export function ChatComposer({
           </div>
         }
         attachments={
-          <AttachmentCards
-            selection={conversation.projectSelection}
-            disabled={!conversation.canEdit}
-            onRemove={conversation.removeFile}
-          />
+          <>
+            <AttachmentCards
+              selection={conversation.projectSelection}
+              disabled={!conversation.canEdit}
+              onRemove={conversation.removeFile}
+            />
+            {images?.pending && (
+              <div className="composer-image">
+                <ImageAttachment
+                  image={images.pending.image}
+                  src={images.pending.thumbnailSrc}
+                  disabled={!conversation.canEdit || images.busy}
+                  onPreview={onPreviewImage}
+                  onRemove={() => {
+                    void images.remove()
+                  }}
+                />
+                <small className="composer-image-notice">图片不随聊天历史保存。</small>
+              </div>
+            )}
+          </>
         }
       />
       <p className="composer-footnote">

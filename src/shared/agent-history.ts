@@ -2,6 +2,7 @@ import type { AgentMode } from './agent'
 import type { ChatMessage } from './conversation'
 import { parseToolScope, sameToolScope, isToolAllowed } from './project'
 import type { ToolScope } from './project'
+import { hasImageTurnNotice } from './image-input'
 
 export type JsonValue =
   null | boolean | number | string | JsonValue[] | { [key: string]: JsonValue }
@@ -182,6 +183,8 @@ export function parseToolHistory(
   let start = 0
   for (let index = 1; index <= items.length; index++) {
     if (index < items.length && items[index].role !== 'user') continue
+    const first = items[start]
+    if (typeof first.content === 'string' && hasImageTurnNotice(first.content)) return null
     const turn = parseProtocolTurn(items.slice(start, index), checkedScope)
     if (!turn) return null
     for (const item of turn) {
@@ -402,6 +405,9 @@ export function selectToolHistory(
   for (let index = messages.length - 1; index >= 1; index -= 2) {
     const assistant = messages[index]
     const user = messages[index - 1]
+    // Image pixels are deliberately absent from v6. Even failed image turns
+    // terminate history reuse before the ordinary failed-turn skip.
+    if (user.role === 'user' && hasImageTurnNotice(user.content)) break
     const run = runs.find((item) => item.assistantId === assistant.id)
     if (
       assistant.role === 'assistant' &&

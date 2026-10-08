@@ -11,6 +11,14 @@ import { MarkdownContent, UserMessageContent } from './MarkdownContent'
 import { MessageEditor } from './MessageEditor'
 import { MessageActivity } from './MessageActivity'
 import { MessageChangeProposalCard, MessageCommandProposalCard } from './MessageProposals'
+import { ImageAttachment } from '../project/ImageAttachment'
+import type { RuntimeImage } from '../project/useImageSelection'
+import {
+  IMAGE_TURN_NOTICE,
+  hasImageTurnNotice,
+  stripImageTurnNotice,
+  type ImageDescriptor
+} from '../../../../shared/image-input'
 
 export function MessageList({
   messages,
@@ -29,7 +37,9 @@ export function MessageList({
   onCopyMessage,
   onRetryAssistant,
   canRetryAssistant,
-  onOpenFile
+  onOpenFile,
+  messageImages = {},
+  onPreviewImage
 }: {
   messages: readonly ChatMessage[]
   commandProposals?: Readonly<Record<string, MessageCommandProposal>>
@@ -41,13 +51,15 @@ export function MessageList({
   changeProposalStatus?: Readonly<Record<string, ChangeProposalStatus>>
   proposalOpenDisabled?: boolean
   onOpenProposal?: (proposal: MessageChangeProposal, trigger: HTMLButtonElement) => void
-  onSendEditedMessage?: (messageId: string, content: string) => boolean
+  onSendEditedMessage?: (messageId: string, content: string) => boolean | Promise<boolean>
   editDisabled?: boolean
   editMaxLength?: number
   onCopyMessage?: (message: ChatMessage) => Promise<boolean> | boolean
   onRetryAssistant?: (message: ChatMessage) => void
   canRetryAssistant?: (message: ChatMessage) => boolean
   onOpenFile?: OpenFileView
+  messageImages?: Readonly<Record<string, RuntimeImage>>
+  onPreviewImage?: (image: ImageDescriptor, trigger: HTMLButtonElement) => void
 }): React.JSX.Element {
   const [editingId, setEditingId] = useState<string | null>(null)
   const [copiedId, setCopiedId] = useState<string | null>(null)
@@ -55,6 +67,14 @@ export function MessageList({
   return (
     <ol className="message-list" aria-label="聊天记录">
       {messages.map((message) => {
+        const imageTurn = message.role === 'user' && hasImageTurnNotice(message.content)
+        const userContent = imageTurn ? stripImageTurnNotice(message.content) : message.content
+        const image = message.role === 'user' ? messageImages[message.id] : undefined
+        const imageNotice = imageTurn
+          ? image
+            ? '图片不随聊天历史保存；再次询问请重新添加。'
+            : '图片已失效；再次询问请重新添加。'
+          : undefined
         const entries = message.role === 'assistant' ? toolActivity[message.id] : undefined
         const command = message.role === 'assistant' ? commandProposals[message.id] : undefined
         const activity = entries?.length ? entries : undefined
@@ -131,8 +151,9 @@ export function MessageList({
             )}
             {editingId === message.id && onSendEditedMessage ? (
               <MessageEditor
-                initialValue={message.content}
-                maxLength={editMaxLength}
+                initialValue={userContent}
+                imageNotice={imageNotice}
+                maxLength={editMaxLength - (imageTurn ? IMAGE_TURN_NOTICE.length : 0)}
                 disabled={editDisabled}
                 onCancel={() => setEditingId(null)}
                 onSend={(content) => onSendEditedMessage(message.id, content)}
@@ -141,6 +162,14 @@ export function MessageList({
               <div
                 className={`message-content${message.role === 'assistant' ? ' message-answer' : ''}`}
               >
+                {image && (
+                  <ImageAttachment
+                    image={image.image}
+                    src={image.thumbnailSrc}
+                    compact
+                    onPreview={onPreviewImage}
+                  />
+                )}
                 {message.role === 'user' &&
                   message.attachments &&
                   message.attachments.length > 0 && (
@@ -171,7 +200,16 @@ export function MessageList({
                   message.role === 'assistant' ? (
                     <MarkdownContent content={message.content} onOpenFile={onOpenMessageFile} />
                   ) : message.role === 'user' ? (
-                    <UserMessageContent content={message.content} onOpenFile={onOpenMessageFile} />
+                    <>
+                      <UserMessageContent content={userContent} onOpenFile={onOpenMessageFile} />
+                      {imageNotice && (
+                        <p
+                          className={`message-image-notice${image ? '' : ' message-image-expired'}`}
+                        >
+                          {imageNotice}
+                        </p>
+                      )}
+                    </>
                   ) : (
                     message.content
                   )

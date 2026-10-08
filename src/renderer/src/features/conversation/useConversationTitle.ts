@@ -66,7 +66,7 @@ export function useConversationTitle(
           requestId: job.requestId,
           conversationId: job.conversationId,
           messageId: job.messageId,
-          content: accepted.content
+          content: accepted.titleContent ?? accepted.content
         })
       )
       .then((result) => {

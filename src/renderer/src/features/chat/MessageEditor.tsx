@@ -1,4 +1,4 @@
-import { useLayoutEffect, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import type { FormEvent, KeyboardEvent } from 'react'
 
 export function MessageEditor({
@@ -6,16 +6,28 @@ export function MessageEditor({
   maxLength,
   disabled,
   onCancel,
-  onSend
+  onSend,
+  imageNotice
 }: {
   initialValue: string
   maxLength: number
   disabled: boolean
   onCancel: () => void
-  onSend: (content: string) => boolean
+  onSend: (content: string) => boolean | Promise<boolean>
+  imageNotice?: string
 }): React.JSX.Element {
   const [value, setValue] = useState(initialValue)
   const textarea = useRef<HTMLTextAreaElement>(null)
+  const mounted = useRef(true)
+  const version = useRef(0)
+  const pending = useRef(false)
+  const [preparing, setPreparing] = useState(false)
+  useEffect(() => {
+    mounted.current = true
+    return () => {
+      mounted.current = false
+    }
+  }, [])
 
   useLayoutEffect(() => {
     textarea.current?.focus()
@@ -31,13 +43,27 @@ export function MessageEditor({
 
   function submit(event: FormEvent): void {
     event.preventDefault()
-    if (!disabled && value.trim() && onSend(value)) onCancel()
+    if (disabled || pending.current || !value.trim() || value.length > maxLength) return
+    const submittedVersion = version.current
+    const settle = (accepted: boolean): void => {
+      pending.current = false
+      if (!mounted.current) return
+      setPreparing(false)
+      if (accepted && version.current === submittedVersion) onCancel()
+    }
+    const accepted = onSend(value)
+    if (typeof accepted === 'boolean') settle(accepted)
+    else {
+      pending.current = true
+      setPreparing(true)
+      void accepted.then(settle, () => settle(false))
+    }
   }
 
   function onKeyDown(event: KeyboardEvent<HTMLTextAreaElement>): void {
     if (event.key === 'Escape') {
       event.preventDefault()
-      onCancel()
+      if (!pending.current) onCancel()
     } else if (
       event.key === 'Enter' &&
       !event.shiftKey &&
@@ -61,14 +87,27 @@ export function MessageEditor({
         disabled={disabled}
         maxLength={maxLength}
         rows={2}
-        onChange={(event) => setValue(event.currentTarget.value)}
+        onChange={(event) => {
+          version.current += 1
+          setValue(event.currentTarget.value)
+        }}
         onKeyDown={onKeyDown}
       />
+      {imageNotice && <p className="message-image-notice">{imageNotice}</p>}
       <div className="message-inline-controls">
-        <button type="button" className="message-inline-cancel" onClick={onCancel}>
+        <button
+          type="button"
+          className="message-inline-cancel"
+          disabled={preparing}
+          onClick={onCancel}
+        >
           取消
         </button>
-        <button type="submit" className="message-inline-send" disabled={disabled || !value.trim()}>
+        <button
+          type="submit"
+          className="message-inline-send"
+          disabled={disabled || preparing || !value.trim() || value.length > maxLength}
+        >
           发送
         </button>
       </div>

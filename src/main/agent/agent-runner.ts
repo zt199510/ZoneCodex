@@ -9,10 +9,13 @@ import {
   type ToolScope
 } from '../../shared/project'
 import { sameExecutionInfo } from '../../shared/execution'
+import { hasImageTurnNotice, stripImageTurnNotice } from '../../shared/image-input'
 import { isTaskId } from '../../shared/task'
 import { AgentError } from '../errors'
 import { runToolLoop } from './tool-loop'
 import { createLiveResponse } from '../model/response-client'
+import { withImageInput } from '../model/image-input'
+import { captureImageAccess, hasImageSelection, type CapturedImage } from '../project/image-access'
 import { buildAgentRequest } from './agent-instructions'
 import { createAgentToolExecutor } from './agent-tools'
 import { captureProjectAccess, hasProjectSelection } from '../project/attachment-access'
@@ -34,7 +37,7 @@ import {
 } from '../execution/action-authorization'
 import { inspectWindowsCommandBackend } from '../execution/windows-command-backend'
 
-type Job = { id: string; controller: AbortController; snapshotId?: string }
+type Job = { id: string; controller: AbortController; snapshotId?: string; imageId?: string }
 const jobs = new Map<number, Job>()
 
 export function hasAgentJob(windowId: number): boolean {
@@ -46,6 +49,11 @@ export function abortProjectJob(windowId: number, snapshotId: string): void {
   if (job?.snapshotId === snapshotId) job.controller.abort()
 }
 
+export function abortImageJob(windowId: number, imageId: string): void {
+  const job = jobs.get(windowId)
+  if (job?.imageId === imageId) job.controller.abort()
+}
+
 export function isAgentBusy(
   windowId: number,
   isPreparationActive: (windowId: number) => boolean
@@ -55,6 +63,7 @@ export function isAgentBusy(
     hasExecutionApproval(windowId) ||
     isPreparationActive(windowId) ||
     hasProjectSelection(windowId) ||
+    hasImageSelection(windowId) ||
     hasWorkspaceSelection(windowId)
   )
 }
@@ -87,6 +96,7 @@ export async function runAgentRequest(
     jobs.has(windowId) ||
     hasExecutionApproval(windowId) ||
     hasProjectSelection(windowId) ||
+    hasImageSelection(windowId) ||
     hasWorkspaceSelection(windowId) ||
     isPreparationActive(windowId)
   ) {
@@ -94,10 +104,12 @@ export async function runAgentRequest(
     return { status: 'error', error: '请先完成当前操作', trace }
   }
   const controller = new AbortController()
+  let capturedImage: CapturedImage | null = null
   const job: Job = {
     id,
     controller,
-    snapshotId: checkedContext.attachment?.snapshotId
+    snapshotId: checkedContext.attachment?.snapshotId,
+    imageId: checkedContext.image?.imageId
   }
   const cancel = (): void => controller.abort()
   jobs.set(windowId, job)
@@ -105,6 +117,20 @@ export async function runAgentRequest(
   sender.once('render-process-gone', cancel)
   sender.once('destroyed', cancel)
   try {
+    if (
+      Boolean(checkedContext.image) !== hasImageTurnNotice(prompt) ||
+      !stripImageTurnNotice(prompt)
+    )
+      return { status: 'error', error: '图片与本轮问题不一致，请重新添加后发送', trace }
+    if (checkedContext.image) {
+      capturedImage = captureImageAccess(
+        windowId,
+        checkedContext.conversationId,
+        checkedContext.image.imageId
+      )
+      if (!capturedImage)
+        return { status: 'error', error: '原图片未确认或已失效，请重新添加后发送', trace }
+    }
     const workspaceId = checkedContext.workspaceId
     const workspace =
       workspaceId !== undefined
@@ -182,6 +208,7 @@ export async function runAgentRequest(
       jobs.get(windowId) !== job ||
       isPreparationActive(windowId) ||
       hasProjectSelection(windowId) ||
+      hasImageSelection(windowId) ||
       hasWorkspaceSelection(windowId)
     ) {
       return { status: 'error', error: '运行上下文已变化，请重新发送', trace }
@@ -211,6 +238,7 @@ export async function runAgentRequest(
     try {
       appendTrace('模式：真实模型 SSE')
       const assertWorkspaceAccess = (): boolean => {
+        capturedImage?.assertCurrent()
         return (
           !controller.signal.aborted && executionStillCurrent(windowId, checkedContext, execution)
         )
@@ -223,13 +251,14 @@ export async function runAgentRequest(
         workspaceInstruction,
         workspaceId,
         execution: execution.info,
-        commandSandboxAvailable: commandBackend !== null
+        commandSandboxAvailable: commandBackend !== null,
+        imagePresent: capturedImage !== null
       })
       const authorizationOptions: Parameters<typeof createWorkspaceAuthorization>[0] = {
         windowId,
         requestId: id,
         conversationId: checkedContext.conversationId,
-        userRequest: prompt.trim(),
+        userRequest: stripImageTurnNotice(prompt),
         execution,
         assertCurrent: assertWorkspaceAccess,
         beginApproval: () => {
@@ -360,9 +389,18 @@ export async function runAgentRequest(
         }
         if (!sender.isDestroyed()) sender.send('agent:tool-event', { requestId: id, ...event })
       }
+      const liveResponse = createLiveResponse(agentRequest.tools, agentRequest.instructions)
       const completed = await runToolLoop(
         prompt.trim(),
-        createLiveResponse(agentRequest.tools, agentRequest.instructions),
+        capturedImage
+          ? withImageInput(
+              liveResponse,
+              capturedImage,
+              checkedHistory.length,
+              prompt.trim(),
+              assertWorkspaceAccess
+            )
+          : liveResponse,
         controller.signal,
         trace,
         (message) => {
@@ -442,6 +480,7 @@ export async function runAgentRequest(
         }
   } finally {
     controller.abort()
+    capturedImage?.finish()
     if (jobs.get(windowId) === job) jobs.delete(windowId)
     sender.removeListener('did-start-loading', cancel)
     sender.removeListener('render-process-gone', cancel)

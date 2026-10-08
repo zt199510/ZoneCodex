@@ -3,6 +3,7 @@ import type { BrowserWindow } from 'electron'
 import { isAgentId } from '../../shared/agent'
 import type { WorkspaceInstructionResult, WorkspaceSelectionResult } from '../../shared/project'
 import { getIpcWindow } from '../ipc-source'
+import { hasImageSelection } from './image-access'
 import {
   configureAttachmentAccess,
   hasProjectSelection,
@@ -27,10 +28,13 @@ export type ProjectAccessCallbacks = {
 }
 
 export function registerProjectAccess(nextCallbacks: ProjectAccessCallbacks): void {
-  configureAttachmentAccess({ ...nextCallbacks, hasWorkspaceSelection })
+  configureAttachmentAccess({
+    ...nextCallbacks,
+    hasWorkspaceSelection: (id) => hasWorkspaceSelection(id) || hasImageSelection(id)
+  })
   configureWorkspaceAccess({
     isAgentJobActive: nextCallbacks.isAgentJobActive,
-    hasProjectSelection
+    hasProjectSelection: (id) => hasProjectSelection(id) || hasImageSelection(id)
   })
   const ownerOf = (event: Electron.IpcMainInvokeEvent): BrowserWindow =>
     getIpcWindow(event, '不支持的项目选择来源', { windowMustBeLive: true })
@@ -69,6 +73,7 @@ export function registerProjectAccess(nextCallbacks: ProjectAccessCallbacks): vo
       !isAgentId(snapshotId) ||
       hasProjectSelection(owner.id) ||
       hasWorkspaceSelection(owner.id) ||
+      hasImageSelection(owner.id) ||
       nextCallbacks.isAgentJobActive(owner.id)
     )
       return false

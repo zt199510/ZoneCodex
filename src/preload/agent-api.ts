@@ -1,6 +1,7 @@
 import { ipcRenderer } from 'electron'
 import type { IpcRendererEvent } from 'electron'
 import type { AppAPI } from '../shared/api'
+import { hasImageTurnNotice, stripImageTurnNotice } from '../shared/image-input'
 import {
   parseExecutionApproval,
   parseExecutionInfo,
@@ -184,6 +185,14 @@ export const agentAPI: Pick<
   startAgentRequest: async (requestId, prompt, history, context, taskId) => {
     const checkedContext = parseAgentRequestContext(context)
     if (!checkedContext) throw new Error('工具上下文格式不正确')
+    if (
+      typeof prompt !== 'string' ||
+      !prompt.trim() ||
+      prompt.trim().length > 2000 ||
+      Boolean(checkedContext.image) !== hasImageTurnNotice(prompt) ||
+      !stripImageTurnNotice(prompt)
+    )
+      throw new Error('图片与本轮问题不一致，或文字超过上限')
     const checkedScope = parseToolScope(toolScopeForAgentRequest(checkedContext))
     if (!checkedScope) throw new Error('工具范围格式不正确')
     const checkedHistory = parseToolHistory(history, checkedScope)

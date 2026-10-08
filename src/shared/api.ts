@@ -2,6 +2,12 @@ import type { CommitRequest, CommitResult } from './change-commit'
 import type { PreparationRequest, PreparationResult } from './change-preparation'
 import type { SaveConversationResult } from './conversation'
 import type { FileViewRequest, FileViewResult } from './file-view'
+import type {
+  ImageImportRequest,
+  ImageSelectionResult,
+  ImagePreviewResult,
+  ImagePreparationResult
+} from './image-input'
 import type { WindowAction, WindowState } from './window'
 import type { ConversationLibrary, LoadLibraryResult } from './conversation-library'
 import type { TerminalSize, TerminalResult, TerminalEvent } from './terminal'
@@ -40,6 +46,15 @@ export type StreamDelta = AgentDelta
 
 // 应用 API 接口类型
 export interface AppAPI {
+  selectImage: (conversationId: string) => Promise<ImageSelectionResult>
+  importImage: (
+    conversationId: string,
+    request: ImageImportRequest
+  ) => Promise<ImageSelectionResult>
+  readImagePreview: (conversationId: string, imageId: string) => Promise<ImagePreviewResult>
+  prepareImage: (conversationId: string, imageId: string) => Promise<ImagePreparationResult>
+  revokeImage: (conversationId: string, imageId: string) => Promise<boolean>
+  revokeConversationImages: (conversationId: string) => Promise<boolean>
   readFileView: (request: FileViewRequest) => Promise<FileViewResult>
   listTasks: () => Promise<TaskRecord[]>
   cancelTask: (taskId: string) => Promise<boolean>
