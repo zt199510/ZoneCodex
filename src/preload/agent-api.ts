@@ -195,7 +195,12 @@ export const agentAPI: Pick<
       throw new Error('图片与本轮问题不一致，或文字超过上限')
     const checkedScope = parseToolScope(toolScopeForAgentRequest(checkedContext))
     if (!checkedScope) throw new Error('工具范围格式不正确')
-    const checkedHistory = parseToolHistory(history, checkedScope, checkedContext.imageHistory)
+    const checkedHistory = parseToolHistory(
+      history,
+      checkedScope,
+      checkedContext.imageHistory,
+      checkedContext.mode
+    )
     if (!checkedHistory) throw new Error('工具历史参数格式不正确')
     return parseAgentResult(
       await ipcRenderer.invoke(
@@ -207,7 +212,8 @@ export const agentAPI: Pick<
         taskId
       ),
       checkedScope,
-      prompt.trim()
+      prompt.trim(),
+      checkedContext.mode
     )
   },
   cancelAgentRequest: async (requestId) => {

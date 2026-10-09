@@ -2,8 +2,12 @@ import { parseIncompleteToolTurn, parseProtocolTurn } from './agent-history'
 import type { ProtocolItem } from './agent-history'
 import type { ToolScope } from './project'
 
-// 正式 Agent 只使用真实模型 SSE。
-export type AgentMode = 'live'
+// 两种工作方式均使用真实模型 SSE，与执行批准方式独立。
+export type AgentMode = 'execute' | 'plan'
+
+export function parseAgentMode(value: unknown): AgentMode | null {
+  return value === 'execute' || value === 'plan' ? value : null
+}
 // 统一模型与 Agent 的文字增量事件。Agent 通过同一 IPC 通道发送，
 // 这样 renderer 不需要根据请求模式选择另一套消息更新协议。
 export type AgentDelta = { requestId: string; delta: string }
@@ -148,8 +152,10 @@ export function isAgentId(value: unknown): value is string {
 export function parseAgentResult(
   value: unknown,
   scope: ToolScope = { kind: 'time' },
-  expectedPrompt?: string
+  expectedPrompt?: string,
+  mode: AgentMode = 'execute'
 ): AgentResult {
+  if (!parseAgentMode(mode)) throw new Error('Agent 工作方式不正确')
   if (
     typeof value !== 'object' ||
     value === null ||
@@ -164,7 +170,7 @@ export function parseAgentResult(
   const trace: string[] = value.trace
   const readIncompleteItems = (): { items?: ProtocolItem[] } => {
     if (!('items' in value)) return {}
-    const items = parseIncompleteToolTurn(value.items, scope, expectedPrompt)
+    const items = parseIncompleteToolTurn(value.items, scope, expectedPrompt, mode)
     if (!items) throw new Error('Agent 未完成调用记录格式不正确')
     return { items }
   }
@@ -176,7 +182,7 @@ export function parseAgentResult(
     value.answer.length <= 16000 &&
     'items' in value
   ) {
-    const items = parseProtocolTurn(value.items, scope)
+    const items = parseProtocolTurn(value.items, scope, mode)
     if (
       !items ||
       items[items.length - 1].type !== 'message' ||

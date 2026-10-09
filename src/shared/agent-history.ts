@@ -1,4 +1,4 @@
-import type { AgentMode } from './agent'
+import { parseAgentMode, type AgentMode } from './agent'
 import { getMessageImages, type ChatMessage } from './conversation'
 import { parseToolScope, sameToolScope, isToolAllowed } from './project'
 import type { ToolScope } from './project'
@@ -96,10 +96,11 @@ function finalText(items: readonly ProtocolItem[]): string {
 // 只接受一轮完整的工具协议；返回深拷贝，保留 output 原有字段。
 export function parseProtocolTurn(
   value: unknown,
-  scope: ToolScope = { kind: 'time' }
+  scope: ToolScope = { kind: 'time' },
+  mode: AgentMode = 'execute'
 ): ProtocolItem[] | null {
   const checkedScope = parseToolScope(scope)
-  if (!checkedScope) return null
+  if (!checkedScope || !parseAgentMode(mode)) return null
   const items = cloneJsonArray(value, 160, 128000)
   if (!items || items.length < 2 || !items.every((item): item is ProtocolItem => isRecord(item)))
     return null
@@ -123,7 +124,7 @@ export function parseProtocolTurn(
       if (
         hasFinal ||
         pendingCall !== null ||
-        !isToolAllowed(item.name, checkedScope) ||
+        !isToolAllowed(item.name, checkedScope, mode) ||
         typeof item.arguments !== 'string' ||
         item.arguments.length > 4096 ||
         typeof item.call_id !== 'string' ||
@@ -175,10 +176,11 @@ export function parseProtocolTurn(
 export function parseToolHistory(
   value: unknown,
   scope: ToolScope = { kind: 'time' },
-  imageHistory: readonly ImageHistoryReference[] = []
+  imageHistory: readonly ImageHistoryReference[] = [],
+  mode: AgentMode = 'execute'
 ): ProtocolItem[] | null {
   const checkedScope = parseToolScope(scope)
-  if (!checkedScope) return null
+  if (!checkedScope || !parseAgentMode(mode)) return null
   const items = cloneJsonArray(value, 300, 64000)
   if (!items || !items.every((item): item is ProtocolItem => isRecord(item))) return null
   const references = imageHistory.length ? parseImageHistoryReferences(imageHistory) : []
@@ -199,7 +201,7 @@ export function parseToolHistory(
     )
       return null
     imageIndices.delete(start)
-    const turn = parseProtocolTurn(items.slice(start, index), checkedScope)
+    const turn = parseProtocolTurn(items.slice(start, index), checkedScope, mode)
     if (!turn) return null
     for (const item of turn) {
       if (item.type === 'function_call' && typeof item.call_id === 'string') {
@@ -218,10 +220,11 @@ export function parseToolHistory(
 export function parseIncompleteToolTurn(
   value: unknown,
   scope: ToolScope = { kind: 'time' },
-  expectedPrompt?: string
+  expectedPrompt?: string,
+  mode: AgentMode = 'execute'
 ): ProtocolItem[] | null {
   const checkedScope = parseToolScope(scope)
-  if (!checkedScope) return null
+  if (!checkedScope || !parseAgentMode(mode)) return null
   const items = cloneJsonArray(value, 160, 128000)
   if (!items || !items.every((item): item is ProtocolItem => isRecord(item))) return null
   if (items.length === 0) return []
@@ -243,7 +246,7 @@ export function parseIncompleteToolTurn(
         Object.keys(item).length !== 4 ||
         pendingCall !== null ||
         calls.size >= 8 ||
-        !isToolAllowed(item.name, checkedScope) ||
+        !isToolAllowed(item.name, checkedScope, mode) ||
         typeof item.arguments !== 'string' ||
         item.arguments.length > 4096 ||
         typeof item.call_id !== 'string' ||
@@ -319,7 +322,7 @@ export function parseToolRuns(value: unknown, messages: readonly ChatMessage[]):
       requestIds.has(item.requestId) ||
       usedMessages.has(item.userId) ||
       usedMessages.has(item.assistantId) ||
-      item.mode !== 'live' ||
+      !parseAgentMode(item.mode) ||
       !Array.isArray(item.trace) ||
       item.trace.length > 30 ||
       !item.trace.every((line): line is string => typeof line === 'string' && line.length <= 500) ||
@@ -335,12 +338,14 @@ export function parseToolRuns(value: unknown, messages: readonly ChatMessage[]):
       !assistant ||
       assistant.id !== item.assistantId ||
       assistant.role !== 'assistant' ||
-      user.status !== assistant.status
+      user.status !== assistant.status ||
+      user.mode !== item.mode ||
+      assistant.mode !== item.mode
     )
       return null
     let items: ProtocolItem[]
     if (user.status === 'complete') {
-      const parsed = parseProtocolTurn(item.items, scope)
+      const parsed = parseProtocolTurn(item.items, scope, item.mode as AgentMode)
       if (
         !parsed ||
         parsed[0].content !== user.content ||
@@ -352,7 +357,12 @@ export function parseToolRuns(value: unknown, messages: readonly ChatMessage[]):
     } else {
       if (user.status !== 'pending' && user.status !== 'failed' && user.status !== 'cancelled')
         return null
-      const parsed = parseIncompleteToolTurn(item.items, scope, user.content)
+      const parsed = parseIncompleteToolTurn(
+        item.items,
+        scope,
+        user.content,
+        item.mode as AgentMode
+      )
       if (!parsed) return null
       items = parsed
     }
@@ -364,7 +374,7 @@ export function parseToolRuns(value: unknown, messages: readonly ChatMessage[]):
       requestId: item.requestId,
       userId: item.userId,
       assistantId: item.assistantId,
-      mode: item.mode,
+      mode: item.mode as AgentMode,
       scope,
       trace: item.trace,
       items
@@ -391,10 +401,12 @@ export function selectToolContext(
 ): { history: ProtocolItem[]; imageHistory: ImageHistoryReference[] } {
   const checkedScope = parseToolScope(scope)
   if (!checkedScope) throw new Error('工具范围无效，请重新选择工具模式。')
+  if (!parseAgentMode(mode)) throw new Error('工作方式无效，请重新选择执行或计划。')
   const hasSavedImages = messages.some(
     (message) => message.role === 'user' && getMessageImages(message).length > 0
   )
   const selected: Array<{ user: ChatMessage; items: ProtocolItem[] }> = []
+  let crossedModes = false
   for (let index = messages.length - 1; index >= 1; index -= 2) {
     const assistant = messages[index]
     const user = messages[index - 1]
@@ -419,16 +431,18 @@ export function selectToolContext(
       user.role !== 'user' ||
       assistant.status !== 'complete' ||
       user.status !== 'complete' ||
-      !run ||
-      run.userId !== user.id ||
-      run.mode !== mode
+      !parseAgentMode(user.mode) ||
+      user.mode !== assistant.mode ||
+      (run && (run.userId !== user.id || user.mode !== run.mode))
     )
       break
-    if (sameToolScope(run.scope, checkedScope)) {
+    if (user.mode !== mode) crossedModes = true
+    if (!crossedModes && !run) break
+    if (!crossedModes && run && sameToolScope(run.scope, checkedScope)) {
       selected.unshift({ user, items: run.items })
-    } else if (hasSavedImages) {
-      // Retain the visual conversation across runtime changes without replaying
-      // tools from an expired attachment/workspace or restoring its permissions.
+    } else if (crossedModes || hasSavedImages) {
+      // 跨工作方式后只保留用户任务与最终文字；更早的工具和推理也不重放。
+      // 合法原图继续按用户消息关联，不恢复旧范围或批准。
       selected.unshift({
         user,
         items: [
@@ -459,7 +473,7 @@ export function selectToolContext(
   if (items.length > 300 || JSON.stringify(items).length > 64000) {
     throw new Error('工具上下文已达到本课上限，请新建会话并重新说明问题。')
   }
-  const history = parseToolHistory(items, checkedScope, imageHistory)
+  const history = parseToolHistory(items, checkedScope, imageHistory, mode)
   if (!history) throw new Error('图片与工具历史不一致或达到上限，请新建会话并重新说明问题。')
   return { history, imageHistory }
 }

@@ -1,4 +1,5 @@
 import { parseExecutionInfo, type ExecutionInfo } from './execution'
+import { parseAgentMode, type AgentMode } from './agent'
 import {
   parseImageReferences,
   parseImageHistoryReferences,
@@ -67,6 +68,7 @@ export type ProjectSelectionResult =
 
 export type AgentRequestContext = {
   conversationId: string
+  mode: AgentMode
   workspaceId?: string
   attachment?: { snapshotId: string; allowUpload: true }
   images?: ImageReference[]
@@ -258,6 +260,7 @@ export function parseAgentRequestContext(value: unknown): AgentRequestContext | 
       Object.keys(value).some(
         (key) =>
           key !== 'conversationId' &&
+          key !== 'mode' &&
           key !== 'workspaceId' &&
           key !== 'attachment' &&
           key !== 'images' &&
@@ -267,7 +270,9 @@ export function parseAgentRequestContext(value: unknown): AgentRequestContext | 
       (hasOwn(value, 'workspaceId') && !isAgentId(value.workspaceId))
     )
       return null
-    const context: AgentRequestContext = { conversationId: value.conversationId }
+    const mode = parseAgentMode(value.mode)
+    if (!mode) return null
+    const context: AgentRequestContext = { conversationId: value.conversationId, mode }
     if (hasOwn(value, 'workspaceId')) context.workspaceId = value.workspaceId as string
     if (hasOwn(value, 'execution')) {
       const execution = parseExecutionInfo(value.execution)
@@ -459,8 +464,22 @@ export function parseWorkspaceSelectionResult(value: unknown): WorkspaceSelectio
   }
 }
 
-// A single allowlist is shared by live execution and persisted protocol validation.
-export function isToolAllowed(name: unknown, scope: ToolScope): name is string {
+// 工具声明、执行器与保存的协议共用当前工作方式和范围的白名单。
+export function isToolAllowed(
+  name: unknown,
+  scope: ToolScope,
+  mode: AgentMode = 'execute'
+): name is string {
+  if (!parseAgentMode(mode)) return false
+  if (
+    mode === 'plan' &&
+    (name === 'create_workspace_file' ||
+      name === 'edit_workspace_file' ||
+      name === 'run_workspace_command' ||
+      name === 'propose_file_change' ||
+      name === 'propose_command')
+  )
+    return false
   return (
     name === 'get_current_time' ||
     ((scope.workspaceId !== undefined || scope.executionId !== undefined) &&

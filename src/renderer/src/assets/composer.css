@@ -102,7 +102,38 @@
   min-width: 0;
 }
 
+.composer-mode {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+.agent-mode-trigger[data-mode='plan'] {
+  color: #526b4b;
+}
+
+.message-inline-controls > .composer-mode {
+  margin-right: auto;
+}
+
+.message-mode {
+  display: block;
+  margin: 0 8px 5px;
+  text-align: right;
+  font-size: 10px;
+  color: var(--soft-text);
+}
+
 @media (max-width: 760px) {
+  .composer-tools {
+    flex-wrap: wrap;
+    gap: 5px;
+  }
+
+  .composer-toolbar {
+    gap: 5px;
+  }
+
   .composer-toolbar .keyboard-hint {
     display: none;
   }

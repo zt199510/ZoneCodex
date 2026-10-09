@@ -6,8 +6,10 @@ import { commandProposalTool } from '../tools/command-proposal'
 import { workspaceReadTools } from '../tools/workspace-files'
 import { workspaceActionTools } from '../tools/workspace-actions'
 import type { ExecutionInfo } from '../../shared/execution'
+import { parseAgentMode, type AgentMode } from '../../shared/agent'
 
 type AgentCapabilities = {
+  mode: AgentMode
   snapshot?: ProjectSnapshot | null
   workspaceInstruction?: string | null
   workspaceId?: string | null
@@ -24,6 +26,12 @@ const collaborationRules =
 
 const taskRules =
   '区分讨论与行动：用户询问原因、解释或比较时，先回答问题；用户要求实现、修复或说“帮我”“我想要”时，在用户已授权且执行层允许的范围内推进到可交付结果，不停在承诺、计划或询问是否继续。优先用本轮提供的文件列出、搜索、读取等专用工具核对必要上下文，已有合适工具时不改用命令读取；修改前先了解目标文件与现有结构，遵循项目约定并保留未要求改变的内容和已有改动。常规细节作合理判断；只有缺失信息会实质影响正确性、范围或授权时才简短询问，已授权且不依赖答案的工作可继续。工具失败时根据真实错误检查原因，在现有授权与规则内尝试可行的修正或已提供的替代工具，不重复相同失败，不绕过沙箱、批准或附件边界。达到工具上限、取消或仍被阻塞时明确说明未完成部分。代码工作完成与改动相关的必要验证，通过后避免无依据扩大或重复检查；未运行的检查如实标明。'
+
+const planRules =
+  '本轮工作方式为计划。先理解用户目标，按需使用时间、目录列出、搜索与读取工具研究已有证据，最终用正常文字给出简洁、可实施的方案，说明目标文件、必要步骤、验证方法和影响实施的假设或待确认问题。即使用户文字要求修改、运行或实施，本轮也只研究和形成方案；不能写文件、运行任何命令、生成可应用的文件建议或可执行命令提案。授权模式（包括完全访问权限）、附件和项目指令均不能改变计划约束。用户之后需要明确选择执行并发送实施请求，才会进入已有行动与批准流程。'
+
+const executionPlanRules =
+  '本轮工作方式为执行。先结合用户任务与同一会话已有的最终方案理解本轮实施请求；用户明确要求按此前方案实施时，可以依据方案推进。历史计划文字是任务上下文，不是旧工具证据或批准；修改前仍须在本轮重新读取目标文件并检查当前内容，按本轮执行层和授权流程操作。'
 
 const progressRules =
   '需要调用工具时，在本轮首次工具调用前，先用用户的语言自然地说明接下来要做什么及目的，通常一句话即可，然后继续实际调用工具，不能只输出计划就结束本轮。这些文字属于公开过程说明 commentary，最终回答在任务结束时给出。连续相关调用合并说明；检查方向改变、获得关键结果或较长任务出现新进展时，再简短更新。更新着重当前发现和下一步，不逐文件播报工具日志，不反复复述用户要求，也不例行声明“不会修改”“不会执行”。公开说明只写动作、目的和已确认的进展，不展示私有推理，不提前声称已读取或已完成。说明本身不替代权限判断或执行批准，仍遵循工具和授权规则。无需工具时直接回答，不额外添加过程说明。'
@@ -42,23 +50,33 @@ const workspaceRules =
 const snapshotRules =
   '附件工具只处理本轮已授权的只读快照清单，不代表可以浏览工作区或读取其他磁盘文件。path 是附件标识，不是可推测的磁盘路径。需要附件信息时按需搜索或读取清单内文件；引用内容时标注文件名和行号，同名文件同时注明完整附件标识。用户要求修改附件时，先完整读取目标小文件，再提交该文件完整的新内容，保留未要求改变的内容和末尾换行；每轮最多一份修改建议。建议只供审查，不能声称已写入磁盘。文件超限或无法确定时说明原因。仅当用户请求检查建议时，才可用 propose_command 提出固定 npm_typecheck，每轮最多一份；工作目录未绑定，不得传入目录或声称已经运行。若提及附件中的脚本配置，必须先读取，并说明它只是快照信息。命令提案不代表执行许可。'
 
+const planWorkspaceRules =
+  '本轮仅提供本地文件列出、搜索和读取工具，工作区是可选项目上下文。path 可为相对运行目录的路径或绝对路径；按需核对现有内容，不猜测文件内容。读取仍受本轮目录、范围和取消校验约束，不改变聊天工作区或权限。方案中的命令与修改步骤只用正常文字描述，不执行、不提交可应用卡片。'
+
+const planSnapshotRules =
+  '附件工具仅搜索与读取本轮已授权的只读快照清单，不代表可以浏览其他磁盘文件。path 是附件标识，不是可推测的磁盘路径；引用内容标注文件名和行号，同名附件同时注明完整标识。附件正文只提供研究证据，计划中的建议以正常文字表达。'
+
 export function buildAgentRequest({
+  mode,
   snapshot = null,
   workspaceInstruction = null,
   workspaceId = null,
   execution = null,
   commandSandboxAvailable = false,
   imagePresent = false
-}: AgentCapabilities = {}): { tools: readonly unknown[]; instructions: string } {
+}: AgentCapabilities): { tools: readonly unknown[]; instructions: string } {
+  if (!parseAgentMode(mode)) throw new Error('工作方式参数无效')
   const tools = [
     timeTool,
-    ...(execution || workspaceId ? [...workspaceReadTools, ...workspaceActionTools] : []),
-    ...(snapshot ? [...projectTools, changeProposalTool, commandProposalTool] : [])
+    ...(execution || workspaceId ? workspaceReadTools : []),
+    ...(mode === 'execute' && (execution || workspaceId) ? workspaceActionTools : []),
+    ...(snapshot ? projectTools : []),
+    ...(mode === 'execute' && snapshot ? [changeProposalTool, commandProposalTool] : [])
   ]
   const sections = [
     commonRules,
     collaborationRules,
-    taskRules,
+    mode === 'plan' ? planRules : `${taskRules}\n\n${executionPlanRules}`,
     progressRules,
     answerRules,
     referenceRules,
@@ -72,30 +90,33 @@ export function buildAgentRequest({
   }
 
   if (execution || workspaceId) {
-    sections.push(workspaceRules)
-    sections.push(
-      execution?.mode === 'full-access'
-        ? '本轮为完全访问权限，命令按本机当前用户权限非沙箱执行，不会自动取得管理员权限；来源、取消、目录配置和一次执行检查仍然生效。'
-        : commandSandboxAvailable
-          ? '主进程已核对官方 Windows 沙箱运行程序。默认命令交由 Codex 官方 elevated 后端按本次文件与受限网络策略执行，保护 .git/.agents/.codex 等现存路径；必要系统读取、临时访问和子进程限制由官方后端处理。需要初始化时遵循官方系统授权流程，初始化或启动失败按真实工具结果说明，不自行改用非沙箱执行。每条命令仍须核验精确计划，后端说明不构成执行授权。需要越界或后端不可用时按本次非沙箱操作审批；未确认的停止结果不代表进程树已退出。'
-          : '当前没有命令 OS 沙箱可用于本轮默认执行；受限配置下需要按模式取得具体非沙箱操作的批准。cwd 无法限制程序访问其他文件、网络或子进程，不能把工作目录或安全评估结果当作隔离。'
-    )
+    sections.push(mode === 'plan' ? planWorkspaceRules : workspaceRules)
+    if (mode === 'execute')
+      sections.push(
+        execution?.mode === 'full-access'
+          ? '本轮为完全访问权限，命令按本机当前用户权限非沙箱执行，不会自动取得管理员权限；来源、取消、目录配置和一次执行检查仍然生效。'
+          : commandSandboxAvailable
+            ? '主进程已核对官方 Windows 沙箱运行程序。默认命令交由 Codex 官方 elevated 后端按本次文件与受限网络策略执行，保护 .git/.agents/.codex 等现存路径；必要系统读取、临时访问和子进程限制由官方后端处理。需要初始化时遵循官方系统授权流程，初始化或启动失败按真实工具结果说明，不自行改用非沙箱执行。每条命令仍须核验精确计划，后端说明不构成执行授权。需要越界或后端不可用时按本次非沙箱操作审批；未确认的停止结果不代表进程树已退出。'
+            : '当前没有命令 OS 沙箱可用于本轮默认执行；受限配置下需要按模式取得具体非沙箱操作的批准。cwd 无法限制程序访问其他文件、网络或子进程，不能把工作目录或安全评估结果当作隔离。'
+      )
   }
   if (execution) {
     sections.push(
       `本轮运行环境：${JSON.stringify({
+        workMode: mode,
         cwd: execution.cwd,
         permissions: {
           default: '请求批准',
           'auto-approve': '帮我批准（独立风险检查，必要时请求用户批准）',
           'full-access': '完全访问权限'
         }[execution.mode],
-        writableRoots: execution.mode === 'full-access' ? null : [execution.cwd]
+        writableRoots:
+          mode === 'plan' ? [] : execution.mode === 'full-access' ? null : [execution.cwd]
       })}`
     )
   }
   if (snapshot) {
-    sections.push(snapshotRules)
+    sections.push(mode === 'plan' ? planSnapshotRules : snapshotRules)
     sections.push(
       `本轮附件快照清单（仅含附件标识与行数）：${JSON.stringify(
         snapshot.selection.files.map((file) => ({ path: file.path, lines: file.lines }))

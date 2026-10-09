@@ -1,6 +1,7 @@
 import { performance } from 'node:perf_hooks'
 import type { WebContents } from 'electron'
 import type { AgentMessageEvent, AgentResult, ToolCallEvent } from '../../shared/agent'
+import { parseAgentMode } from '../../shared/agent'
 import { parseIncompleteToolTurn, parseToolHistory } from '../../shared/agent-history'
 import type { ProtocolItem } from '../../shared/agent-history'
 import {
@@ -35,6 +36,7 @@ import { captureProjectAccess, hasProjectSelection } from '../project/attachment
 import { captureWorkspaceAccess, hasWorkspaceSelection } from '../project/workspace-access'
 import { readProjectInstruction } from '../project/project-instruction'
 import { createChangeProposalExecutor } from '../tools/change-proposal'
+import { createProjectExecutor } from '../tools/project-file-tools'
 import { createCommandProposalExecutor } from '../tools/command-proposal'
 import type { ProjectSnapshot } from '../tools/project-snapshot'
 import { createTask, newTaskId, updateTask } from '../execution/task-registry'
@@ -100,6 +102,9 @@ export async function runAgentRequest(
 ): Promise<AgentResult> {
   const startedAt = performance.now()
   const trace: string[] = []
+  // Capture once after IPC validation; later UI changes cannot alter this turn.
+  const mode = parseAgentMode(checkedContext.mode)
+  if (!mode) return { status: 'error', error: '工作方式参数无效', trace }
   let observedItems: ProtocolItem[] = []
   const appendTrace = (message: string): void => {
     trace.push(message.slice(0, 500))
@@ -239,9 +244,16 @@ export async function runAgentRequest(
     }
     const checkedScope: ToolScope = toolScopeForAgentRequest(checkedContext)
     const projectExecutor = projectSnapshot
-      ? createChangeProposalExecutor(projectSnapshot, checkedContext.conversationId)
+      ? mode === 'plan'
+        ? createProjectExecutor(projectSnapshot)
+        : createChangeProposalExecutor(projectSnapshot, checkedContext.conversationId)
       : undefined
-    const checkedHistory = parseToolHistory(history, checkedScope, checkedContext.imageHistory)
+    const checkedHistory = parseToolHistory(
+      history,
+      checkedScope,
+      checkedContext.imageHistory,
+      mode
+    )
     const executeCommandProposal = createCommandProposalExecutor()
     if (!checkedHistory) return { status: 'error', error: '工具历史参数无效', trace }
     let imageBytes = capturedImages.reduce((total, captured) => total + captured.image.bytes, 0)
@@ -321,7 +333,7 @@ export async function runAgentRequest(
       }, 240_000)
     let timer = armTimeout()
     try {
-      appendTrace('模式：真实模型 SSE')
+      appendTrace(`工作方式：${mode === 'plan' ? '计划' : '执行'}；真实模型 SSE`)
       const assertWorkspaceAccess = (): boolean => {
         for (const captured of capturedImages) captured.assertCurrent()
         for (const image of historyImages) image.captured.assertCurrent()
@@ -329,10 +341,11 @@ export async function runAgentRequest(
           !controller.signal.aborted && executionStillCurrent(windowId, checkedContext, execution)
         )
       }
-      const commandBackend = await inspectWindowsCommandBackend()
+      const commandBackend = mode === 'execute' ? await inspectWindowsCommandBackend() : null
       controller.signal.throwIfAborted()
       if (!assertWorkspaceAccess()) throw new AgentError('运行上下文已失效，请重新发送')
       const agentRequest = buildAgentRequest({
+        mode,
         snapshot: projectSnapshot,
         workspaceInstruction,
         workspaceId,
@@ -371,6 +384,7 @@ export async function runAgentRequest(
       const approveWorkspaceAction = createWorkspaceAuthorization(authorizationOptions)
       const authorizeWorkspaceCommand = createWorkspaceCommandAuthorization(authorizationOptions)
       const executeTools = createAgentToolExecutor({
+        mode,
         execution,
         assertCurrent: assertWorkspaceAccess,
         approve: approveWorkspaceAction,
@@ -431,7 +445,7 @@ export async function runAgentRequest(
           }
           if (position === undefined) candidate.push(message)
           else candidate[position] = message
-          const checked = parseIncompleteToolTurn(candidate, checkedScope, prompt.trim())
+          const checked = parseIncompleteToolTurn(candidate, checkedScope, prompt.trim(), mode)
           if (!checked) throw new AgentError('公开过程文字超过本轮保存上限')
           observedItems = checked
           if (position === undefined) commentaryPositions.set(event.messageId, candidate.length - 1)
@@ -464,7 +478,7 @@ export async function runAgentRequest(
             output: event.output
           })
         }
-        const checked = parseIncompleteToolTurn(candidate, checkedScope, prompt.trim())
+        const checked = parseIncompleteToolTurn(candidate, checkedScope, prompt.trim(), mode)
         if (checked) observedItems = checked
         else if (event.phase === 'start') {
           throw new AgentError('调用记录已超过本轮保存上限，未继续执行工具')
@@ -508,7 +522,8 @@ export async function runAgentRequest(
           sender.send('model-stream:delta', { requestId: id, delta })
         },
         observeToolCall,
-        observeMessage
+        observeMessage,
+        mode
       )
 
       controller.signal.throwIfAborted()

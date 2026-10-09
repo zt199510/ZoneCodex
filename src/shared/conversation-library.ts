@@ -4,6 +4,7 @@ import type { SavedWorkspace } from './project'
 import { isAbsoluteLocalDirectory } from './settings'
 import { parseTaskRecords } from './task'
 import type { TaskRecord } from './task'
+import { parseAgentMode, type AgentMode } from './agent'
 
 export type Conversation = {
   id: string
@@ -11,6 +12,7 @@ export type Conversation = {
   pinned: boolean
   archived: boolean
   defaultDirectory: string
+  agentMode: AgentMode
   messages: ChatMessage[]
   toolRuns: ToolRun[]
   workspace: SavedWorkspace | null
@@ -18,7 +20,7 @@ export type Conversation = {
 }
 
 export type ConversationLibrary = {
-  version: 7
+  version: 8
   activeConversationId: string | null
   conversations: Conversation[]
 }
@@ -117,6 +119,7 @@ const conversationKeys = [
   'pinned',
   'archived',
   'defaultDirectory',
+  'agentMode',
   'messages',
   'toolRuns',
   'workspace',
@@ -125,7 +128,7 @@ const conversationKeys = [
 
 /** Parse the only supported library format. Historical scopes never restore permissions. */
 export function parseLibrary(value: unknown): ConversationLibrary | null {
-  if (!isRecord(value) || !hasExactKeys(value, libraryKeys) || value.version !== 7) return null
+  if (!isRecord(value) || !hasExactKeys(value, libraryKeys) || value.version !== 8) return null
   if (!Array.isArray(value.conversations) || value.conversations.length > 100) return null
 
   const ids = new Set<string>()
@@ -148,6 +151,8 @@ export function parseLibrary(value: unknown): ConversationLibrary | null {
       return null
     const messages = parseMessages(raw.messages)
     if (!messages) return null
+    const agentMode = parseAgentMode(raw.agentMode)
+    if (!agentMode) return null
     const toolRuns = parseToolRuns(raw.toolRuns, messages)
     if (!toolRuns) return null
     const workspace = parseWorkspace(raw.workspace)
@@ -165,6 +170,7 @@ export function parseLibrary(value: unknown): ConversationLibrary | null {
       pinned: raw.pinned,
       archived: raw.archived,
       defaultDirectory: raw.defaultDirectory,
+      agentMode,
       messages,
       toolRuns,
       workspace,
@@ -180,7 +186,7 @@ export function parseLibrary(value: unknown): ConversationLibrary | null {
   )
     return null
   const result: ConversationLibrary = {
-    version: 7,
+    version: 8,
     activeConversationId: activeId,
     conversations
   }

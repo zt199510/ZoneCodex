@@ -1,8 +1,11 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import type { FormEvent, KeyboardEvent } from 'react'
+import type { AgentMode } from '../../../../shared/agent'
+import { ComposerMode } from './ComposerMode'
 
 export function MessageEditor({
   initialValue,
+  initialMode,
   maxLength,
   disabled,
   onCancel,
@@ -10,13 +13,15 @@ export function MessageEditor({
   imageNotice
 }: {
   initialValue: string
+  initialMode: AgentMode
   maxLength: number
   disabled: boolean
   onCancel: () => void
-  onSend: (content: string) => boolean | Promise<boolean>
+  onSend: (content: string, mode: AgentMode) => boolean | Promise<boolean>
   imageNotice?: string
 }): React.JSX.Element {
   const [value, setValue] = useState(initialValue)
+  const [mode, setMode] = useState(initialMode)
   const textarea = useRef<HTMLTextAreaElement>(null)
   const mounted = useRef(true)
   const version = useRef(0)
@@ -51,7 +56,7 @@ export function MessageEditor({
       setPreparing(false)
       if (accepted && version.current === submittedVersion) onCancel()
     }
-    const accepted = onSend(value)
+    const accepted = onSend(value, mode)
     if (typeof accepted === 'boolean') settle(accepted)
     else {
       pending.current = true
@@ -95,6 +100,16 @@ export function MessageEditor({
       />
       {imageNotice && <p className="message-image-notice">{imageNotice}</p>}
       <div className="message-inline-controls">
+        <ComposerMode
+          mode={mode}
+          onSelect={(next) => {
+            if (disabled || pending.current) return false
+            version.current += 1
+            setMode(next)
+            return true
+          }}
+          disabled={disabled || preparing}
+        />
         <button
           type="button"
           className="message-inline-cancel"

@@ -4,6 +4,7 @@ import type { ProtocolItem, ToolRun } from '../../../../shared/agent-history'
 import type { AgentRequestContext, ProjectSelection, Workspace } from '../../../../shared/project'
 import { toolScopeForAgentRequest } from '../../../../shared/project'
 import type { ChatAttachment, ChatMessage } from '../../../../shared/conversation'
+import type { AgentMode } from '../../../../shared/agent'
 import type { Conversation } from '../../../../shared/conversation-library'
 import {
   hasLocalSideEffects,
@@ -56,6 +57,7 @@ type ActiveRequest = {
 type ChatRetrySource = {
   conversationId: string
   prompt: string
+  mode: AgentMode
   sourceMessages: readonly ChatMessage[]
   sourceToolRuns: readonly ToolRun[]
   snapshotId: string | null
@@ -93,6 +95,7 @@ type ChatRequest = {
   toolActivity: ToolActivity
   send: (
     rawContent: string,
+    mode: AgentMode,
     sourceMessages?: readonly ChatMessage[],
     sourceToolRuns?: readonly ToolRun[],
     targetConversationId?: string | null,
@@ -179,7 +182,8 @@ export function useChatRequest({
       const checked = parseIncompleteToolTurn(
         next,
         toolScopeForAgentRequest(active.context),
-        active.prompt
+        active.prompt,
+        active.context.mode
       )
       if (!checked) return
       if (index === undefined) active.commentaryIndexes.set(event.messageId, checked.length - 1)
@@ -240,7 +244,8 @@ export function useChatRequest({
       const checked = parseIncompleteToolTurn(
         next,
         toolScopeForAgentRequest(active.context),
-        active.prompt
+        active.prompt,
+        active.context.mode
       )
       if (!checked) return
       active.items = checked
@@ -301,7 +306,7 @@ export function useChatRequest({
       requestId: active.requestId,
       userId: active.userId,
       assistantId: active.assistantId,
-      mode: 'live',
+      mode: active.context.mode,
       scope: toolScopeForAgentRequest(active.context),
       trace: finalTrace,
       items
@@ -358,7 +363,7 @@ export function useChatRequest({
       const selected = selectToolContext(
         active.sourceMessages,
         active.sourceToolRuns,
-        'live',
+        active.context.mode,
         scope
       )
       active.history = selected.history
@@ -374,7 +379,7 @@ export function useChatRequest({
             requestId: active.requestId,
             userId: active.userId,
             assistantId: active.assistantId,
-            mode: 'live',
+            mode: active.context.mode,
             scope,
             trace: [],
             items: []
@@ -423,6 +428,7 @@ export function useChatRequest({
 
   function send(
     rawContent: string,
+    mode: AgentMode,
     sourceMessages: readonly ChatMessage[] = messages,
     sourceToolRuns: readonly ToolRun[] = toolRuns,
     targetConversationId: string | null = conversationId,
@@ -478,7 +484,12 @@ export function useChatRequest({
     }
     let request: ReturnType<typeof resolveAgentRequest>
     try {
-      request = resolveAgentRequest(targetConversationId, sourceWorkspace, sourceProjectSelection)
+      request = resolveAgentRequest(
+        targetConversationId,
+        sourceWorkspace,
+        sourceProjectSelection,
+        mode
+      )
       if (frozenImageIds.length)
         request.context = {
           ...request.context,
@@ -532,12 +543,19 @@ export function useChatRequest({
         {
           id: active.userId,
           role: 'user',
+          mode: active.context.mode,
           content,
           status: 'pending',
           ...(images.length ? { images } : {}),
           ...(active.attachments.length > 0 ? { attachments: active.attachments } : {})
         },
-        { id: active.assistantId, role: 'assistant', content: '', status: 'pending' }
+        {
+          id: active.assistantId,
+          role: 'assistant',
+          mode: active.context.mode,
+          content: '',
+          status: 'pending'
+        }
       ]
     }))
     onAccepted?.({
@@ -550,6 +568,7 @@ export function useChatRequest({
     retrySources.current.set(active.assistantId, {
       conversationId: active.conversationId,
       prompt: content,
+      mode: active.context.mode,
       sourceMessages: [...sourceMessages],
       sourceToolRuns: [...sourceToolRuns],
       snapshotId: sourceProjectSelection?.snapshotId ?? null,
@@ -582,6 +601,7 @@ export function useChatRequest({
     if (!source || !canRetry(assistantId)) return false
     const accepted = send(
       source.prompt,
+      source.mode,
       source.sourceMessages,
       source.sourceToolRuns,
       source.conversationId,

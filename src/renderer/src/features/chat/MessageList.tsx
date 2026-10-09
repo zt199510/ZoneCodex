@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { getMessageImages, type ChatMessage } from '../../../../shared/conversation'
+import type { AgentMode } from '../../../../shared/agent'
 import type { ToolRun } from '../../../../shared/agent-history'
 import type { MessageCommandProposal } from '../../../../shared/command-proposal'
 import type { MessageChangeProposal } from '../../../../shared/change-proposal'
@@ -51,7 +52,11 @@ export function MessageList({
   changeProposalStatus?: Readonly<Record<string, ChangeProposalStatus>>
   proposalOpenDisabled?: boolean
   onOpenProposal?: (proposal: MessageChangeProposal, trigger: HTMLButtonElement) => void
-  onSendEditedMessage?: (messageId: string, content: string) => boolean | Promise<boolean>
+  onSendEditedMessage?: (
+    messageId: string,
+    content: string,
+    mode: AgentMode
+  ) => boolean | Promise<boolean>
   editDisabled?: boolean
   editMaxLength?: number
   onCopyMessage?: (message: ChatMessage) => Promise<boolean> | boolean
@@ -141,6 +146,11 @@ export function MessageList({
             }
           >
             {message.role === 'system' && <div className="message-author">系统</div>}
+            {message.role === 'user' && message.mode === 'plan' && (
+              <span className="message-mode" aria-label="工作方式：计划">
+                计划
+              </span>
+            )}
             {(activity ||
               hasProcess ||
               (message.role === 'assistant' && message.status === 'pending')) && (
@@ -158,6 +168,7 @@ export function MessageList({
             {editingId === message.id && onSendEditedMessage ? (
               <MessageEditor
                 initialValue={userContent}
+                initialMode={message.mode}
                 imageNotice={imageNotice}
                 maxLength={
                   editMaxLength -
@@ -165,7 +176,7 @@ export function MessageList({
                 }
                 disabled={editDisabled}
                 onCancel={() => setEditingId(null)}
-                onSend={(content) => onSendEditedMessage(message.id, content)}
+                onSend={(content, mode) => onSendEditedMessage(message.id, content, mode)}
               />
             ) : (
               <div

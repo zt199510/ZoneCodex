@@ -52,7 +52,7 @@ export function createConversationStore(directory: string): {
       typeof value !== 'object' ||
       value === null ||
       !('version' in value) ||
-      value.version !== 7
+      value.version !== 8
     ) {
       throw new Error('会话格式不支持：只读取当前格式，旧记录未被覆盖或删除。')
     }
@@ -100,7 +100,7 @@ export function createConversationStore(directory: string): {
             return {
               ok: true,
               missing: true,
-              snapshot: { version: 7, activeConversationId: null, conversations: [] }
+              snapshot: { version: 8, activeConversationId: null, conversations: [] }
             }
           }
           const snapshot = recoverPending(saved)

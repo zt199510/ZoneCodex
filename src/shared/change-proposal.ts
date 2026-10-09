@@ -121,6 +121,7 @@ export function deriveMessageChangeProposal(
 ): MessageChangeProposal | null {
   if (
     !conversationId ||
+    run.mode !== 'execute' ||
     run.scope.kind !== 'project' ||
     !userMessage ||
     !assistantMessage ||
@@ -128,6 +129,8 @@ export function deriveMessageChangeProposal(
     assistantMessage.role !== 'assistant' ||
     userMessage.status !== 'complete' ||
     assistantMessage.status !== 'complete' ||
+    userMessage.mode !== run.mode ||
+    assistantMessage.mode !== run.mode ||
     run.userId !== userMessage.id ||
     run.assistantId !== assistantMessage.id
   ) {

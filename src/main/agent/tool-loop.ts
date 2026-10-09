@@ -4,7 +4,12 @@ import type { SendResponse } from '../model/response-client'
 import { executeTimeTool } from '../tools/current-time'
 import { parseProtocolTurn } from '../../shared/agent-history'
 import type { ProtocolItem } from '../../shared/agent-history'
-import type { AgentMessageEvent, ToolCallEvent } from '../../shared/agent'
+import {
+  parseAgentMode,
+  type AgentMode,
+  type AgentMessageEvent,
+  type ToolCallEvent
+} from '../../shared/agent'
 import { parseToolScope, isToolAllowed } from '../../shared/project'
 import type { ToolScope } from '../../shared/project'
 
@@ -34,8 +39,10 @@ export async function runToolLoop(
   scope: ToolScope = { kind: 'time' },
   onTextDelta: (delta: string) => void = () => undefined,
   onToolEvent: (event: ToolCallEvent) => void = () => undefined,
-  onMessageEvent?: (event: Omit<AgentMessageEvent, 'requestId'>) => void
+  onMessageEvent?: (event: Omit<AgentMessageEvent, 'requestId'>) => void,
+  mode: AgentMode = 'execute'
 ): Promise<{ answer: string; items: ProtocolItem[] }> {
+  if (!parseAgentMode(mode)) throw new AgentError('工作方式参数无效')
   const parsedScope = parseToolScope(scope)
   if (!parsedScope) throw new AgentError('工具范围参数无效')
   const checkedScope: ToolScope = parsedScope
@@ -178,7 +185,7 @@ export async function runToolLoop(
     if (calls.length === 0) {
       const answer = text.join('\n')
       if (!answer.trim() || answer.length > 16000) throw new AgentError('缺少有效的最终回答')
-      const items = parseProtocolTurn(input.slice(turnStart), checkedScope)
+      const items = parseProtocolTurn(input.slice(turnStart), checkedScope, mode)
       if (!items) throw new AgentError('本轮协议历史不完整或超过保存上限')
       record('获得最终回答')
       return { answer, items }
@@ -188,6 +195,9 @@ export async function runToolLoop(
     if (round === 9 || toolCount >= 8) throw new AgentError('已达到调用上限，未继续执行工具')
     const call = calls[0]
     if (seenCalls.has(call.callId)) throw new AgentError('收到重复 call_id，未重复执行')
+    // The hidden-tool defense precedes tool events and all executor side effects.
+    if (mode === 'plan' && !isToolAllowed(call.name, checkedScope, mode))
+      throw new AgentError('计划模式只允许研究与读取，不能写入、运行命令或生成可执行提案')
     if (!isToolAllowed(call.name, checkedScope))
       throw new AgentError('工具不在当前范围内，任务已停止')
     seenCalls.add(call.callId)

@@ -67,6 +67,7 @@ export function registerFileView(): void {
           throw new Error('工作区上下文已变化，请重新打开文件')
         const context = {
           conversationId: request.conversationId,
+          mode: 'plan' as const,
           ...(source.workspaceId ? { workspaceId: source.workspaceId } : {})
         }
         const execution = await resolveExecutionContext(window.id, context)

@@ -7,6 +7,7 @@ import { AttachmentCards } from '../project/AttachmentCards'
 import { ImageAttachment } from '../project/ImageAttachment'
 import { appendImageTurnNotice, type ImageDescriptor } from '../../../../shared/image-input'
 import { ChatInput } from './ChatInput'
+import { ComposerMode } from './ComposerMode'
 
 export function ChatComposer({
   conversation,
@@ -73,6 +74,17 @@ export function ChatComposer({
                   : undefined
               }
               imageBusy={images?.busy}
+            />
+            <ComposerMode
+              mode={conversation.agentMode}
+              onSelect={conversation.setAgentMode}
+              conversationId={conversation.activeConversationId}
+              disabled={
+                operation !== 'idle' ||
+                !conversation.canNavigate ||
+                executionApprovalPending ||
+                Boolean(images?.busy)
+              }
             />
             <ComposerPermissions
               permissions={conversation.executionPermissions}

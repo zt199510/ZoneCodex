@@ -574,7 +574,7 @@ button.message-tool-file-reference:focus-visible {
   margin-top: 10px;
 }
 
-.message-inline-controls button {
+.message-inline-controls > button {
   padding: 5px 10px;
   border-radius: 6px;
   font-size: 12px;

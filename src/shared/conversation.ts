@@ -1,4 +1,5 @@
 import { getImageTurnNoticeCount, parseImageDescriptors, type ImageDescriptor } from './image-input'
+import { parseAgentMode, type AgentMode } from './agent'
 
 // 每轮用户消息随附的安全展示元数据；不包含文件正文、绝对根目录或授权标识。
 export type ChatAttachment = {
@@ -13,6 +14,7 @@ export type ChatMessage = {
   role: 'user' | 'assistant' | 'system'
   content: string
   status: 'pending' | 'complete' | 'failed' | 'cancelled'
+  mode: AgentMode
   attachments?: ChatAttachment[]
   images?: ImageDescriptor[]
 }
@@ -109,7 +111,7 @@ export function parseMessages(value: unknown): ChatMessage[] | null {
     if (
       !isRecord(item) ||
       Object.keys(item).some(
-        (key) => !['id', 'role', 'content', 'status', 'attachments', 'images'].includes(key)
+        (key) => !['id', 'role', 'content', 'status', 'mode', 'attachments', 'images'].includes(key)
       ) ||
       typeof item.id !== 'string' ||
       !item.id ||
@@ -119,6 +121,8 @@ export function parseMessages(value: unknown): ChatMessage[] | null {
     )
       return null
     const { role, status, content, id } = item
+    const mode = parseAgentMode(item.mode)
+    if (!mode) return null
     if (role !== 'user' && role !== 'assistant' && role !== 'system') return null
     if (
       status !== 'pending' &&
@@ -148,11 +152,14 @@ export function parseMessages(value: unknown): ChatMessage[] | null {
     total += content.length
     if (total > 1_000_000) return null
     ids.add(id)
+    const previous = messages[messages.length - 1]
+    if (role === 'assistant' && previous?.role === 'user' && previous.mode !== mode) return null
     messages.push({
       id,
       role,
       content,
       status,
+      mode,
       ...(attachments ? { attachments } : {}),
       ...(images ? { images } : {})
     })

@@ -1,5 +1,6 @@
 import { useCallback, useLayoutEffect, useRef, useState } from 'react'
 import type { ChatMessage } from '../../../../shared/conversation'
+import { parseAgentMode, type AgentMode } from '../../../../shared/agent'
 import { getMessageImages } from '../../../../shared/conversation'
 import type { ToolRun } from '../../../../shared/agent-history'
 import {
@@ -64,8 +65,10 @@ export type ConversationController = ConversationReviewController & {
   workspace: WorkspaceController
   executionPermissions: ExecutionPermissionsController
   images: ImageSelectionController
+  agentMode: AgentMode
+  setAgentMode: (mode: AgentMode) => boolean
   send: (content: string) => boolean | Promise<boolean>
-  editAndSend: (messageId: string, content: string) => boolean | Promise<boolean>
+  editAndSend: (messageId: string, content: string, mode: AgentMode) => boolean | Promise<boolean>
   stop: () => Promise<void>
   setClosePending: (value: boolean) => void
   getOperation: () => Operation
@@ -76,7 +79,7 @@ export type ConversationController = ConversationReviewController & {
 
 export function useConversation(): ConversationController {
   const [snapshot, setSnapshot] = useState<ConversationLibrary>({
-    version: 7,
+    version: 8,
     activeConversationId: null,
     conversations: []
   })
@@ -90,6 +93,7 @@ export function useConversation(): ConversationController {
   const [conversationError, setConversationError] = useState<string | null>(null)
   const [search, setSearch] = useState('')
   const [draftInheritanceTarget, setDraftInheritanceTarget] = useState<string | null>(null)
+  const [unboundMode, setUnboundMode] = useState<AgentMode>('execute')
   const closePendingRef = useRef(false)
   const {
     invalidate: invalidateTitle,
@@ -269,8 +273,8 @@ export function useConversation(): ConversationController {
   )
 
   const editAndSend = useCallback(
-    (messageId: string, rawContent: string): boolean | Promise<boolean> => {
-      if (!active || !canSubmit) return false
+    (messageId: string, rawContent: string, mode: AgentMode): boolean | Promise<boolean> => {
+      if (!active || !canSubmit || !parseAgentMode(mode)) return false
       const content = rawContent.trim()
       const index = active.messages.findIndex(
         (message) => message.id === messageId && message.role === 'user'
@@ -331,6 +335,7 @@ export function useConversation(): ConversationController {
         let acceptedMessageId: string | null = null
         const accepted = request.send(
           checkedContent,
+          mode,
           trimmedMessages,
           trimmedToolRuns,
           undefined,
@@ -407,6 +412,7 @@ export function useConversation(): ConversationController {
               title: `新会话 ${previous.conversations.length + 1}`,
               pinned: false,
               archived: false,
+              agentMode: inheritDraft ? (active?.agentMode ?? unboundMode) : 'execute',
               messages: [],
               toolRuns: [],
               workspace: null,
@@ -649,10 +655,20 @@ export function useConversation(): ConversationController {
     workspace,
     executionPermissions,
     images,
+    agentMode: active?.agentMode ?? unboundMode,
+    setAgentMode: (mode) => {
+      if (!parseAgentMode(mode) || !canChange() || images.busy) return false
+      if (active) updateConversation(active.id, (previous) => ({ ...previous, agentMode: mode }))
+      else setUnboundMode(mode)
+      return true
+    },
     setClosePending,
     getOperation: operations.getOperation,
     send: (content) => {
       if (!canSubmit) return false
+      // Capture before directory binding or image preparation; this round never
+      // reads a later composer selection, including on retry and edit sends.
+      const mode = active?.agentMode ?? unboundMode
       const group = [...images.pending]
       const question = group.length ? stripImageTurnNotice(content).trim() : content.trim()
       if (
@@ -677,6 +693,7 @@ export function useConversation(): ConversationController {
             : ''
         const accepted = request.send(
           question,
+          mode,
           target.messages,
           target.toolRuns,
           target.id,

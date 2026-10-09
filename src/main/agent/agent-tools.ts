@@ -11,8 +11,11 @@ import {
 } from '../tools/workspace-actions'
 import { canonicalLocalPath } from '../tools/local-path'
 import type { ProjectSnapshot } from '../tools/project-snapshot'
+import { projectTools } from '../tools/project-file-tools'
+import { parseAgentMode, type AgentMode } from '../../shared/agent'
 
 type AgentToolsOptions = {
+  mode: AgentMode
   execution: ExecutionContext
   assertCurrent: () => boolean
   approve: WorkspaceApprove
@@ -28,6 +31,7 @@ type AgentToolsOptions = {
 /** Full-read evidence belongs to this request only and never grants lasting file access. */
 export function createAgentToolExecutor(options: AgentToolsOptions): ExecuteTool {
   const {
+    mode,
     execution,
     assertCurrent,
     approve,
@@ -39,17 +43,29 @@ export function createAgentToolExecutor(options: AgentToolsOptions): ExecuteTool
     projectExecutor,
     executeCommandProposal
   } = options
+  if (!parseAgentMode(mode)) throw new AgentError('工作方式参数无效')
   const readWorkspace = createWorkspaceReadExecutor(execution.info.cwd, assertCurrent, {
     isPathAllowed: () => assertCurrent()
   })
-  const actInWorkspace = createWorkspaceActionExecutor(execution.info.cwd, assertCurrent, approve, {
-    isPathAllowed: () => assertCurrent(),
-    onEffect,
-    authorizeCommand
-  })
+  const actInWorkspace =
+    mode === 'execute'
+      ? createWorkspaceActionExecutor(execution.info.cwd, assertCurrent, approve, {
+          isPathAllowed: () => assertCurrent(),
+          onEffect,
+          authorizeCommand
+        })
+      : null
   const completeReads = new Map<string, string>()
   return async (name, args, signal): Promise<string> => {
     signal.throwIfAborted()
+    // This guard runs before argument parsing, approval, proposals or any action.
+    if (
+      mode === 'plan' &&
+      name !== 'get_current_time' &&
+      !workspaceReadTools.some((tool) => tool.name === name) &&
+      !projectTools.some((tool) => tool.name === name)
+    )
+      throw new AgentError('计划模式只允许研究与读取，不能写入、运行命令或生成可执行提案')
     if (name === 'get_current_time') return executeTimeTool(name, args)
     if (readWorkspace && workspaceReadTools.some((tool) => tool.name === name)) {
       const output = await readWorkspace(name, args, signal)

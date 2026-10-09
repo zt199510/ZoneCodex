@@ -80,7 +80,7 @@ export function deriveMessageCommandProposal(
   user: ChatMessage | undefined,
   assistant: ChatMessage | undefined
 ): MessageCommandProposal | null {
-  if (!parseProtocolTurn(run.items, run.scope)) return null
+  if (run.mode !== 'execute' || !parseProtocolTurn(run.items, run.scope, run.mode)) return null
   if (
     !conversationId ||
     run.scope.kind !== 'project' ||
@@ -88,6 +88,8 @@ export function deriveMessageCommandProposal(
     assistant?.role !== 'assistant' ||
     user.status !== 'complete' ||
     assistant.status !== 'complete' ||
+    user.mode !== run.mode ||
+    assistant.mode !== run.mode ||
     user.id !== run.userId ||
     assistant.id !== run.assistantId
   )
