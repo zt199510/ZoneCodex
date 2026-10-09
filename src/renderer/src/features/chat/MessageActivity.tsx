@@ -3,11 +3,16 @@ import type { ChatMessage } from '../../../../shared/conversation'
 import type { ProtocolItem } from '../../../../shared/agent-history'
 import { commandTemplate } from '../../../../shared/command-proposal'
 import { parseFileReference } from '../../../../shared/file-view'
+import {
+  parseAgentUserInputArguments,
+  parseAgentUserInputResult
+} from '../../../../shared/agent-user-input'
 import { Icon, type IconName } from '../../components/ui/Icon'
 import type { FileViewOrigin, OpenFileReference, OpenFileView } from '../files/file-view-origin'
 import { MarkdownContent } from './MarkdownContent'
 
 const toolLabels: Record<string, string> = {
+  request_user_input: '询问计划选择',
   get_current_time: '读取当前时间',
   search_project_text: '搜索项目文本',
   read_project_file: '读取项目文件',
@@ -205,6 +210,12 @@ function toolState(call: ToolCall, status: ChatMessage['status']): string {
   if (call.output === undefined)
     return status === 'pending' ? 'running' : status === 'cancelled' ? 'cancelled' : 'uncertain'
   const result = readObject(call.output)
+  if (call.name === 'request_user_input') {
+    const question = parseAgentUserInputArguments(readObject(call.arguments))
+    return question && parseAgentUserInputResult(result, question.questions)
+      ? 'completed'
+      : 'uncertain'
+  }
   if (call.name === 'run_workspace_command' && !result) return 'uncertain'
   if (result?.treeExited === false || result?.status === 'uncertain') return 'uncertain'
   if (result?.status === 'timed_out') return 'timed_out'
@@ -402,11 +413,14 @@ function ToolItem({
 }): React.JSX.Element {
   const args = readObject(call.arguments)
   const result = readObject(call.output)
+  const questions = call.name === 'request_user_input' ? parseAgentUserInputArguments(args) : null
+  const confirmed = questions ? parseAgentUserInputResult(result, questions.questions) : null
   const command = call.name === 'run_workspace_command'
   const state = toolState(call, status)
   const requested = toolLabels[call.name] ?? call.name
-  const completedLabel =
-    call.name === 'read_project_file' || call.name === 'read_workspace_file'
+  const completedLabel = confirmed
+    ? '已收到计划回答'
+    : call.name === 'read_project_file' || call.name === 'read_workspace_file'
       ? '已读取'
       : call.name === 'edit_workspace_file' && result?.status === 'applied'
         ? '编辑了'
@@ -519,7 +533,19 @@ function ToolItem({
         </span>
       </summary>
       <div className="message-tool-details">
-        {command && program ? (
+        {questions ? (
+          <dl className="plan-question-history">
+            {questions.questions.map((question) => (
+              <div key={question.id}>
+                <dt>{question.question}</dt>
+                <dd>
+                  {confirmed?.answers.find((answer) => answer.id === question.id)?.answer ??
+                    '尚未回答'}
+                </dd>
+              </div>
+            ))}
+          </dl>
+        ) : command && program ? (
           <>
             <div className="message-tool-field">
               <span>命令</span>
@@ -578,7 +604,9 @@ function ToolItem({
               <p className="message-tool-note">输出已达到捕获上限，部分内容未显示。</p>
             )}
           </>
-        ) : call.output !== undefined && (!command || !result || state === 'uncertain') ? (
+        ) : !questions &&
+          call.output !== undefined &&
+          (!command || !result || state === 'uncertain') ? (
           <div className="message-tool-field">
             <span>结果</span>
             <pre>{result ? JSON.stringify(result, null, 2) : call.output}</pre>
@@ -588,8 +616,12 @@ function ToolItem({
         {call.output === undefined && (
           <p className="message-tool-note">
             {state === 'running'
-              ? '正在处理此调用，结果尚未返回。'
-              : '此调用未返回结果，请核对实际执行情况。'}
+              ? questions
+                ? '等待你回答计划问题。'
+                : '正在处理此调用，结果尚未返回。'
+              : questions
+                ? '本轮已结束，问题未回答。'
+                : '此调用未返回结果，请核对实际执行情况。'}
           </p>
         )}
       </div>

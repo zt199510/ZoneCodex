@@ -5,7 +5,9 @@ import type { ToolRun } from '../../../../shared/agent-history'
 import type { MessageCommandProposal } from '../../../../shared/command-proposal'
 import type { MessageChangeProposal } from '../../../../shared/change-proposal'
 import type { ChangeProposalStatus } from '../review/useConversationReview'
-import type { ToolActivity } from './useChatRequest'
+import type { ToolActivity, PendingPlanQuestion } from './useChatRequest'
+import type { AgentUserInputResponse } from '../../../../shared/agent-user-input'
+import { PlanQuestionCard } from './PlanQuestionCard'
 import type { FileViewOrigin, OpenFileReference, OpenFileView } from '../files/file-view-origin'
 import { Icon } from '../../components/ui/Icon'
 import { MarkdownContent, UserMessageContent } from './MarkdownContent'
@@ -27,6 +29,10 @@ export function MessageList({
   onOpenCommand,
   toolActivity = {},
   toolRuns = [],
+  pendingPlanQuestion = null,
+  onRespondToPlanQuestion,
+  onCancelPlanQuestion,
+  planQuestionDisabled = false,
   changeProposals = {},
   changeProposalStatus = {},
   proposalOpenDisabled = false,
@@ -48,6 +54,10 @@ export function MessageList({
   onOpenCommand?: (proposal: MessageCommandProposal, trigger: HTMLButtonElement) => void
   toolActivity?: ToolActivity
   toolRuns?: readonly ToolRun[]
+  pendingPlanQuestion?: PendingPlanQuestion | null
+  onRespondToPlanQuestion?: (response: AgentUserInputResponse) => Promise<boolean>
+  onCancelPlanQuestion?: () => Promise<void>
+  planQuestionDisabled?: boolean
   changeProposals?: Readonly<Record<string, MessageChangeProposal>>
   changeProposalStatus?: Readonly<Record<string, ChangeProposalStatus>>
   proposalOpenDisabled?: boolean
@@ -165,6 +175,19 @@ export function MessageList({
                 onOpenMessageFile={onOpenMessageFile}
               />
             )}
+            {message.status === 'pending' &&
+              message.mode === 'plan' &&
+              pendingPlanQuestion?.assistantId === message.id &&
+              onRespondToPlanQuestion &&
+              onCancelPlanQuestion && (
+                <PlanQuestionCard
+                  key={pendingPlanQuestion.request.inputId}
+                  request={pendingPlanQuestion.request}
+                  onRespond={onRespondToPlanQuestion}
+                  onCancel={onCancelPlanQuestion}
+                  disabled={planQuestionDisabled}
+                />
+              )}
             {editingId === message.id && onSendEditedMessage ? (
               <MessageEditor
                 initialValue={userContent}

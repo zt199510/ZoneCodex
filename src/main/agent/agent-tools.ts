@@ -13,6 +13,10 @@ import { canonicalLocalPath } from '../tools/local-path'
 import type { ProjectSnapshot } from '../tools/project-snapshot'
 import { projectTools } from '../tools/project-file-tools'
 import { parseAgentMode, type AgentMode } from '../../shared/agent'
+import {
+  parseAgentUserInputArguments,
+  type AgentUserInputArguments
+} from '../../shared/agent-user-input'
 
 type AgentToolsOptions = {
   mode: AgentMode
@@ -26,6 +30,11 @@ type AgentToolsOptions = {
   projectSnapshot: ProjectSnapshot | null
   projectExecutor: ExecuteTool | undefined
   executeCommandProposal: ExecuteTool
+  requestUserInput?: (
+    input: AgentUserInputArguments,
+    signal: AbortSignal,
+    callId: string
+  ) => Promise<string>
 }
 
 /** Full-read evidence belongs to this request only and never grants lasting file access. */
@@ -41,7 +50,8 @@ export function createAgentToolExecutor(options: AgentToolsOptions): ExecuteTool
     onProgress,
     projectSnapshot,
     projectExecutor,
-    executeCommandProposal
+    executeCommandProposal,
+    requestUserInput
   } = options
   if (!parseAgentMode(mode)) throw new AgentError('工作方式参数无效')
   const readWorkspace = createWorkspaceReadExecutor(execution.info.cwd, assertCurrent, {
@@ -56,8 +66,23 @@ export function createAgentToolExecutor(options: AgentToolsOptions): ExecuteTool
         })
       : null
   const completeReads = new Map<string, string>()
-  return async (name, args, signal): Promise<string> => {
+  return async (name, args, signal, callId): Promise<string> => {
     signal.throwIfAborted()
+    if (name === 'request_user_input') {
+      if (mode !== 'plan') throw new AgentError('只有计划模式可以向用户提问')
+      if (!requestUserInput) throw new AgentError('当前请求不支持向用户提问')
+      let input: AgentUserInputArguments | null = null
+      try {
+        if (typeof args === 'string' && args.length <= 4096)
+          input = parseAgentUserInputArguments(JSON.parse(args))
+      } catch {
+        // Invalid model arguments never create a pending question.
+      }
+      if (!input || typeof callId !== 'string' || !callId || callId.length > 200)
+        throw new AgentError('提问参数或工具标识无效')
+      if (!assertCurrent()) throw new AgentError('运行上下文已失效，请重新发送')
+      return requestUserInput(input, signal, callId)
+    }
     // This guard runs before argument parsing, approval, proposals or any action.
     if (
       mode === 'plan' &&

@@ -5,6 +5,10 @@ import type { AgentRequestContext, ProjectSelection, Workspace } from '../../../
 import { toolScopeForAgentRequest } from '../../../../shared/project'
 import type { ChatAttachment, ChatMessage } from '../../../../shared/conversation'
 import type { AgentMode } from '../../../../shared/agent'
+import type {
+  AgentUserInputRequest,
+  AgentUserInputResponse
+} from '../../../../shared/agent-user-input'
 import type { Conversation } from '../../../../shared/conversation-library'
 import {
   hasLocalSideEffects,
@@ -23,6 +27,7 @@ import {
 } from '../../../../shared/image-input'
 
 export type ToolActivity = Record<string, string[]>
+export type PendingPlanQuestion = { assistantId: string; request: AgentUserInputRequest }
 
 // 输入框和请求层共用同一条上限；请求层仍需独立校验，避免其他入口绕过表单限制。
 const maxPromptLength = 2000
@@ -93,6 +98,8 @@ type ChatRequestOptions = {
 type ChatRequest = {
   error: string | null
   toolActivity: ToolActivity
+  pendingPlanQuestion: PendingPlanQuestion | null
+  respondToPlanQuestion: (response: AgentUserInputResponse) => Promise<boolean>
   send: (
     rawContent: string,
     mode: AgentMode,
@@ -140,11 +147,51 @@ export function useChatRequest({
   const { begin, finish } = operations
   const [error, setError] = useState<string | null>(null)
   const [toolActivity, setToolActivity] = useState<ToolActivity>({})
+  const [pendingPlanQuestion, setPendingPlanQuestion] = useState<PendingPlanQuestion | null>(null)
+  const pendingInput = useRef<AgentUserInputRequest | null>(null)
   const activeRequest = useRef<ActiveRequest | null>(null)
   const retrySources = useRef(new Map<string, ChatRetrySource>())
   const subscribed = useRef(false)
 
   useEffect(() => {
+    const receiveInput = (request: AgentUserInputRequest | null): void => {
+      if (!request) {
+        pendingInput.current = null
+        setPendingPlanQuestion(null)
+        return
+      }
+      const active = activeRequest.current
+      if (
+        !active ||
+        active.phase !== 'running' ||
+        active.context.mode !== 'plan' ||
+        request.requestId !== active.requestId ||
+        request.conversationId !== active.conversationId ||
+        !active.items.some(
+          (item) =>
+            item.type === 'function_call' &&
+            item.call_id === request.callId &&
+            item.name === 'request_user_input'
+        )
+      )
+        return
+      pendingInput.current = request
+      setPendingPlanQuestion({ assistantId: active.assistantId, request })
+    }
+    // Recovery is only for a still-live request owned by this mounted hook.
+    // A reloaded window has no active request and cannot revive the old question.
+    let inputEventSeen = false
+    let inputDisposed = false
+    const offInput = window.api.onAgentUserInputChange((request) => {
+      inputEventSeen = true
+      receiveInput(request)
+    })
+    void window.api
+      .getPendingAgentUserInput()
+      .then((request) => {
+        if (!inputDisposed && !inputEventSeen) receiveInput(request)
+      })
+      .catch(() => undefined)
     const offMessage = window.api.onAgentMessageEvent((event) => {
       const active = activeRequest.current
       if (!active || active.phase !== 'running' || active.requestId !== event.requestId) return
@@ -271,6 +318,9 @@ export function useChatRequest({
     subscribed.current = true
     return () => {
       subscribed.current = false
+      inputDisposed = true
+      offInput()
+      pendingInput.current = null
       offMessage()
       offProgress()
       offTool()
@@ -291,6 +341,10 @@ export function useChatRequest({
     items: ProtocolItem[],
     answer?: string
   ): void {
+    if (pendingInput.current?.requestId === active.requestId) {
+      pendingInput.current = null
+      setPendingPlanQuestion(null)
+    }
     active.sideEffectStarted ||= hasLocalSideEffects(trace)
     if (active.sideEffectStarted) retrySources.current.delete(active.assistantId)
     const visibleAnswer =
@@ -420,6 +474,8 @@ export function useChatRequest({
       }
     } finally {
       if (activeRequest.current?.requestId === active.requestId) {
+        pendingInput.current = null
+        setPendingPlanQuestion(null)
         activeRequest.current = null
         finish('generating')
       }
@@ -534,6 +590,8 @@ export function useChatRequest({
         messageId: active.userId
       }))
     activeRequest.current = active
+    pendingInput.current = null
+    setPendingPlanQuestion(null)
     setError(null)
     setToolActivity((previous) => ({ ...previous, [active.assistantId]: ['正在处理请求…'] }))
     updateConversation(active.conversationId, (previous) => ({
@@ -634,9 +692,27 @@ export function useChatRequest({
     }
   }
 
+  async function respondToPlanQuestion(response: AgentUserInputResponse): Promise<boolean> {
+    const active = activeRequest.current
+    const pending = pendingInput.current
+    if (
+      !active ||
+      active.phase !== 'running' ||
+      active.context.mode !== 'plan' ||
+      !pending ||
+      active.requestId !== response.requestId ||
+      pending.requestId !== response.requestId ||
+      pending.inputId !== response.inputId
+    )
+      return false
+    return window.api.respondToAgentUserInput(response)
+  }
+
   return {
     error,
     toolActivity,
+    pendingPlanQuestion,
+    respondToPlanQuestion,
     send,
     canRetry,
     retry,
@@ -645,6 +721,8 @@ export function useChatRequest({
     clearError: () => setError(null),
     clearActivity: () => {
       retrySources.current.clear()
+      pendingInput.current = null
+      setPendingPlanQuestion(null)
       setToolActivity({})
     }
   }

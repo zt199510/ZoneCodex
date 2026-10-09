@@ -121,6 +121,10 @@ export function ChatWorkspace({
             messages={messages}
             toolActivity={conversation.toolActivity}
             toolRuns={conversation.toolRuns}
+            pendingPlanQuestion={conversation.pendingPlanQuestion}
+            onRespondToPlanQuestion={conversation.respondToPlanQuestion}
+            onCancelPlanQuestion={conversation.stop}
+            planQuestionDisabled={!conversation.canRespondToPlanQuestion}
             changeProposals={conversation.changeProposals}
             changeProposalStatus={conversation.changeProposalStatus}
             proposalOpenDisabled={

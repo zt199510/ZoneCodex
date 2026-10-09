@@ -2,6 +2,7 @@ import { performance } from 'node:perf_hooks'
 import type { WebContents } from 'electron'
 import type { AgentMessageEvent, AgentResult, ToolCallEvent } from '../../shared/agent'
 import { parseAgentMode } from '../../shared/agent'
+import { parseAgentUserInputResult } from '../../shared/agent-user-input'
 import { parseIncompleteToolTurn, parseToolHistory } from '../../shared/agent-history'
 import type { ProtocolItem } from '../../shared/agent-history'
 import {
@@ -51,6 +52,7 @@ import {
   createWorkspaceCommandAuthorization
 } from '../execution/action-authorization'
 import { inspectWindowsCommandBackend } from '../execution/windows-command-backend'
+import { requestAgentUserInput } from './agent-user-input'
 
 type Job = { id: string; controller: AbortController; snapshotId?: string; imageIds: Set<string> }
 const jobs = new Map<number, Job>()
@@ -325,12 +327,17 @@ export async function runAgentRequest(
     updateTask(windowId, lifecycleId, 'running')
     let timedOut = false
     let workspaceActionApproved = false
-    const armTimeout = (): NodeJS.Timeout =>
-      setTimeout(() => {
+    let timeoutBudgetMs = 240_000
+    let timeoutArmedAt = performance.now()
+    const armTimeout = (budgetMs = 240_000): NodeJS.Timeout => {
+      timeoutBudgetMs = budgetMs
+      timeoutArmedAt = performance.now()
+      return setTimeout(() => {
         if (controller.signal.aborted) return
         timedOut = true
         cancel()
-      }, 240_000)
+      }, budgetMs)
+    }
     let timer = armTimeout()
     try {
       appendTrace(`工作方式：${mode === 'plan' ? '计划' : '执行'}；真实模型 SSE`)
@@ -338,7 +345,9 @@ export async function runAgentRequest(
         for (const captured of capturedImages) captured.assertCurrent()
         for (const image of historyImages) image.captured.assertCurrent()
         return (
-          !controller.signal.aborted && executionStillCurrent(windowId, checkedContext, execution)
+          jobs.get(windowId) === job &&
+          !controller.signal.aborted &&
+          executionStillCurrent(windowId, checkedContext, execution)
         )
       }
       const commandBackend = mode === 'execute' ? await inspectWindowsCommandBackend() : null
@@ -392,6 +401,50 @@ export async function runAgentRequest(
         projectSnapshot,
         projectExecutor,
         executeCommandProposal,
+        requestUserInput: async (input, signal, callId) => {
+          signal.throwIfAborted()
+          if (mode !== 'plan' || !assertWorkspaceAccess())
+            throw new AgentError('当前请求不允许提问或上下文已失效')
+          if (!updateTask(windowId, lifecycleId, 'waiting_input')) {
+            controller.abort()
+            signal.throwIfAborted()
+          }
+          // Only the model's active work consumes the four-minute budget.
+          // Unlike a fresh request, a resumed question keeps its remaining time.
+          const remainingMs = Math.max(0, timeoutBudgetMs - (performance.now() - timeoutArmedAt))
+          clearTimeout(timer)
+          const message = '等待用户补充计划信息'
+          appendTrace(message)
+          if (!sender.isDestroyed()) sender.send('agent:progress', { requestId: id, message })
+          try {
+            const answers = await requestAgentUserInput(
+              windowId,
+              {
+                requestId: id,
+                conversationId: checkedContext.conversationId,
+                callId,
+                questions: input.questions
+              },
+              signal,
+              assertWorkspaceAccess
+            )
+            signal.throwIfAborted()
+            if (!answers || !assertWorkspaceAccess())
+              throw new AgentError('提问或运行上下文已失效，请重新发送')
+            const result = parseAgentUserInputResult({ answers }, input.questions)
+            if (!result) throw new AgentError('用户回答与计划问题不一致')
+            const resumed = '用户已补充，继续制定方案'
+            appendTrace(resumed)
+            if (!sender.isDestroyed())
+              sender.send('agent:progress', { requestId: id, message: resumed })
+            return JSON.stringify(result)
+          } finally {
+            if (!controller.signal.aborted) {
+              if (updateTask(windowId, lifecycleId, 'running')) timer = armTimeout(remainingMs)
+              else controller.abort()
+            }
+          }
+        },
         appendTrace,
         onProgress: (message) => {
           if (!sender.isDestroyed()) sender.send('agent:progress', { requestId: id, message })

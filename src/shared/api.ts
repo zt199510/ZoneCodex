@@ -42,6 +42,7 @@ import type {
   PermissionMode,
   PermissionsState
 } from './execution'
+import type { AgentUserInputRequest, AgentUserInputResponse } from './agent-user-input'
 
 // 正式聊天与 Agent 共用的流式文字增量事件。
 export type StreamDelta = AgentDelta
@@ -113,6 +114,9 @@ export interface AppAPI {
   getPendingExecutionApproval: () => Promise<ExecutionApproval | null>
   respondToExecutionApproval: (approvalId: string, approved: boolean) => Promise<boolean>
   onExecutionApprovalChange: (listener: (approval: ExecutionApproval | null) => void) => () => void
+  getPendingAgentUserInput: () => Promise<AgentUserInputRequest | null>
+  respondToAgentUserInput: (response: AgentUserInputResponse) => Promise<boolean>
+  onAgentUserInputChange: (listener: (request: AgentUserInputRequest | null) => void) => () => void
   startAgentRequest: (
     requestId: string,
     prompt: string,

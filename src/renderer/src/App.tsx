@@ -41,6 +41,12 @@ function App(): React.JSX.Element {
   }
 
   useEffect(() => {
+    return window.api.onAgentUserInputChange((request) => {
+      if (request) setSettingsOpen(false)
+    })
+  }, [])
+
+  useEffect(() => {
     if (!settingsOpen) return
     // An approval or window-close dialog needs the chat surface that owns it.
     const showPendingDialog = (): void => {

@@ -28,6 +28,7 @@ import {
   parseCommandExecutionRequest
 } from '../shared/command-preparation'
 import { isTaskId, parseTaskRecord, parseTaskRecords } from '../shared/task'
+import { parseAgentUserInputRequest, parseAgentUserInputResponse } from '../shared/agent-user-input'
 
 export const agentAPI: Pick<
   AppAPI,
@@ -48,6 +49,9 @@ export const agentAPI: Pick<
   | 'getPendingExecutionApproval'
   | 'respondToExecutionApproval'
   | 'onExecutionApprovalChange'
+  | 'getPendingAgentUserInput'
+  | 'respondToAgentUserInput'
+  | 'onAgentUserInputChange'
   | 'startAgentRequest'
   | 'cancelAgentRequest'
   | 'onAgentProgress'
@@ -181,6 +185,36 @@ export const agentAPI: Pick<
     }
     ipcRenderer.on('execution:approval-change', handler)
     return () => ipcRenderer.removeListener('execution:approval-change', handler)
+  },
+  getPendingAgentUserInput: async () => {
+    const value: unknown = await ipcRenderer.invoke('agent:user-input-get')
+    if (value === null) return null
+    const request = parseAgentUserInputRequest(value)
+    if (!request) throw new Error('计划提问格式不正确')
+    return request
+  },
+  respondToAgentUserInput: async (response) => {
+    const shaped = parseAgentUserInputResponse(response)
+    if (!shaped) throw new Error('计划回答参数无效')
+    const pending = parseAgentUserInputRequest(await ipcRenderer.invoke('agent:user-input-get'))
+    if (!pending) return false
+    const checked = parseAgentUserInputResponse(shaped, pending)
+    if (!checked) throw new Error('计划回答与当前问题不一致')
+    const result: unknown = await ipcRenderer.invoke('agent:user-input-respond', checked)
+    if (typeof result !== 'boolean') throw new Error('计划回答结果格式不正确')
+    return result
+  },
+  onAgentUserInputChange: (listener) => {
+    const handler = (_event: IpcRendererEvent, value: unknown): void => {
+      if (value === null) {
+        listener(null)
+        return
+      }
+      const request = parseAgentUserInputRequest(value)
+      if (request) listener(request)
+    }
+    ipcRenderer.on('agent:user-input-change', handler)
+    return () => ipcRenderer.removeListener('agent:user-input-change', handler)
   },
   startAgentRequest: async (requestId, prompt, history, context, taskId) => {
     const checkedContext = parseAgentRequestContext(context)

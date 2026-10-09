@@ -10,6 +10,7 @@ export const taskStatuses = [
   'created',
   'running',
   'waiting_approval',
+  'waiting_input',
   'completed',
   'cancelled',
   'failed',

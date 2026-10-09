@@ -72,6 +72,7 @@ export function parseAgentMessageEvent(value: unknown): AgentMessageEvent | null
 // independently enforce the active request's scope before any operation occurs.
 const toolEventNames = new Set([
   'get_current_time',
+  'request_user_input',
   'search_project_text',
   'read_project_file',
   'propose_file_change',

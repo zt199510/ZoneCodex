@@ -3,6 +3,11 @@ import { getMessageImages, type ChatMessage } from './conversation'
 import { parseToolScope, sameToolScope, isToolAllowed } from './project'
 import type { ToolScope } from './project'
 import {
+  parseAgentUserInputArguments,
+  parseAgentUserInputResult,
+  type AgentUserInputArguments
+} from './agent-user-input'
+import {
   hasImageTurnNotice,
   getImageTurnNoticeCount,
   parseImageHistoryReferences,
@@ -93,6 +98,50 @@ function finalText(items: readonly ProtocolItem[]): string {
   return parts.join('\n')
 }
 
+function readUserInputArguments(value: unknown): AgentUserInputArguments | null {
+  if (typeof value !== 'string' || value.length > 4096) return null
+  try {
+    return parseAgentUserInputArguments(JSON.parse(value))
+  } catch {
+    return null
+  }
+}
+
+function readUserInputResult(
+  value: unknown,
+  args: AgentUserInputArguments
+): ReturnType<typeof parseAgentUserInputResult> {
+  if (typeof value !== 'string' || value.length > 12000) return null
+  try {
+    return parseAgentUserInputResult(JSON.parse(value), args.questions)
+  } catch {
+    return null
+  }
+}
+
+// Confirmed answers are user requirements, independent from tool protocol or approval.
+function userInputSummary(items: readonly ProtocolItem[]): string {
+  const lines: string[] = []
+  let pending: { callId: string; args: AgentUserInputArguments } | null = null
+  for (const item of items) {
+    if (item.type === 'function_call' && item.name === 'request_user_input') {
+      const args = readUserInputArguments(item.arguments)
+      pending = args && typeof item.call_id === 'string' ? { callId: item.call_id, args } : null
+    } else if (pending && item.type === 'function_call_output' && item.call_id === pending.callId) {
+      const result = readUserInputResult(item.output, pending.args)
+      if (result)
+        for (const [index, answer] of result.answers.entries()) {
+          const question = pending.args.questions[index]
+          lines.push(`【${question.header}】${question.question}\n用户回答：${answer.answer}`)
+        }
+      pending = null
+    }
+  }
+  return lines.length
+    ? `用户在计划阶段已确认的回答（属于需求信息，不是执行批准）：\n${lines.join('\n\n')}`
+    : ''
+}
+
 // 只接受一轮完整的工具协议；返回深拷贝，保留 output 原有字段。
 export function parseProtocolTurn(
   value: unknown,
@@ -116,6 +165,7 @@ export function parseProtocolTurn(
 
   const calls = new Set<string>()
   let pendingCall: string | null = null
+  let pendingUserInput: AgentUserInputArguments | null = null
   let hasFinal = false
   for (let index = 1; index < items.length; index++) {
     const item = items[index]
@@ -135,11 +185,17 @@ export function parseProtocolTurn(
         return null
       calls.add(item.call_id)
       pendingCall = item.call_id
+      if (item.name === 'request_user_input') {
+        pendingUserInput = readUserInputArguments(item.arguments)
+        if (!pendingUserInput) return null
+      }
     } else if (item.type === 'function_call_output') {
       if (pendingCall === null || item.call_id !== pendingCall || typeof item.output !== 'string') {
         return null
       }
+      if (pendingUserInput && !readUserInputResult(item.output, pendingUserInput)) return null
       pendingCall = null
+      pendingUserInput = null
     } else if (item.type === 'reasoning') {
       if (
         !Array.isArray(item.summary) ||
@@ -240,6 +296,7 @@ export function parseIncompleteToolTurn(
     return null
   const calls = new Set<string>()
   let pendingCall: string | null = null
+  let pendingUserInput: AgentUserInputArguments | null = null
   for (const item of items.slice(1)) {
     if (item.type === 'function_call') {
       if (
@@ -257,6 +314,10 @@ export function parseIncompleteToolTurn(
         return null
       calls.add(item.call_id)
       pendingCall = item.call_id
+      if (item.name === 'request_user_input') {
+        pendingUserInput = readUserInputArguments(item.arguments)
+        if (!pendingUserInput) return null
+      }
     } else if (item.type === 'function_call_output') {
       if (
         Object.keys(item).length !== 3 ||
@@ -266,7 +327,9 @@ export function parseIncompleteToolTurn(
         item.output.length > 12000
       )
         return null
+      if (pendingUserInput && !readUserInputResult(item.output, pendingUserInput)) return null
       pendingCall = null
+      pendingUserInput = null
     } else if (item.type === 'message') {
       if (
         Object.keys(item).length !== 4 ||
@@ -443,10 +506,21 @@ export function selectToolContext(
     } else if (crossedModes || hasSavedImages) {
       // 跨工作方式后只保留用户任务与最终文字；更早的工具和推理也不重放。
       // 合法原图继续按用户消息关联，不恢复旧范围或批准。
+      const confirmedAnswers = run ? userInputSummary(run.items) : ''
       selected.unshift({
         user,
         items: [
           { role: 'user', content: user.content },
+          ...(confirmedAnswers
+            ? [
+                {
+                  type: 'message',
+                  role: 'assistant',
+                  phase: 'commentary',
+                  content: [{ type: 'output_text', text: confirmedAnswers }]
+                }
+              ]
+            : []),
           {
             type: 'message',
             role: 'assistant',

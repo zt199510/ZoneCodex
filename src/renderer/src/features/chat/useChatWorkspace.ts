@@ -233,7 +233,7 @@ export function useChatWorkspace(conversation: ConversationController): ChatWork
   useLayoutEffect(() => {
     const area = scrollArea.current
     if (area) settleScroll(area)
-  }, [messages, conversation.toolRuns, conversation.toolActivity])
+  }, [messages, conversation.toolRuns, conversation.toolActivity, conversation.pendingPlanQuestion])
 
   function send(content: string): boolean | Promise<boolean> {
     const draftAtSend = currentDraft.current

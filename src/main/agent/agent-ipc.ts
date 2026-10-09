@@ -4,10 +4,12 @@ import { isAgentId } from '../../shared/agent'
 import { parseAgentRequestContext } from '../../shared/project'
 import { getIpcWindow } from '../ipc-source'
 import { runAgentRequest, cancelAgentJob } from './agent-runner'
+import { registerAgentUserInput } from './agent-user-input'
 
 export function registerAgentRequest(
   isPreparationActive: (windowId: number) => boolean = () => false
 ): void {
+  registerAgentUserInput()
   ipcMain.handle(
     'agent:start',
     async (

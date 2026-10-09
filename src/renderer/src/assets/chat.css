@@ -653,3 +653,138 @@ button.message-tool-file-reference:focus-visible {
     opacity: 1;
   }
 }
+
+.plan-question-card {
+  margin: 14px 0;
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--panel, #fff);
+  overflow-wrap: anywhere;
+}
+
+.plan-question-title {
+  margin: 0 0 14px;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.plan-question-card fieldset {
+  min-width: 0;
+  margin: 0 0 16px;
+  padding: 0;
+  border: 0;
+}
+
+.plan-question-card legend {
+  margin-bottom: 10px;
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+.plan-question-header {
+  display: block;
+  margin-bottom: 4px;
+  color: var(--soft-text);
+  font-size: 12px;
+}
+
+.plan-question-option {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  margin-top: 7px;
+  padding: 9px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font-size: 13px;
+  line-height: 1.5;
+  cursor: pointer;
+}
+
+.plan-question-option:has(input:checked) {
+  border-color: #789471;
+  background: #f5f8f4;
+}
+
+.plan-question-option input {
+  flex: none;
+  margin: 3px 0 0;
+  accent-color: #52674c;
+}
+
+.plan-question-option strong {
+  font-weight: 500;
+}
+
+.plan-question-description {
+  display: block;
+  color: var(--soft-text);
+  font-size: 12px;
+}
+
+.plan-question-custom {
+  box-sizing: border-box;
+  width: 100%;
+  margin-top: 8px;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  resize: vertical;
+  background: #fff;
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.plan-question-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.plan-question-actions button {
+  padding: 7px 12px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: #fff;
+  font-size: 13px;
+}
+
+.plan-question-actions button[type='submit'] {
+  border-color: #303a30;
+  background: #303a30;
+  color: #fff;
+}
+
+.plan-question-actions button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.plan-question-error {
+  color: #a23f35;
+  font-size: 13px;
+}
+
+.plan-question-history {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+
+.plan-question-history > div + div {
+  margin-top: 10px;
+}
+
+.plan-question-history dt {
+  color: var(--soft-text);
+}
+
+.plan-question-history dd {
+  margin: 4px 0 0;
+  white-space: pre-wrap;
+}

@@ -38,7 +38,7 @@ export type SavedWorkspace = {
 }
 
 export type TaskStatus =
-  'idle' | 'running' | 'waiting_approval' | 'completed' | 'cancelled' | 'failed'
+  'idle' | 'running' | 'waiting_approval' | 'waiting_input' | 'completed' | 'cancelled' | 'failed'
 
 export type PermissionStatus = 'unscoped' | 'scoped' | 'expired' | 'revoked'
 
@@ -471,6 +471,7 @@ export function isToolAllowed(
   mode: AgentMode = 'execute'
 ): name is string {
   if (!parseAgentMode(mode)) return false
+  if (name === 'request_user_input') return mode === 'plan'
   if (
     mode === 'plan' &&
     (name === 'create_workspace_file' ||

@@ -16,7 +16,8 @@ import type { ToolScope } from '../../shared/project'
 export type ExecuteTool = (
   name: string,
   argumentsText: string,
-  signal: AbortSignal
+  signal: AbortSignal,
+  callId?: string
 ) => Promise<string>
 
 export function isRecord(value: unknown): value is Record<string, unknown> {
@@ -198,7 +199,7 @@ export async function runToolLoop(
     // The hidden-tool defense precedes tool events and all executor side effects.
     if (mode === 'plan' && !isToolAllowed(call.name, checkedScope, mode))
       throw new AgentError('计划模式只允许研究与读取，不能写入、运行命令或生成可执行提案')
-    if (!isToolAllowed(call.name, checkedScope))
+    if (!isToolAllowed(call.name, checkedScope, mode))
       throw new AgentError('工具不在当前范围内，任务已停止')
     seenCalls.add(call.callId)
     signal.throwIfAborted()
@@ -212,7 +213,7 @@ export async function runToolLoop(
       ...(visibleCommentary && !onMessageEvent ? { commentary: visibleCommentary } : {})
     })
     const startedAt = performance.now()
-    const output = await execute(call.name, call.arguments, signal)
+    const output = await execute(call.name, call.arguments, signal, call.callId)
     if (typeof output !== 'string') throw new AgentError('工具结果格式不正确，任务已停止')
     if (output.length > 12000) throw new AgentError('工具结果过长，任务已停止')
     onToolEvent({

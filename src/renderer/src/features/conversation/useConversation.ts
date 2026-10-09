@@ -10,7 +10,8 @@ import {
   maxConversationTitleLength
 } from '../../../../shared/conversation-library'
 import type { Conversation, ConversationLibrary } from '../../../../shared/conversation-library'
-import { useChatRequest, type ToolActivity } from '../chat/useChatRequest'
+import { useChatRequest, type ToolActivity, type PendingPlanQuestion } from '../chat/useChatRequest'
+import type { AgentUserInputResponse } from '../../../../shared/agent-user-input'
 import { useProjectSelection } from '../project/useProjectSelection'
 import { useImageSelection, type ImageSelectionController } from '../project/useImageSelection'
 import {
@@ -73,6 +74,9 @@ export type ConversationController = ConversationReviewController & {
   setClosePending: (value: boolean) => void
   getOperation: () => Operation
   toolActivity: ToolActivity
+  pendingPlanQuestion: PendingPlanQuestion | null
+  respondToPlanQuestion: (response: AgentUserInputResponse) => Promise<boolean>
+  canRespondToPlanQuestion: boolean
   toolRuns: readonly ToolRun[]
   removeFile: (path: string) => Promise<boolean>
 }
@@ -732,6 +736,10 @@ export function useConversation(): ConversationController {
     },
     editAndSend,
     toolActivity: visibleActivity,
+    pendingPlanQuestion: request.pendingPlanQuestion,
+    respondToPlanQuestion: (response) =>
+      closePendingRef.current ? Promise.resolve(false) : request.respondToPlanQuestion(response),
+    canRespondToPlanQuestion: !closePending && operations.operation === 'generating',
     toolRuns: active?.toolRuns ?? [],
     removeFile,
     preparation,

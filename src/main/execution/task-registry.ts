@@ -26,8 +26,17 @@ const byRequest = new Map<number, Set<string>>()
 
 const allowedTransitions: Record<TaskRecordStatus, readonly TaskRecordStatus[]> = {
   created: ['running', 'waiting_approval', 'cancelled', 'failed', 'interrupted'],
-  running: ['waiting_approval', 'completed', 'cancelled', 'failed', 'timed_out', 'interrupted'],
+  running: [
+    'waiting_approval',
+    'waiting_input',
+    'completed',
+    'cancelled',
+    'failed',
+    'timed_out',
+    'interrupted'
+  ],
   waiting_approval: ['running', 'cancelled', 'failed', 'timed_out', 'interrupted'],
+  waiting_input: ['running', 'cancelled', 'failed', 'timed_out', 'interrupted'],
   completed: [],
   cancelled: [],
   failed: [],
@@ -143,7 +152,7 @@ export function updateTask(
   if (!previous || isTerminalTaskStatus(previous.status)) return null
   if (status === previous.status) return { ...previous }
   if (!canTransitionTaskStatus(previous.status, status)) return null
-  const active = status === 'running' || status === 'waiting_approval'
+  const active = status === 'running' || status === 'waiting_approval' || status === 'waiting_input'
   const next: TaskRecord = {
     ...previous,
     status,
@@ -189,7 +198,7 @@ export function cancelTask(windowId: number, taskId: string): boolean {
   // terminal transition and will publish `cancelled` after it has stopped.
   try {
     runtime.cancel()
-    if (record.status === 'waiting_approval') {
+    if (record.status === 'waiting_approval' || record.status === 'waiting_input') {
       return updateTask(windowId, taskId, 'cancelled', { error: '用户已取消任务' }) !== null
     }
     return true
@@ -204,7 +213,7 @@ export function cleanupTasksForSnapshot(windowId: number, snapshotId: string): v
     try {
       runtime.cancel()
       const record = get(windowId, taskId)
-      if (record?.status === 'waiting_approval') {
+      if (record?.status === 'waiting_approval' || record?.status === 'waiting_input') {
         updateTask(windowId, taskId, 'cancelled', { error: '工作区授权已撤销' })
       }
     } catch {
