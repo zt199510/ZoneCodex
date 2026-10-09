@@ -20,7 +20,7 @@ export type Conversation = {
 }
 
 export type ConversationLibrary = {
-  version: 8
+  version: 9
   activeConversationId: string | null
   conversations: Conversation[]
 }
@@ -128,7 +128,7 @@ const conversationKeys = [
 
 /** Parse the only supported library format. Historical scopes never restore permissions. */
 export function parseLibrary(value: unknown): ConversationLibrary | null {
-  if (!isRecord(value) || !hasExactKeys(value, libraryKeys) || value.version !== 8) return null
+  if (!isRecord(value) || !hasExactKeys(value, libraryKeys) || value.version !== 9) return null
   if (!Array.isArray(value.conversations) || value.conversations.length > 100) return null
 
   const ids = new Set<string>()
@@ -186,7 +186,7 @@ export function parseLibrary(value: unknown): ConversationLibrary | null {
   )
     return null
   const result: ConversationLibrary = {
-    version: 8,
+    version: 9,
     activeConversationId: activeId,
     conversations
   }

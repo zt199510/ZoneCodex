@@ -14,6 +14,7 @@ import { basename, dirname, isAbsolute, join, parse, relative, sep, win32 } from
 import { commitChange } from './change-commit'
 import { prepareChange } from './change-preparation'
 import { createProjectSnapshot } from './project-snapshot'
+import { applyWorkspacePatch } from './workspace-patch'
 import type { ProjectExecutor } from './project-file-tools'
 import { canonicalLocalPath, insideLocalPath, localPathParts, sameLocalPath } from './local-path'
 
@@ -52,18 +53,18 @@ export const workspaceActionTools = [
   },
   {
     type: 'function',
-    name: 'edit_workspace_file',
+    name: 'apply_workspace_patch',
     description:
-      'Replace one fully read local text file with complete new content under the current runtime permission and approval policy. The path may be relative to the default working directory or absolute. Limited to 80 lines and 2000 characters.',
+      'Apply exact context patches to one existing UTF-8 text file fully read in this request. Send path, the raw-byte sha256 from that read, and patch text: *** Begin Patch, *** Update File: <same path>, one or more bare @@ hunk headers with space-prefixed context, - old lines and + new lines, then *** End Patch (each on its own line). Optional *** End of File anchors the final hunk at the end. Use exact unique old context, never line numbers or @@ descriptions. Do not include line-number prefixes or BOM. The main process preserves BOM, LF/CRLF and the original trailing-newline count. No add/delete/move or multi-file patches. Source and candidate remain limited to 80 lines and 2000 characters. Subject to the current permission and approval policy.',
     strict: true,
     parameters: {
       type: 'object',
       properties: {
         path: { type: 'string', minLength: 1, maxLength: 512 },
-        proposedText: { type: 'string', maxLength: 2000 },
+        patch: { type: 'string', minLength: 1, maxLength: 6000 },
         expectedSha256: { type: 'string', pattern: '^[a-f0-9]{64}$' }
       },
-      required: ['path', 'proposedText', 'expectedSha256'],
+      required: ['path', 'patch', 'expectedSha256'],
       additionalProperties: false
     }
   },
@@ -118,8 +119,8 @@ function result(status: string, details: Record<string, unknown> = {}): string {
   return JSON.stringify({ status, ...details })
 }
 
-function parseArguments(raw: string): Record<string, unknown> | null {
-  if (typeof raw !== 'string' || raw.length > MAX_ARGUMENTS) return null
+function parseArguments(raw: string, limit = MAX_ARGUMENTS): Record<string, unknown> | null {
+  if (typeof raw !== 'string' || raw.length > limit) return null
   try {
     const value: unknown = JSON.parse(raw)
     if (!value || typeof value !== 'object' || Array.isArray(value)) return null
@@ -588,7 +589,10 @@ export function createWorkspaceActionExecutor(
 
   return async (name, rawArguments, signal) => {
     signal.throwIfAborted()
-    const args = parseArguments(rawArguments)
+    const args = parseArguments(
+      rawArguments,
+      name === 'apply_workspace_patch' ? 12000 : MAX_ARGUMENTS
+    )
     if (!args) return result('error', { error: '工具参数无效或过长' })
 
     if (name === 'create_workspace_file') {
@@ -615,16 +619,16 @@ export function createWorkspaceActionExecutor(
       }
     }
 
-    if (name === 'edit_workspace_file') {
+    if (name === 'apply_workspace_patch') {
       if (
-        !exactKeys(args, ['path', 'proposedText', 'expectedSha256']) ||
+        !exactKeys(args, ['path', 'patch', 'expectedSha256']) ||
         !validFilePath(args.path) ||
-        typeof args.proposedText !== 'string' ||
-        args.proposedText.length > 2000 ||
+        typeof args.patch !== 'string' ||
+        args.patch.length > 6000 ||
         typeof args.expectedSha256 !== 'string' ||
         !/^[a-f0-9]{64}$/.test(args.expectedSha256)
       ) {
-        return result('error', { error: '编辑参数无效' })
+        return result('error', { error: '补丁参数无效' })
       }
       try {
         const cwd = await checkedRoot(root, assertAccess)
@@ -646,11 +650,18 @@ export function createWorkspaceActionExecutor(
         ) {
           return result('conflict', { path, error: '文件内容已变化，请重新读取后再修改' })
         }
-        const prepared = await prepareChange(snapshot, alias, args.proposedText, signal)
+        if (baseline.newline === 'unsupported')
+          return result('unsupported', { path, error: '暂不修改混合换行或孤立 CR 文件' })
+        const originalText = snapshot.files.get(alias)?.join('\n')
+        if (originalText === undefined) return result('error', { path, error: '缺少原文基线' })
+        const candidate = applyWorkspacePatch(originalText, args.patch, args.path)
+        if (candidate.status !== 'candidate')
+          return result('error', { path, error: candidate.error })
+        const prepared = await prepareChange(snapshot, alias, candidate.text, signal)
         signal.throwIfAborted()
         if (!assertAccess()) return result('error', { error: '工作区授权已失效' })
         if (prepared.status !== 'prepared')
-          return result(prepared.status, { error: prepared.error })
+          return result(prepared.status, { path, error: prepared.error, hunks: candidate.hunks })
 
         const accepted = await approve(
           {
@@ -684,6 +695,10 @@ export function createWorkspaceActionExecutor(
         }
         return result(outcome.status, {
           path,
+          hunks: candidate.hunks,
+          ...(outcome.status === 'applied'
+            ? { sha256: createHash('sha256').update(prepared.candidateBytes).digest('hex') }
+            : {}),
           message: outcome.status === 'applied' ? '文件修改已提交并复核' : outcome.message,
           ...(outcome.recovery ? { recoveryPath: outcome.recovery.path } : {}),
           cleanupWarning: outcome.cleanupWarning,

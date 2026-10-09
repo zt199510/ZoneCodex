@@ -22,7 +22,7 @@ const toolLabels: Record<string, string> = {
   search_workspace_text: '搜索文本',
   read_workspace_file: '读取文件',
   create_workspace_file: '新建文件',
-  edit_workspace_file: '修改文件',
+  apply_workspace_patch: '修改文件',
   run_workspace_command: '运行命令'
 }
 const resultLabels: Record<string, string> = {
@@ -152,14 +152,14 @@ function toolTarget(
       'read_project_file',
       'read_workspace_file',
       'create_workspace_file',
-      'edit_workspace_file',
+      'apply_workspace_patch',
       'propose_file_change'
     ].includes(name) &&
     typeof args.path === 'string' &&
     args.path
   ) {
     const path =
-      ['read_workspace_file', 'create_workspace_file', 'edit_workspace_file'].includes(name) &&
+      ['read_workspace_file', 'create_workspace_file', 'apply_workspace_patch'].includes(name) &&
       typeof result?.path === 'string' &&
       result.path
         ? result.path
@@ -185,7 +185,7 @@ function toolIcon(name: string): IconName {
   if (name === 'run_workspace_command' || name === 'propose_command') return 'terminal'
   if (name.includes('search')) return 'search'
   if (name === 'read_project_file' || name === 'read_workspace_file') return 'book'
-  if (name === 'edit_workspace_file' || name === 'propose_file_change') return 'edit'
+  if (name === 'apply_workspace_patch' || name === 'propose_file_change') return 'edit'
   if (name.includes('file')) return 'file'
   return 'code'
 }
@@ -193,7 +193,7 @@ const fileTools = new Set([
   'read_project_file',
   'read_workspace_file',
   'create_workspace_file',
-  'edit_workspace_file',
+  'apply_workspace_patch',
   'propose_file_change'
 ])
 function formatElapsed(milliseconds: number, pending = false): string {
@@ -253,7 +253,7 @@ const toolCategories = [
     completed: '已读取文件',
     icon: 'book'
   },
-  { names: ['edit_workspace_file'], action: '编辑文件', completed: '编辑了文件', icon: 'edit' },
+  { names: ['apply_workspace_patch'], action: '编辑文件', completed: '编辑了文件', icon: 'edit' },
   { names: ['create_workspace_file'], action: '新建文件', completed: '新建了文件', icon: 'file' },
   {
     names: ['run_workspace_command'],
@@ -307,7 +307,7 @@ function groupSummary(
     const states = new Set(categoryCalls.map((call) => toolState(call, status)))
     if (states.size === 1 && states.has('completed')) {
       if (
-        category.names.includes('edit_workspace_file') &&
+        category.names.includes('apply_workspace_patch') &&
         categoryCalls.every((call) => readObject(call.output)?.status === 'no_change')
       )
         return '文件没有变化'
@@ -422,7 +422,7 @@ function ToolItem({
     ? '已收到计划回答'
     : call.name === 'read_project_file' || call.name === 'read_workspace_file'
       ? '已读取'
-      : call.name === 'edit_workspace_file' && result?.status === 'applied'
+      : call.name === 'apply_workspace_patch' && result?.status === 'applied'
         ? '编辑了'
         : call.name === 'create_workspace_file' && result?.status === 'created'
           ? '新建了'
@@ -456,7 +456,7 @@ function ToolItem({
   const snapshotFile = call.name === 'read_project_file' || call.name === 'propose_file_change'
   const existingWriteTarget =
     (call.name === 'create_workspace_file' && result?.status === 'created') ||
-    (call.name === 'edit_workspace_file' &&
+    (call.name === 'apply_workspace_patch' &&
       (result?.status === 'applied' || result?.status === 'no_change'))
   const readableTarget =
     state !== 'failed' &&
@@ -722,7 +722,7 @@ export function MessageActivity({
     if (result) return [{ name: result[1], label: resultLabels[result[2]] ?? result[2], index }]
     const name = /^执行工具：([a-z_]+)(?:$|[；;])/.exec(line)?.[1]
     return name &&
-      !['create_workspace_file', 'edit_workspace_file', 'run_workspace_command'].includes(name)
+      !['create_workspace_file', 'apply_workspace_patch', 'run_workspace_command'].includes(name)
       ? [{ name, label: toolLabels[name] ?? name, index }]
       : []
   })

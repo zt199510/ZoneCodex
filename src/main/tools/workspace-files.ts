@@ -7,6 +7,12 @@ import { AgentError } from '../errors'
 import { canonicalLocalPath, insideLocalPath, localPathParts } from './local-path'
 
 export type WorkspaceReadOptions = { isPathAllowed?: (target: string) => boolean }
+export type WorkspaceReadFormat = {
+  encoding: 'utf-8'
+  hasUtf8Bom: boolean
+  newline: 'lf' | 'crlf' | 'none' | 'unsupported'
+  trailingNewlines: number
+}
 
 const maxFileBytes = 128 * 1024
 const maxSearchBytes = 2 * 1024 * 1024
@@ -16,6 +22,27 @@ const maxVisitedEntries = 3000
 const maxDepth = 8
 const maxResultLength = 11000
 const maxReadLines = 100
+const maxPatchLines = 80
+const maxPatchTextLength = 2000
+
+function readFormat(text: string, hasUtf8Bom: boolean): WorkspaceReadFormat {
+  const separators = text.match(/\r\n|\n|\r/g) ?? []
+  const newline =
+    separators.length === 0
+      ? 'none'
+      : separators.every((separator) => separator === '\n')
+        ? 'lf'
+        : separators.every((separator) => separator === '\r\n')
+          ? 'crlf'
+          : 'unsupported'
+  const trailing = text.match(/(?:\r\n|\n|\r)+$/)?.[0] ?? ''
+  return {
+    encoding: 'utf-8',
+    hasUtf8Bom,
+    newline,
+    trailingNewlines: (trailing.match(/\r\n|\n|\r/g) ?? []).length
+  }
+}
 
 const skippedDirectories = new Set([
   '.git',
@@ -113,6 +140,7 @@ function boundedResult<T>(
     const result = JSON.stringify({
       ok: true,
       ...rest,
+      ...('fullText' in rest && count < values.length ? { fullText: null } : {}),
       [field]: values.slice(0, count),
       truncated: truncated || count < values.length
     })
@@ -159,7 +187,7 @@ export const workspaceReadTools = [
     type: 'function',
     name: 'read_workspace_file',
     description:
-      '按行读取运行权限允许的本地 UTF-8 文本文件；path 接受相对于默认运行目录的路径或本地绝对路径，每次最多 100 行，结果返回实际目标路径。',
+      '按行读取运行权限允许的本地 UTF-8 文本文件；path 接受相对于默认运行目录的路径或本地绝对路径，每次最多 100 行。结果返回实际目标路径、原字节哈希和格式信息；从第一行完整读取且未截断的 80 行、2000 字符以内小文件还提供无 BOM、规范 LF 的 fullText，其余为 null。',
     strict: true,
     parameters: {
       type: 'object',
@@ -225,7 +253,7 @@ export function createWorkspaceReadExecutor(
   async function readText(
     path: string,
     signal: AbortSignal
-  ): Promise<{ path: string; text: string; sha256: string } | null> {
+  ): Promise<{ path: string; text: string; sha256: string; format: WorkspaceReadFormat } | null> {
     const before = await checkedPath(path, signal)
     if (!before.info.isFile() || before.info.nlink !== 1 || before.info.size > maxFileBytes)
       return null
@@ -257,7 +285,10 @@ export function createWorkspaceReadExecutor(
       )
         return null
       try {
-        const text = new TextDecoder('utf-8', { fatal: true }).decode(buffer.subarray(0, length))
+        const bytes = buffer.subarray(0, length)
+        const hasUtf8Bom =
+          bytes.length >= 3 && bytes[0] === 0xef && bytes[1] === 0xbb && bytes[2] === 0xbf
+        const text = new TextDecoder('utf-8', { fatal: true }).decode(bytes)
         const containsControlCharacter = Array.from(text).some((character) => {
           const code = character.charCodeAt(0)
           return code < 32 && ![9, 10, 13].includes(code)
@@ -267,7 +298,8 @@ export function createWorkspaceReadExecutor(
           : {
               path: before.path,
               text,
-              sha256: createHash('sha256').update(buffer.subarray(0, length)).digest('hex')
+              sha256: createHash('sha256').update(bytes).digest('hex'),
+              format: readFormat(text, hasUtf8Bom)
             }
       } catch {
         return null
@@ -465,10 +497,25 @@ export function createWorkspaceReadExecutor(
             text: line.slice(0, 2000),
             truncated: line.length > 2000
           }))
+        const normalizedText = lines.join('\n')
+        const fullText =
+          args.startLine === 1 &&
+          endLine === lines.length &&
+          lines.length <= maxPatchLines &&
+          normalizedText.length <= maxPatchTextLength &&
+          selected.every((line) => !line.truncated)
+            ? normalizedText
+            : null
         return boundedResult(
           'lines',
           selected,
-          { path: outputPath(file.path), totalLines: lines.length, sha256: file.sha256 },
+          {
+            path: outputPath(file.path),
+            totalLines: lines.length,
+            sha256: file.sha256,
+            format: file.format,
+            fullText
+          },
           false
         )
       } catch (error) {

@@ -83,7 +83,7 @@ export type ConversationController = ConversationReviewController & {
 
 export function useConversation(): ConversationController {
   const [snapshot, setSnapshot] = useState<ConversationLibrary>({
-    version: 8,
+    version: 9,
     activeConversationId: null,
     conversations: []
   })

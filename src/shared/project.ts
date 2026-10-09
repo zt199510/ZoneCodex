@@ -475,7 +475,7 @@ export function isToolAllowed(
   if (
     mode === 'plan' &&
     (name === 'create_workspace_file' ||
-      name === 'edit_workspace_file' ||
+      name === 'apply_workspace_patch' ||
       name === 'run_workspace_command' ||
       name === 'propose_file_change' ||
       name === 'propose_command')
@@ -488,7 +488,7 @@ export function isToolAllowed(
         name === 'search_workspace_text' ||
         name === 'read_workspace_file' ||
         name === 'create_workspace_file' ||
-        name === 'edit_workspace_file' ||
+        name === 'apply_workspace_patch' ||
         name === 'run_workspace_command')) ||
     (scope.kind === 'project' &&
       (name === 'search_project_text' ||

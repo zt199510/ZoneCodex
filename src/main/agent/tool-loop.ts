@@ -6,6 +6,7 @@ import { parseProtocolTurn } from '../../shared/agent-history'
 import type { ProtocolItem } from '../../shared/agent-history'
 import {
   parseAgentMode,
+  toolArgumentsLimit,
   type AgentMode,
   type AgentMessageEvent,
   type ToolCallEvent
@@ -134,7 +135,7 @@ export async function runToolLoop(
           !item.name ||
           item.name.length > 80 ||
           typeof item.arguments !== 'string' ||
-          item.arguments.length > 4096
+          item.arguments.length > toolArgumentsLimit(item.name)
         ) {
           throw new AgentError('工具调用字段无效')
         }

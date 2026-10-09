@@ -18,6 +18,7 @@ function loadBundled(relativePath, additionalExports = '') {
     },
     bundle: true,
     platform: 'node',
+    external: ['electron'],
     format: 'cjs',
     write: false,
     logLevel: 'silent'
@@ -219,7 +220,7 @@ async function main() {
     assert.equal(isToolAllowed('run_workspace_command', scopeA), true)
     assert.equal(isToolAllowed('search_project_text', scopeA), false)
     assert.equal(isToolAllowed('unknown_tool', scopeA), false)
-    const workspaceTools = buildAgentRequest({ workspaceId: 'workspace-a' }).tools
+    const workspaceTools = buildAgentRequest({ mode: 'execute', workspaceId: 'workspace-a' }).tools
 
     const args = { path: 'example.ts', startLine: 1, endLine: 2 }
     const callItem = functionCall('read_workspace_file', args)
@@ -236,22 +237,34 @@ async function main() {
     assert.deepEqual(parseToolHistory(history, scopeA), history)
     assert.equal(parseToolHistory(history, { kind: 'time' }), null)
     const messages = [
-      { id: 'user-a', role: 'user', status: 'complete', content: 'Read the source' },
-      { id: 'assistant-a', role: 'assistant', status: 'complete', content: 'Read complete' }
+      {
+        id: 'user-a',
+        role: 'user',
+        mode: 'execute',
+        status: 'complete',
+        content: 'Read the source'
+      },
+      {
+        id: 'assistant-a',
+        role: 'assistant',
+        mode: 'execute',
+        status: 'complete',
+        content: 'Read complete'
+      }
     ]
     const runs = [
       {
         requestId: 'request-a',
         userId: 'user-a',
         assistantId: 'assistant-a',
-        mode: 'live',
+        mode: 'execute',
         scope: scopeA,
         trace: [],
         items: history
       }
     ]
-    assert.deepEqual(selectToolHistory(messages, runs, 'live', scopeA), history)
-    assert.deepEqual(selectToolHistory(messages, runs, 'live', scopeB), [])
+    assert.deepEqual(selectToolHistory(messages, runs, 'execute', scopeA), history)
+    assert.deepEqual(selectToolHistory(messages, runs, 'execute', scopeB), [])
 
     let executionCount = 0
     const unauthorizedSend = async () => ({ status: 'completed', output: [callItem] })
@@ -384,10 +397,11 @@ async function main() {
     const staleEdit = JSON.parse(
       await call(
         actions,
-        'edit_workspace_file',
+        'apply_workspace_patch',
         {
           path: 'example.ts',
-          proposedText: 'export const answer = 43\n',
+          patch:
+            '*** Begin Patch\n*** Update File: example.ts\n@@\n-export const answer = 42\n+export const answer = 43\n // needle in workspace\n*** End Patch',
           expectedSha256: '0'.repeat(64)
         },
         signal
@@ -401,10 +415,11 @@ async function main() {
     const edit = JSON.parse(
       await call(
         actions,
-        'edit_workspace_file',
+        'apply_workspace_patch',
         {
           path: 'example.ts',
-          proposedText: 'export const answer = 43\n',
+          patch:
+            '*** Begin Patch\n*** Update File: example.ts\n@@\n-export const answer = 42\n+export const answer = 43\n // needle in workspace\n*** End Patch',
           expectedSha256
         },
         signal
@@ -432,17 +447,21 @@ async function main() {
     const appliedEdit = JSON.parse(
       await call(
         actions,
-        'edit_workspace_file',
+        'apply_workspace_patch',
         {
           path: 'example.ts',
-          proposedText: 'export const answer = 43\n',
+          patch:
+            '*** Begin Patch\n*** Update File: example.ts\n@@\n-export const answer = 42\n+export const answer = 43\n // needle in workspace\n*** End Patch',
           expectedSha256
         },
         signal
       )
     )
     assert.equal(appliedEdit.status, 'applied')
-    assert.equal(await readFile(source, 'utf8'), 'export const answer = 43\n')
+    assert.equal(
+      await readFile(source, 'utf8'),
+      'export const answer = 43\n// needle in workspace\n'
+    )
 
     assert.equal(isToolAllowed('create_workspace_file', scopeA), true)
     assert.equal(isToolAllowed('create_workspace_file', { kind: 'time' }), false)
@@ -454,7 +473,7 @@ async function main() {
         'search_workspace_text',
         'read_workspace_file',
         'create_workspace_file',
-        'edit_workspace_file',
+        'apply_workspace_patch',
         'run_workspace_command'
       ]
     )

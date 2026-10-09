@@ -52,7 +52,7 @@ export function createConversationStore(directory: string): {
       typeof value !== 'object' ||
       value === null ||
       !('version' in value) ||
-      value.version !== 8
+      value.version !== 9
     ) {
       throw new Error('会话格式不支持：只读取当前格式，旧记录未被覆盖或删除。')
     }
@@ -100,7 +100,7 @@ export function createConversationStore(directory: string): {
             return {
               ok: true,
               missing: true,
-              snapshot: { version: 8, activeConversationId: null, conversations: [] }
+              snapshot: { version: 9, activeConversationId: null, conversations: [] }
             }
           }
           const snapshot = recoverPending(saved)
@@ -131,6 +131,8 @@ export function createConversationStore(directory: string): {
           // Read before replacement so an unsupported existing file cannot be overwritten.
           await readExisting()
           await beforeWrite?.(snapshot)
+          // Preparing saved resources may await I/O; recheck the format after it.
+          await readExisting()
           await writeLibrary(snapshot)
           return { ok: true }
         } catch {

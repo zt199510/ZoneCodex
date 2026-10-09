@@ -1,4 +1,4 @@
-import { parseAgentMode, type AgentMode } from './agent'
+import { parseAgentMode, toolArgumentsLimit, type AgentMode } from './agent'
 import { getMessageImages, type ChatMessage } from './conversation'
 import { parseToolScope, sameToolScope, isToolAllowed } from './project'
 import type { ToolScope } from './project'
@@ -176,7 +176,7 @@ export function parseProtocolTurn(
         pendingCall !== null ||
         !isToolAllowed(item.name, checkedScope, mode) ||
         typeof item.arguments !== 'string' ||
-        item.arguments.length > 4096 ||
+        item.arguments.length > toolArgumentsLimit(item.name) ||
         typeof item.call_id !== 'string' ||
         !item.call_id ||
         item.call_id.length > 200 ||
@@ -305,7 +305,7 @@ export function parseIncompleteToolTurn(
         calls.size >= 8 ||
         !isToolAllowed(item.name, checkedScope, mode) ||
         typeof item.arguments !== 'string' ||
-        item.arguments.length > 4096 ||
+        item.arguments.length > toolArgumentsLimit(item.name) ||
         typeof item.call_id !== 'string' ||
         !item.call_id ||
         item.call_id.length > 200 ||

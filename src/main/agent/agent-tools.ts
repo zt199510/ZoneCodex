@@ -12,7 +12,7 @@ import {
 import { canonicalLocalPath } from '../tools/local-path'
 import type { ProjectSnapshot } from '../tools/project-snapshot'
 import { projectTools } from '../tools/project-file-tools'
-import { parseAgentMode, type AgentMode } from '../../shared/agent'
+import { parseAgentMode, toolArgumentsLimit, type AgentMode } from '../../shared/agent'
 import {
   parseAgentUserInputArguments,
   type AgentUserInputArguments
@@ -103,6 +103,7 @@ export function createAgentToolExecutor(options: AgentToolsOptions): ExecuteTool
             sha256?: unknown
             totalLines?: unknown
             truncated?: unknown
+            fullText?: unknown
             lines?: Array<{ line?: unknown; truncated?: unknown }>
           }
           if (
@@ -112,6 +113,7 @@ export function createAgentToolExecutor(options: AgentToolsOptions): ExecuteTool
             typeof read.sha256 === 'string' &&
             typeof read.totalLines === 'number' &&
             read.truncated === false &&
+            typeof read.fullText === 'string' &&
             Array.isArray(read.lines) &&
             read.lines.length === read.totalLines &&
             read.lines.every((line, index) => line.line === index + 1 && !line.truncated)
@@ -126,8 +128,9 @@ export function createAgentToolExecutor(options: AgentToolsOptions): ExecuteTool
     }
     if (actInWorkspace && workspaceActionTools.some((tool) => tool.name === name)) {
       let output: string
-      if (name === 'edit_workspace_file') {
+      if (name === 'apply_workspace_patch') {
         try {
+          if (args.length > toolArgumentsLimit(name)) throw new AgentError('补丁参数过长')
           const edit = JSON.parse(args) as { path?: unknown; expectedSha256?: unknown }
           output =
             typeof edit.path === 'string' &&
@@ -136,7 +139,7 @@ export function createAgentToolExecutor(options: AgentToolsOptions): ExecuteTool
               ? await actInWorkspace(name, args, signal)
               : JSON.stringify({ status: 'error', error: '请先完整读取目标文件' })
         } catch {
-          output = JSON.stringify({ status: 'error', error: '编辑参数无效' })
+          output = JSON.stringify({ status: 'error', error: '补丁参数无效' })
         }
       } else {
         output = await actInWorkspace(name, args, signal)

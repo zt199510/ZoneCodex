@@ -81,9 +81,14 @@ const toolEventNames = new Set([
   'search_workspace_text',
   'read_workspace_file',
   'create_workspace_file',
-  'edit_workspace_file',
+  'apply_workspace_patch',
   'run_workspace_command'
 ])
+
+/** Patch text and JSON escaping need a larger envelope; other tools keep their existing limit. */
+export function toolArgumentsLimit(name: unknown): number {
+  return name === 'apply_workspace_patch' ? 12000 : 4096
+}
 
 export function parseAgentToolEvent(value: unknown): AgentToolEvent | null {
   try {
@@ -116,7 +121,7 @@ export function parseAgentToolEvent(value: unknown): AgentToolEvent | null {
             !['requestId', 'callId', 'name', 'phase', 'arguments', 'commentary'].includes(key)
         ) ||
         typeof event.arguments !== 'string' ||
-        event.arguments.length > 4096 ||
+        event.arguments.length > toolArgumentsLimit(event.name) ||
         ('commentary' in event &&
           (typeof event.commentary !== 'string' || event.commentary.length > 16000))
       )
