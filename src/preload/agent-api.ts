@@ -14,6 +14,7 @@ import {
   parseAgentMessageEvent,
   parseAgentProgress,
   parseAgentResult,
+  parseAgentRetryEvent,
   parseAgentToolEvent
 } from '../shared/agent'
 import { parseToolHistory } from '../shared/agent-history'
@@ -57,6 +58,7 @@ export const agentAPI: Pick<
   | 'onAgentProgress'
   | 'onAgentToolEvent'
   | 'onAgentMessageEvent'
+  | 'onAgentRetryEvent'
 > = {
   listTasks: async () => {
     try {
@@ -270,6 +272,14 @@ export const agentAPI: Pick<
     }
     ipcRenderer.on('agent:tool-event', handler)
     return () => ipcRenderer.removeListener('agent:tool-event', handler)
+  },
+  onAgentRetryEvent: (listener) => {
+    const handler = (_event: IpcRendererEvent, value: unknown): void => {
+      const retry = parseAgentRetryEvent(value)
+      if (retry) listener(retry)
+    }
+    ipcRenderer.on('agent:retry', handler)
+    return () => ipcRenderer.removeListener('agent:retry', handler)
   },
   onAgentMessageEvent: (listener) => {
     const handler = (_event: IpcRendererEvent, value: unknown): void => {

@@ -17,6 +17,80 @@ export type AgentMessageEvent = {
   phase: 'commentary' | 'final_answer'
   text: string
 }
+export type AgentRetryEvent = {
+  requestId: string
+  round: number
+  retry: number
+  maxRetries: 5
+  delayMs: number
+  reason: 'http' | 'connection' | 'stream'
+  status?: number
+}
+
+export function parseResponseMessageId(
+  value: unknown
+): { round: number; attempt: number; index: number } | null {
+  if (typeof value !== 'string') return null
+  const match = /^response-([1-9])-attempt-([0-5])-message-([0-9]|[1-4][0-9])$/.exec(value)
+  return match
+    ? { round: Number(match[1]), attempt: Number(match[2]), index: Number(match[3]) }
+    : null
+}
+
+export function parseAgentRetryEvent(value: unknown): AgentRetryEvent | null {
+  try {
+    if (typeof value !== 'object' || value === null || Array.isArray(value)) return null
+    const prototype = Object.getPrototypeOf(value)
+    if (prototype !== Object.prototype && prototype !== null) return null
+    const descriptors = Object.getOwnPropertyDescriptors(value)
+    const keys = Reflect.ownKeys(descriptors)
+    if (
+      keys.length < 6 ||
+      keys.length > 7 ||
+      keys.some(
+        (key) =>
+          typeof key !== 'string' ||
+          !['requestId', 'round', 'retry', 'maxRetries', 'delayMs', 'reason', 'status'].includes(
+            key
+          ) ||
+          !descriptors[key].enumerable ||
+          !('value' in descriptors[key])
+      )
+    )
+      return null
+    const event = value as Record<string, unknown>
+    if (
+      !isAgentId(event.requestId) ||
+      !Number.isSafeInteger(event.round) ||
+      (event.round as number) < 1 ||
+      (event.round as number) > 9 ||
+      !Number.isSafeInteger(event.retry) ||
+      (event.retry as number) < 1 ||
+      (event.retry as number) > 5 ||
+      event.maxRetries !== 5 ||
+      !Number.isSafeInteger(event.delayMs) ||
+      (event.delayMs as number) < 0 ||
+      (event.delayMs as number) > 2_147_483_647 ||
+      !['http', 'connection', 'stream'].includes(event.reason as string) ||
+      ('status' in event &&
+        (!Number.isSafeInteger(event.status) ||
+          (event.status as number) < 100 ||
+          (event.status as number) > 599))
+    )
+      return null
+    return {
+      requestId: event.requestId,
+      round: event.round as number,
+      retry: event.retry as number,
+      maxRetries: 5,
+      delayMs: event.delayMs as number,
+      reason: event.reason as AgentRetryEvent['reason'],
+      ...(typeof event.status === 'number' ? { status: event.status } : {})
+    }
+  } catch {
+    return null
+  }
+}
 // Agent 请求的执行结果
 export type AgentResult =
   | { status: 'done'; answer: string; trace: string[]; items: ProtocolItem[] }
@@ -51,7 +125,7 @@ export function parseAgentMessageEvent(value: unknown): AgentMessageEvent | null
     if (
       !isAgentId(event.requestId) ||
       typeof event.messageId !== 'string' ||
-      !/^response-[1-9]-message-(?:[0-9]|[1-4][0-9])$/.test(event.messageId) ||
+      !parseResponseMessageId(event.messageId) ||
       (event.phase !== 'commentary' && event.phase !== 'final_answer') ||
       typeof event.text !== 'string' ||
       event.text.length > 16000

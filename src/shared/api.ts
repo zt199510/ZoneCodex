@@ -17,7 +17,8 @@ import type {
   AgentResult,
   AgentProgress,
   AgentToolEvent,
-  AgentMessageEvent
+  AgentMessageEvent,
+  AgentRetryEvent
 } from './agent'
 import type { ConversationTitleOutcome, ConversationTitleRequest } from './conversation-title'
 import type { ProtocolItem } from './agent-history'
@@ -153,6 +154,7 @@ export interface AppAPI {
   onAgentProgress: (listener: (event: AgentProgress) => void) => () => void
   onAgentToolEvent: (listener: (event: AgentToolEvent) => void) => () => void
   onAgentMessageEvent: (listener: (event: AgentMessageEvent) => void) => () => void
+  onAgentRetryEvent: (listener: (event: AgentRetryEvent) => void) => () => void
   // 生成会话元数据标题；结果不进入聊天消息、工具记录或任务记录
   generateConversationTitle: (
     request: ConversationTitleRequest

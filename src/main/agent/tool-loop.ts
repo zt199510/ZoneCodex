@@ -9,6 +9,7 @@ import {
   toolArgumentsLimit,
   type AgentMode,
   type AgentMessageEvent,
+  type AgentRetryEvent,
   type ToolCallEvent
 } from '../../shared/agent'
 import { parseToolScope, isToolAllowed } from '../../shared/project'
@@ -42,7 +43,8 @@ export async function runToolLoop(
   onTextDelta: (delta: string) => void = () => undefined,
   onToolEvent: (event: ToolCallEvent) => void = () => undefined,
   onMessageEvent?: (event: Omit<AgentMessageEvent, 'requestId'>) => void,
-  mode: AgentMode = 'execute'
+  mode: AgentMode = 'execute',
+  onRetry?: (event: Omit<AgentRetryEvent, 'requestId'>) => void
 ): Promise<{ answer: string; items: ProtocolItem[] }> {
   if (!parseAgentMode(mode)) throw new AgentError('工作方式参数无效')
   const parsedScope = parseToolScope(scope)
@@ -67,21 +69,26 @@ export async function runToolLoop(
   const messageSnapshots = new Map<string, { phase: AgentMessageEvent['phase']; text: string }>()
   const publishMessage = (
     round: number,
+    attempt: number,
     outputIndex: number,
     phase: AgentMessageEvent['phase'],
     text: string
   ): void => {
+    signal.throwIfAborted()
     if (!onMessageEvent) return
     if (
       !Number.isInteger(outputIndex) ||
       outputIndex < 0 ||
       outputIndex >= 50 ||
+      !Number.isInteger(attempt) ||
+      attempt < 0 ||
+      attempt > 5 ||
       (phase !== 'commentary' && phase !== 'final_answer') ||
       typeof text !== 'string' ||
       text.length > 16000
     )
       throw new AgentError('公开消息事件格式不正确')
-    const messageId = `response-${round}-message-${outputIndex}`
+    const messageId = `response-${round}-attempt-${attempt}-message-${outputIndex}`
     const previous = messageSnapshots.get(messageId)
     if (previous && previous.phase !== phase) throw new AgentError('公开消息阶段不一致')
     if (previous?.phase === phase && previous.text === text) return
@@ -98,15 +105,37 @@ export async function runToolLoop(
     signal.throwIfAborted()
     checkInputSize()
     record(`第 ${round} 次模型请求`) // trace.push(`第 ${round} 次模型请求`)
+    let attempt = 0
 
     const response = await send(input, signal, {
       onTextDelta: (delta) => {
+        signal.throwIfAborted()
         onTextDelta(delta)
+      },
+      onRetry: (event) => {
+        signal.throwIfAborted()
+        attempt = event.retry
+        // Retire failed public snapshots; the completed protocol input stays
+        // untouched and still contains every tool result already obtained.
+        for (const messageId of messageSnapshots.keys()) {
+          if (messageId.startsWith(`response-${round}-`)) messageSnapshots.delete(messageId)
+        }
+        record(
+          `正在重试 ${event.retry}/${event.maxRetries}，等待 ${Math.ceil(event.delayMs / 1000)} 秒` +
+            (event.status === undefined ? '（连接中断）' : `（HTTP ${event.status}）`)
+        )
+        onRetry?.({ round, ...event })
       },
       ...(onMessageEvent
         ? {
             onMessageEvent: (event) =>
-              publishMessage(round, event.outputIndex, event.phase, event.text)
+              publishMessage(
+                round,
+                event.attempt ?? attempt,
+                event.outputIndex,
+                event.phase,
+                event.text
+              )
           }
         : {})
     })
@@ -171,10 +200,12 @@ export async function runToolLoop(
       ) {
         publishMessage(
           round,
+          attempt,
           message.outputIndex,
           message.phase === undefined
-            ? (messageSnapshots.get(`response-${round}-message-${message.outputIndex}`)?.phase ??
-                (calls.length > 0 ? 'commentary' : 'final_answer'))
+            ? (messageSnapshots.get(
+                `response-${round}-attempt-${attempt}-message-${message.outputIndex}`
+              )?.phase ?? (calls.length > 0 ? 'commentary' : 'final_answer'))
             : message.phase,
           message.text
         )

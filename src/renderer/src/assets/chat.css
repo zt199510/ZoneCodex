@@ -286,6 +286,16 @@
   cursor: default;
 }
 
+.message-response-retry {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 8px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
 .message-tool-overview-summary > svg,
 .message-tool-chevron {
   display: inline-flex;

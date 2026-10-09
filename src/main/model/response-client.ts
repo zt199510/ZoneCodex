@@ -1,8 +1,16 @@
 import { AgentError } from '../errors'
-import { readResponseStreamResult, StreamError } from './sse'
+import { readResponseStreamResult, StreamConnectionError, StreamError } from './sse'
 import type { ResponseStreamEvent } from './sse'
+import {
+  isTransientConnectionError,
+  RetryableResponseError,
+  retryAfterMilliseconds,
+  waitForResponseRetry,
+  type ResponseRetryEvent
+} from './response-retry'
 
 export type ResponseMessageEvent = {
+  attempt: number
   outputIndex: number
   phase: 'commentary' | 'final_answer'
   text: string
@@ -11,6 +19,7 @@ export type ResponseMessageEvent = {
 export type SendResponseOptions = {
   onTextDelta?: (delta: string) => void
   onMessageEvent?: (event: ResponseMessageEvent) => void
+  onRetry?: (event: ResponseRetryEvent) => void
 }
 export type SendResponse = (
   input: unknown[],
@@ -34,7 +43,8 @@ function record(value: unknown): value is Record<string, unknown> {
 // Streaming snapshots are a public projection. The completed response remains
 // untouched, including provider reasoning needed for the next model request.
 function publicMessageObserver(
-  emit: (event: ResponseMessageEvent) => void
+  emit: (event: ResponseMessageEvent) => void,
+  attempt: number
 ): (event: ResponseStreamEvent) => void {
   const messages = new Map<number, MessageState>()
   const index = (value: unknown): value is number =>
@@ -69,7 +79,7 @@ function publicMessageObserver(
     if (state.emittedText === undefined && !text) return
     state.emittedPhase = state.phase
     state.emittedText = text
-    emit({ outputIndex, phase: state.phase, text })
+    emit({ attempt, outputIndex, phase: state.phase, text })
   }
   const acceptItem = (
     outputIndex: number,
@@ -155,8 +165,17 @@ function publicMessageObserver(
   }
 }
 
+function httpErrorMessage(status: number): string {
+  if (status >= 500) return `模型服务或网关暂时异常（HTTP ${status}），请稍后手动重试`
+  if (status === 401 || status === 403)
+    return `模型访问被拒绝（HTTP ${status}），请检查模型密钥及访问权限`
+  if (status === 429) return '模型请求受限（HTTP 429），请稍后手动重试，或检查服务额度和请求频率'
+  return `模型请求失败（HTTP ${status}），请检查模型地址、名称及接口配置`
+}
+
 export function createLiveResponse(tools: readonly unknown[], instructions: string): SendResponse {
   return async (input, signal, options = {}) => {
+    signal.throwIfAborted()
     const endpoint = process.env.MODEL_ENDPOINT
     const model = process.env.MODEL_NAME
     const apiKey = process.env.MODEL_API_KEY
@@ -167,46 +186,100 @@ export function createLiveResponse(tools: readonly unknown[], instructions: stri
     } catch {
       throw new AgentError('模型地址必须是有效的 HTTPS 地址，且不能在 URL 中携带凭据')
     }
-    const response = await fetch(endpoint, {
+    // Freeze the body once: a retry repeats only this model request, never
+    // any completed local tool, and cannot observe later input mutation.
+    const body = JSON.stringify({
+      model,
+      instructions,
+      input,
+      tools,
+      tool_choice: 'auto',
+      parallel_tool_calls: false,
+      stream: true,
+      store: false,
+      include: ['reasoning.encrypted_content'],
+      max_output_tokens: 4096
+    })
+    const request = {
       method: 'POST',
-      redirect: 'error',
+      redirect: 'error' as const,
       headers: {
         'Content-Type': 'application/json',
         Accept: 'text/event-stream',
         Authorization: `Bearer ${apiKey}`
       },
-      body: JSON.stringify({
-        model,
-        instructions,
-        input,
-        tools,
-        tool_choice: 'auto',
-        parallel_tool_calls: false,
-        stream: true,
-        store: false,
-        include: ['reasoning.encrypted_content'],
-        max_output_tokens: 4096
-      }),
+      body,
       signal
-    })
-    if (!response.ok) {
-      await response.body?.cancel()
-      throw new AgentError(`模型请求失败（HTTP ${response.status}），请检查权限、额度和协议支持`)
     }
-    const mime = response.headers.get('content-type')?.split(';')[0].trim().toLowerCase()
-    if (mime !== 'text/event-stream' || !response.body) {
-      await response.body?.cancel()
-      throw new AgentError('服务未返回 SSE，请确认网关支持 Responses 流式接口')
+    for (let attempt = 0; attempt <= 5; attempt++) {
+      signal.throwIfAborted()
+      try {
+        let response: Response
+        try {
+          response = await fetch(endpoint, request)
+        } catch (error) {
+          signal.throwIfAborted()
+          if (isTransientConnectionError(error))
+            throw new RetryableResponseError('模型连接暂时中断，请稍后重试', 'connection')
+          throw new AgentError('模型连接失败，请检查模型地址、网络及证书配置')
+        }
+        signal.throwIfAborted()
+        if (!response.ok) {
+          // Cleanup cannot mask a known HTTP failure or delay cancellation.
+          void response.body?.cancel().catch(() => undefined)
+          if ([429, 500, 502, 503, 504].includes(response.status))
+            throw new RetryableResponseError(
+              httpErrorMessage(response.status),
+              'http',
+              response.status,
+              retryAfterMilliseconds(response.headers.get('retry-after'))
+            )
+          throw new AgentError(httpErrorMessage(response.status))
+        }
+        const mime = response.headers.get('content-type')?.split(';')[0].trim().toLowerCase()
+        if (mime !== 'text/event-stream' || !response.body) {
+          void response.body?.cancel().catch(() => undefined)
+          throw new AgentError('服务未返回 SSE，请确认网关支持 Responses 流式接口')
+        }
+        try {
+          return await readResponseStreamResult(
+            response.body,
+            (delta) => {
+              signal.throwIfAborted()
+              options.onTextDelta?.(delta)
+            },
+            options.onMessageEvent
+              ? publicMessageObserver((event) => {
+                  signal.throwIfAborted()
+                  options.onMessageEvent?.(event)
+                }, attempt)
+              : undefined,
+            signal
+          )
+        } catch (error) {
+          signal.throwIfAborted()
+          if (error instanceof StreamConnectionError)
+            throw new RetryableResponseError(error.message, 'stream')
+          if (error instanceof StreamError) throw new AgentError(error.message)
+          // Observer/protocol validation errors are not network failures.
+          throw error
+        }
+      } catch (error) {
+        signal.throwIfAborted()
+        if (!(error instanceof RetryableResponseError)) throw error
+        if (attempt === 5) throw new AgentError(`自动重试 5 次后仍未成功：${error.message}`)
+        const retry = attempt + 1
+        const delayMs = Math.max(1000 * 2 ** attempt, error.retryAfterMs)
+        options.onRetry?.({
+          retry,
+          maxRetries: 5,
+          delayMs,
+          reason: error.reason,
+          ...(error.status !== undefined ? { status: error.status } : {})
+        })
+        await waitForResponseRetry(delayMs, signal)
+      }
     }
-    try {
-      return await readResponseStreamResult(
-        response.body,
-        options.onTextDelta,
-        options.onMessageEvent ? publicMessageObserver(options.onMessageEvent) : undefined
-      )
-    } catch (error) {
-      if (error instanceof StreamError) throw new AgentError(error.message)
-      throw error
-    }
+    throw new AgentError('模型请求未完成')
   }
 }

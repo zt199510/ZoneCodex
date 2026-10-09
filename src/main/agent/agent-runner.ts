@@ -1,7 +1,12 @@
 import { performance } from 'node:perf_hooks'
 import type { WebContents } from 'electron'
-import type { AgentMessageEvent, AgentResult, ToolCallEvent } from '../../shared/agent'
-import { parseAgentMode } from '../../shared/agent'
+import type {
+  AgentMessageEvent,
+  AgentResult,
+  AgentRetryEvent,
+  ToolCallEvent
+} from '../../shared/agent'
+import { parseAgentMode, parseAgentRetryEvent, parseResponseMessageId } from '../../shared/agent'
 import { parseAgentUserInputResult } from '../../shared/agent-user-input'
 import { parseIncompleteToolTurn, parseToolHistory } from '../../shared/agent-history'
 import type { ProtocolItem } from '../../shared/agent-history'
@@ -458,8 +463,49 @@ export async function runAgentRequest(
       })
       const commentaryPositions = new Map<string, number>()
       const publicMessages = new Map<string, { phase: AgentMessageEvent['phase']; text: string }>()
+      const roundAttempts = new Map<number, number>()
+      let latestResponseRound = 0
+      const observeRetry = (event: Omit<AgentRetryEvent, 'requestId'>): void => {
+        if (controller.signal.aborted || sender.isDestroyed()) return
+        const retry = parseAgentRetryEvent({ ...event, requestId: id })
+        if (!retry) throw new AgentError('重试事件格式不正确')
+        if (
+          retry.round < latestResponseRound ||
+          retry.retry <= (roundAttempts.get(retry.round) ?? 0)
+        )
+          return
+        latestResponseRound = retry.round
+        roundAttempts.set(retry.round, retry.retry)
+        const removed = new Set<number>()
+        for (const [messageId, position] of commentaryPositions) {
+          if (parseResponseMessageId(messageId)?.round === retry.round) removed.add(position)
+        }
+        // A failed stream contributes no protocol evidence. Remove only its
+        // commentary; actual earlier tool calls and their results stay intact.
+        observedItems = observedItems.filter((_, index) => !removed.has(index))
+        for (const [messageId, position] of commentaryPositions) {
+          if (removed.has(position)) commentaryPositions.delete(messageId)
+          else {
+            const offset = [...removed].filter((index) => index < position).length
+            commentaryPositions.set(messageId, position - offset)
+          }
+        }
+        for (const messageId of publicMessages.keys()) {
+          if (parseResponseMessageId(messageId)?.round === retry.round)
+            publicMessages.delete(messageId)
+        }
+        sender.send('agent:retry', retry)
+      }
       const observeMessage = (event: Omit<AgentMessageEvent, 'requestId'>): void => {
         if (controller.signal.aborted || sender.isDestroyed()) return
+        const identity = parseResponseMessageId(event.messageId)
+        if (
+          !identity ||
+          identity.round < latestResponseRound ||
+          identity.attempt !== (roundAttempts.get(identity.round) ?? 0)
+        )
+          return
+        latestResponseRound = identity.round
         const previous = publicMessages.get(event.messageId)
         if (previous?.phase === event.phase && previous.text === event.text) return
         if (previous && previous.phase !== event.phase) throw new AgentError('公开消息阶段不一致')
@@ -576,7 +622,8 @@ export async function runAgentRequest(
         },
         observeToolCall,
         observeMessage,
-        mode
+        mode,
+        observeRetry
       )
 
       controller.signal.throwIfAborted()

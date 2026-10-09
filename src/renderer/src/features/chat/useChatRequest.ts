@@ -5,6 +5,7 @@ import type { AgentRequestContext, ProjectSelection, Workspace } from '../../../
 import { toolScopeForAgentRequest } from '../../../../shared/project'
 import type { ChatAttachment, ChatMessage } from '../../../../shared/conversation'
 import type { AgentMode } from '../../../../shared/agent'
+import { parseResponseMessageId } from '../../../../shared/agent'
 import type {
   AgentUserInputRequest,
   AgentUserInputResponse
@@ -54,6 +55,9 @@ type ActiveRequest = {
   items: ProtocolItem[]
   commentaryIndexes: Map<string, number>
   answerMessages: Map<string, string>
+  roundAttempts: Map<number, number>
+  responseRound: number
+  replacingRounds: Set<number>
   attachments: ChatAttachment[]
   taskId: string
   startedAt: number
@@ -192,9 +196,94 @@ export function useChatRequest({
         if (!inputDisposed && !inputEventSeen) receiveInput(request)
       })
       .catch(() => undefined)
+    const offRetry = window.api.onAgentRetryEvent((event) => {
+      const active = activeRequest.current
+      if (
+        !active ||
+        active.phase !== 'running' ||
+        active.requestId !== event.requestId ||
+        event.round < active.responseRound ||
+        event.retry <= (active.roundAttempts.get(event.round) ?? 0)
+      )
+        return
+      active.responseRound = event.round
+      active.roundAttempts.set(event.round, event.retry)
+      active.replacingRounds.add(event.round)
+      const removed = new Set<number>()
+      for (const [messageId, index] of active.commentaryIndexes) {
+        if (parseResponseMessageId(messageId)?.round === event.round) removed.add(index)
+      }
+      // Keep real tool results from completed Responses rounds, but discard
+      // commentary from the stream that is now being retried.
+      active.items = active.items.filter((_, index) => !removed.has(index))
+      for (const [messageId, index] of active.commentaryIndexes) {
+        if (removed.has(index)) active.commentaryIndexes.delete(messageId)
+        else {
+          const offset = [...removed].filter((position) => position < index).length
+          active.commentaryIndexes.set(messageId, index - offset)
+        }
+      }
+      updateConversation(active.conversationId, (previous) => ({
+        ...previous,
+        toolRuns: previous.toolRuns.map((run) =>
+          run.requestId === active.requestId && run.assistantId === active.assistantId
+            ? { ...run, items: active.items }
+            : run
+        )
+      }))
+      setToolActivity((previous) => ({
+        ...previous,
+        [active.assistantId]: [
+          ...(previous[active.assistantId] ?? []).filter(
+            (line) => !/^正在重试 [1-5]\/5/.test(line)
+          ),
+          `正在重试 ${event.retry}/5 · 等待 ${event.delayMs / 1000} 秒`
+        ].slice(-30)
+      }))
+    })
     const offMessage = window.api.onAgentMessageEvent((event) => {
       const active = activeRequest.current
       if (!active || active.phase !== 'running' || active.requestId !== event.requestId) return
+      const identity = parseResponseMessageId(event.messageId)
+      if (
+        !identity ||
+        identity.round < active.responseRound ||
+        identity.attempt !== (active.roundAttempts.get(identity.round) ?? 0)
+      )
+        return
+      if (identity.round > active.responseRound && active.replacingRounds.size) {
+        setToolActivity((previous) => ({
+          ...previous,
+          [active.assistantId]: (previous[active.assistantId] ?? []).filter(
+            (line) => !/^正在重试 [1-5]\/5/.test(line)
+          )
+        }))
+      }
+      active.responseRound = identity.round
+      if (event.text && active.replacingRounds.delete(identity.round)) {
+        // Hold the last received final fragment while waiting. The first
+        // public output from the new attempt replaces that round's old final.
+        for (const messageId of active.answerMessages.keys()) {
+          if (parseResponseMessageId(messageId)?.round === identity.round)
+            active.answerMessages.delete(messageId)
+        }
+        setToolActivity((previous) => ({
+          ...previous,
+          [active.assistantId]: (previous[active.assistantId] ?? []).filter(
+            (line) => !/^正在重试 [1-5]\/5/.test(line)
+          )
+        }))
+        if (event.phase !== 'final_answer') {
+          const content = [...active.answerMessages.values()].join('\n')
+          updateMessages(active.conversationId, (previous) =>
+            previous.map((message) =>
+              message.id === active.assistantId && message.status === 'pending'
+                ? { ...message, content }
+                : message
+            )
+          )
+        }
+      }
       if (event.phase === 'final_answer') {
         const answers = new Map(active.answerMessages)
         answers.set(event.messageId, event.text)
@@ -217,6 +306,7 @@ export function useChatRequest({
         ? [...active.items]
         : [{ role: 'user', content: active.prompt }]
       const index = active.commentaryIndexes.get(event.messageId)
+      if (index === undefined && next.at(-1)?.type === 'function_call') return
       const commentary: ProtocolItem = {
         type: 'message',
         role: 'assistant',
@@ -296,6 +386,31 @@ export function useChatRequest({
       )
       if (!checked) return
       active.items = checked
+      if (active.replacingRounds.delete(active.responseRound)) {
+        // A completed retry may contain only a real tool call. That completion
+        // also ends the wait and retires its interrupted final fragment.
+        for (const messageId of active.answerMessages.keys()) {
+          if (parseResponseMessageId(messageId)?.round === active.responseRound)
+            active.answerMessages.delete(messageId)
+        }
+        const content = [...active.answerMessages]
+          .sort(([first], [second]) => first.localeCompare(second, undefined, { numeric: true }))
+          .map(([, text]) => text)
+          .join('\n')
+        updateMessages(active.conversationId, (previous) =>
+          previous.map((message) =>
+            message.id === active.assistantId && message.status === 'pending'
+              ? { ...message, content }
+              : message
+          )
+        )
+        setToolActivity((previous) => ({
+          ...previous,
+          [active.assistantId]: (previous[active.assistantId] ?? []).filter(
+            (line) => !/^正在重试 [1-5]\/5/.test(line)
+          )
+        }))
+      }
       updateConversation(active.conversationId, (previous) => ({
         ...previous,
         toolRuns: previous.toolRuns.map((run) =>
@@ -322,6 +437,7 @@ export function useChatRequest({
       offInput()
       pendingInput.current = null
       offMessage()
+      offRetry()
       offProgress()
       offTool()
       offTask()
@@ -347,11 +463,20 @@ export function useChatRequest({
     }
     active.sideEffectStarted ||= hasLocalSideEffects(trace)
     if (active.sideEffectStarted) retrySources.current.delete(active.assistantId)
+    const receivedAnswer = [...active.answerMessages]
+      .sort(([first], [second]) => first.localeCompare(second, undefined, { numeric: true }))
+      .map(([, text]) => text)
+      .join('\n')
+    const incompleteNotice =
+      active.sideEffectStarted && status !== 'complete'
+        ? (answer ?? '本地操作可能已经执行。请先核对文件或命令结果，再决定是否重新请求。')
+        : undefined
     const visibleAnswer =
-      answer ??
-      (active.sideEffectStarted && status !== 'complete'
-        ? '本地操作可能已经执行。请先核对文件或命令结果，再决定是否重新请求。'
-        : undefined)
+      status === 'complete'
+        ? answer
+        : receivedAnswer
+          ? receivedAnswer + (incompleteNotice ? `\n\n${incompleteNotice}` : '')
+          : (answer ?? incompleteNotice)
     const finalTrace = [
       ...trace.filter((line) => !/^用时：\d+毫秒$/.test(line)),
       `用时：${Math.max(0, Math.round(performance.now() - active.startedAt))}毫秒`
@@ -579,6 +704,9 @@ export function useChatRequest({
       items: [],
       commentaryIndexes: new Map(),
       answerMessages: new Map(),
+      roundAttempts: new Map(),
+      responseRound: 0,
+      replacingRounds: new Set(),
       attachments,
       taskId: crypto.randomUUID(),
       startedAt: performance.now(),

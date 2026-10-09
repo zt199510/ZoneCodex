@@ -1,4 +1,5 @@
 export class StreamError extends Error {}
+export class StreamConnectionError extends StreamError {}
 
 /// 解析 SSE 流事件的类
 export class SseParser {
@@ -52,8 +53,10 @@ export type ResponseStreamEvent = Record<string, unknown>
 export async function readResponseStreamResult(
   body: ReadableStream<Uint8Array>,
   onDelta: (delta: string) => void = () => undefined,
-  onEvent: (event: ResponseStreamEvent) => void = () => undefined
+  onEvent: (event: ResponseStreamEvent) => void = () => undefined,
+  signal?: AbortSignal
 ): Promise<Record<string, unknown>> {
+  signal?.throwIfAborted()
   const reader = body.getReader()
   const decoder = new TextDecoder('utf-8', { fatal: true })
   const parser = new SseParser()
@@ -61,6 +64,17 @@ export async function readResponseStreamResult(
   let outputTextLength = 0
   let totalEventSize = 0
   let responseSize = 0
+  let rejectAborted: ((reason: unknown) => void) | undefined
+  const aborted = new Promise<never>((_, reject) => {
+    rejectAborted = reject
+  })
+  // Keep the rejection handled even when abort occurs between reads.
+  void aborted.catch(() => undefined)
+  const abort = (): void => {
+    rejectAborted?.(signal?.reason)
+    void reader.cancel().catch(() => undefined)
+  }
+  signal?.addEventListener('abort', abort, { once: true })
 
   function accept(data: string): boolean {
     totalEventSize += data.length
@@ -108,16 +122,34 @@ export async function readResponseStreamResult(
 
   try {
     while (true) {
-      const { value, done } = await reader.read()
-      const text = done ? decoder.decode() : decoder.decode(value, { stream: true })
+      signal?.throwIfAborted()
+      let result: ReadableStreamReadResult<Uint8Array>
+      try {
+        result = await Promise.race([reader.read(), aborted])
+      } catch (error) {
+        signal?.throwIfAborted()
+        throw new StreamConnectionError('模型回复连接中断，请稍后重试。', { cause: error })
+      }
+      signal?.throwIfAborted()
+      const { value, done } = result
+      let text: string
+      try {
+        text = done ? decoder.decode() : decoder.decode(value, { stream: true })
+      } catch {
+        if (done) throw new StreamConnectionError('连接已结束，但没有收到完成事件。')
+        throw new StreamError('模型回复不是有效 UTF-8。')
+      }
       for (const data of parser.push(text)) {
         if (accept(data)) return completed!
       }
-      if (done) throw new StreamError('连接已结束，但没有收到完成事件。')
+      if (done) throw new StreamConnectionError('连接已结束，但没有收到完成事件。')
     }
   } finally {
+    signal?.removeEventListener('abort', abort)
     try {
-      await reader.cancel()
+      // Start cleanup without waiting for a transport-owned cancel promise:
+      // a broken connection must not hold a completed or cancelled task open.
+      void reader.cancel().catch(() => undefined)
     } catch {
       /* 已断开或已取消时允许清理失败 */
     }

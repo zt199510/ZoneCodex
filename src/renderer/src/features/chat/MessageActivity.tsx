@@ -628,6 +628,36 @@ function ToolItem({
     </details>
   )
 }
+function ResponseRetryNotice({
+  retry,
+  delaySeconds,
+  interrupted
+}: {
+  retry: number
+  delaySeconds: number
+  interrupted: boolean
+}): React.JSX.Element {
+  const [remaining, setRemaining] = useState(Math.ceil(delaySeconds))
+  useEffect(() => {
+    const deadline = performance.now() + delaySeconds * 1000
+    const timer = window.setInterval(() => {
+      const next = Math.max(0, Math.ceil((deadline - performance.now()) / 1000))
+      setRemaining(next)
+      if (next === 0) window.clearInterval(timer)
+    }, 250)
+    return () => window.clearInterval(timer)
+  }, [delaySeconds])
+  return (
+    <div className="message-response-retry" role="status" aria-live="polite">
+      <span>
+        正在重试 {retry}/5 ·{' '}
+        {remaining > 0 ? `等待 ${remaining} 秒` : `等待回复（间隔 ${delaySeconds} 秒）`}
+      </span>
+      {interrupted && <span>本次回复中断，正在重试</span>}
+    </div>
+  )
+}
+
 export function MessageActivity({
   messageId,
   entries,
@@ -676,9 +706,27 @@ export function MessageActivity({
       : elapsed !== null
         ? `用时 ${formatElapsed(elapsed)}`
         : '处理过程'
+  const retryEntry =
+    status === 'pending'
+      ? [...entries]
+          .reverse()
+          .find((line) => /^正在重试 [1-5]\/5 · 等待 \d+(?:\.\d+)? 秒$/.test(line))
+      : undefined
+  const retry = retryEntry
+    ? /^正在重试 ([1-5])\/5 · 等待 (\d+(?:\.\d+)?) 秒$/.exec(retryEntry)
+    : null
+  const retryNotice = retry ? (
+    <ResponseRetryNotice
+      key={retryEntry}
+      retry={Number(retry[1])}
+      delaySeconds={Number(retry[2])}
+      interrupted={Boolean(answerStarted)}
+    />
+  ) : null
   if (blocks.length)
     return (
       <section className="message-tool-run" aria-label="本轮处理过程">
+        {retryNotice}
         <details
           className="message-tool-overview"
           ref={overview}
@@ -729,6 +777,7 @@ export function MessageActivity({
   if (!legacy.length && status !== 'pending' && elapsed === null) return null
   return (
     <section className="message-tool-run" aria-label="本轮处理过程">
+      {retryNotice}
       {(status === 'pending' || elapsed !== null) && (
         <div className="message-tool-overview-summary message-response-timing">{timingLabel}</div>
       )}
