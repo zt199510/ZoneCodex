@@ -182,9 +182,8 @@ export function parseImageHistoryReferences(value: unknown): ImageHistoryReferen
         !record(item) ||
         !exact(item, ['index', 'messageId', 'imageId']) ||
         typeof item.index !== 'number' ||
-        !Number.isInteger(item.index) ||
+        !Number.isSafeInteger(item.index) ||
         item.index < 0 ||
-        item.index >= 300 ||
         item.index < previousIndex ||
         !isAgentId(item.messageId) ||
         !isAgentId(item.imageId)

@@ -42,8 +42,8 @@ function isId(value: unknown): value is string {
 // 先检查 JSON 值，再序列化；不能让 JSON.stringify 静默丢掉 undefined 等非法值。
 function cloneJsonArray(
   value: unknown,
-  maxItems: number,
-  maxLength: number,
+  maxItems = Number.POSITIVE_INFINITY,
+  maxLength = Number.POSITIVE_INFINITY,
   maxDepth = 30
 ): JsonValue[] | null {
   try {
@@ -228,7 +228,7 @@ export function parseProtocolTurn(
   return items
 }
 
-// 多轮历史可以为空；每轮都必须完整，且整条历史不能复用 call_id。
+// 多轮历史不设独立总量门槛；每轮仍须完整，且整条历史不能复用 call_id。
 export function parseToolHistory(
   value: unknown,
   scope: ToolScope = { kind: 'time' },
@@ -237,7 +237,7 @@ export function parseToolHistory(
 ): ProtocolItem[] | null {
   const checkedScope = parseToolScope(scope)
   if (!checkedScope || !parseAgentMode(mode)) return null
-  const items = cloneJsonArray(value, 300, 64000)
+  const items = cloneJsonArray(value)
   if (!items || !items.every((item): item is ProtocolItem => isRecord(item))) return null
   const references = imageHistory.length ? parseImageHistoryReferences(imageHistory) : []
   if (!references) return null
@@ -543,10 +543,7 @@ export function selectToolContext(
       })
     items.push(...turn.items)
   }
-  if (items.length > 300 || JSON.stringify(items).length > 64000) {
-    throw new Error('工具上下文已达到本课上限，请新建会话并重新说明问题。')
-  }
   const history = parseToolHistory(items, checkedScope, imageHistory, mode)
-  if (!history) throw new Error('图片与工具历史不一致或达到上限，请新建会话并重新说明问题。')
+  if (!history) throw new Error('图片与工具历史不一致，请重新打开会话。')
   return { history, imageHistory }
 }
