@@ -302,7 +302,6 @@ export function parseIncompleteToolTurn(
       if (
         Object.keys(item).length !== 4 ||
         pendingCall !== null ||
-        calls.size >= 8 ||
         !isToolAllowed(item.name, checkedScope, mode) ||
         typeof item.arguments !== 'string' ||
         item.arguments.length > toolArgumentsLimit(item.name) ||

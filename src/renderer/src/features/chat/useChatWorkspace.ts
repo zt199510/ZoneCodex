@@ -1,4 +1,4 @@
-import { useLayoutEffect, useRef, useState } from 'react'
+import { useCallback, useLayoutEffect, useRef, useState } from 'react'
 import type { RefObject, UIEvent } from 'react'
 import type { ChatMessage } from '../../../../shared/conversation'
 import type { MessageChangeProposal } from '../../../../shared/change-proposal'
@@ -75,7 +75,11 @@ export function useChatWorkspace(conversation: ConversationController): ChatWork
   const lastScrollInput = useRef(-Infinity)
   const scrollDirection = useRef<'up' | 'down' | null>(null)
   const scrollInputTop = useRef(0)
+  const scrollInputBottom = useRef(0)
   const draggingScrollbar = useRef(false)
+  const scrollbarInput = useRef(false)
+  const scrollbarPointerY = useRef(0)
+  const scrollbarPressedTop = useRef(0)
   const { messages } = conversation
   const empty = messages.length === 0
 
@@ -97,6 +101,8 @@ export function useChatWorkspace(conversation: ConversationController): ChatWork
     adjustedScrollTop.current = null
     lastScrollInput.current = -Infinity
     scrollDirection.current = null
+    draggingScrollbar.current = false
+    scrollbarInput.current = false
     setConfirmClear(false)
     setDraftState(nextDraft)
   }, [conversation.activeConversationId, conversation.draftInheritanceTarget])
@@ -108,27 +114,76 @@ export function useChatWorkspace(conversation: ConversationController): ChatWork
     setDraftState(value)
   }
 
-  function settleScroll(area: HTMLDivElement): void {
-    if (!area.getClientRects().length) return
-    let top = area.scrollTop
-    if (followBottom.current) top = area.scrollHeight - area.clientHeight
-    else {
-      const retained = anchor.current.find(
-        (candidate) => candidate.element.isConnected && candidate.element.getClientRects().length
+  const readScrollInput = useCallback((area: HTMLDivElement): void => {
+    if (!draggingScrollbar.current && performance.now() - lastScrollInput.current >= 1000) return
+    if (scrollbarInput.current) {
+      if (
+        draggingScrollbar.current &&
+        scrollDirection.current !== 'up' &&
+        area.scrollHeight - area.scrollTop - area.clientHeight < 4
       )
-      if (retained)
-        top +=
-          retained.element.getBoundingClientRect().top -
-          area.getBoundingClientRect().top -
-          retained.offset
+        followBottom.current = true
+      scrollInputTop.current = area.scrollTop
+      anchor.current = readingAnchor(area)
+      return
     }
-    top = Math.max(0, Math.min(top, area.scrollHeight - area.clientHeight))
-    if (Math.abs(top - area.scrollTop) > 0.5) {
-      area.scrollTop = top
-      adjustedScrollTop.current = area.scrollTop
+    if (
+      (adjustedScrollTop.current !== null &&
+        Math.abs(area.scrollTop - adjustedScrollTop.current) < 1) ||
+      Math.abs(area.scrollTop - scrollInputTop.current) < 0.5
+    )
+      return
+    const movement = area.scrollTop - scrollInputTop.current
+    // A shrinking viewport/content can clamp scrollTop in the opposite direction.
+    if (
+      (scrollDirection.current === 'down' && movement < 0) ||
+      (scrollDirection.current === 'up' && movement > 0)
+    ) {
+      scrollInputTop.current = area.scrollTop
+      return
     }
-    if (!followBottom.current) anchor.current = readingAnchor(area)
-  }
+    followBottom.current =
+      movement > 0 &&
+      scrollDirection.current !== 'up' &&
+      (area.scrollHeight - area.scrollTop - area.clientHeight < 4 ||
+        area.scrollTop >= scrollInputBottom.current - 4)
+    scrollInputTop.current = area.scrollTop
+    lastScrollInput.current = performance.now()
+    adjustedScrollTop.current = null
+    anchor.current = readingAnchor(area)
+  }, [])
+
+  const settleScroll = useCallback(
+    (area: HTMLDivElement): void => {
+      if (!area.getClientRects().length) return
+      // Native scrolling can move the viewport before React receives its scroll event.
+      // Capture that input before a streaming layout restores an older reading anchor.
+      readScrollInput(area)
+      // Chromium owns the thumb position while it is held; writing scrollTop here
+      // competes with its projection as streamed content changes the scroll range.
+      if (draggingScrollbar.current) return
+      let top = area.scrollTop
+      if (followBottom.current) top = area.scrollHeight - area.clientHeight
+      else {
+        const retained = anchor.current.find(
+          (candidate) => candidate.element.isConnected && candidate.element.getClientRects().length
+        )
+        if (retained)
+          top +=
+            retained.element.getBoundingClientRect().top -
+            area.getBoundingClientRect().top -
+            retained.offset
+      }
+      top = Math.max(0, Math.min(top, area.scrollHeight - area.clientHeight))
+      if (Math.abs(top - area.scrollTop) > 0.5) {
+        area.scrollTop = top
+        adjustedScrollTop.current = area.scrollTop
+        scrollInputTop.current = area.scrollTop
+      }
+      if (!followBottom.current) anchor.current = readingAnchor(area)
+    },
+    [readScrollInput]
+  )
 
   useLayoutEffect(() => {
     const area = scrollArea.current
@@ -144,18 +199,25 @@ export function useChatWorkspace(conversation: ConversationController): ChatWork
     const wheel = (event: WheelEvent): void => {
       if (!event.deltaY) return
       lastScrollInput.current = performance.now()
+      scrollbarInput.current = false
       scrollDirection.current = event.deltaY < 0 ? 'up' : 'down'
       scrollInputTop.current = area.scrollTop
+      scrollInputBottom.current = area.scrollHeight - area.clientHeight
       adjustedScrollTop.current = null
       if (event.deltaY < 0) {
         followBottom.current = false
-        anchor.current = readingAnchor(area)
-      }
+      } else if (area.scrollHeight - area.scrollTop - area.clientHeight < 4)
+        followBottom.current = true
+      // With passive wheel listeners Chromium may have already moved the viewport.
+      // Retain that position even when its scroll event has not arrived yet.
+      if (!followBottom.current) anchor.current = readingAnchor(area)
     }
     const touch = (): void => {
       lastScrollInput.current = performance.now()
+      scrollbarInput.current = false
       scrollDirection.current = null
       scrollInputTop.current = area.scrollTop
+      scrollInputBottom.current = area.scrollHeight - area.clientHeight
       adjustedScrollTop.current = null
       followBottom.current = false
       anchor.current = readingAnchor(area)
@@ -164,9 +226,15 @@ export function useChatWorkspace(conversation: ConversationController): ChatWork
       draggingScrollbar.current =
         event.clientX >= area.getBoundingClientRect().left + area.clientWidth
       if (draggingScrollbar.current) {
+        scrollbarInput.current = true
+        scrollbarPointerY.current = event.clientY
+        scrollbarPressedTop.current = area.scrollTop
         lastScrollInput.current = performance.now()
         scrollDirection.current = null
         scrollInputTop.current = area.scrollTop
+        scrollInputBottom.current = area.scrollHeight - area.clientHeight
+        adjustedScrollTop.current = null
+        if (area.scrollHeight - area.scrollTop - area.clientHeight < 4) followBottom.current = true
       }
       if (!(event.target instanceof Element)) return
       const summary = event.target.closest<HTMLElement>('summary')
@@ -177,7 +245,42 @@ export function useChatWorkspace(conversation: ConversationController): ChatWork
         anchor.current = readingAnchor(area, summary)
       }
     }
-    const releasePointer = (): void => {
+    const movePointer = (event: PointerEvent): void => {
+      if (!draggingScrollbar.current || event.clientY === scrollbarPointerY.current) return
+      scrollDirection.current = event.clientY > scrollbarPointerY.current ? 'down' : 'up'
+      scrollbarPointerY.current = event.clientY
+      lastScrollInput.current = performance.now()
+      if (scrollDirection.current === 'up') followBottom.current = false
+      readScrollInput(area)
+    }
+    const releasePointer = (event: PointerEvent): void => {
+      if (draggingScrollbar.current) {
+        // Chromium can consume all pointermove events during a native thumb drag.
+        // The release coordinate still records the user's direction and bottom intent.
+        if (event.type === 'pointerup' && event.clientY !== scrollbarPointerY.current) {
+          scrollDirection.current = event.clientY > scrollbarPointerY.current ? 'down' : 'up'
+          if (scrollDirection.current === 'up') followBottom.current = false
+          else if (
+            event.clientY >= area.getBoundingClientRect().top + area.clientHeight - 4 &&
+            event.clientX >= area.getBoundingClientRect().left + area.clientWidth &&
+            event.clientX <= area.getBoundingClientRect().right
+          )
+            followBottom.current = true
+        }
+        // Track clicks and cancelled native drags can change scrollTop without
+        // moving the pointer. Ignore the small thumb-press drift and content clamp.
+        else if (
+          area.scrollTop <
+          Math.min(scrollbarPressedTop.current, area.scrollHeight - area.clientHeight) - 4
+        ) {
+          scrollDirection.current = 'up'
+          followBottom.current = false
+        }
+        lastScrollInput.current = performance.now()
+        readScrollInput(area)
+        adjustedScrollTop.current = null
+        schedule()
+      }
       draggingScrollbar.current = false
     }
     const key = (event: KeyboardEvent): void => {
@@ -197,10 +300,12 @@ export function useChatWorkspace(conversation: ConversationController): ChatWork
         ['ArrowUp', 'ArrowDown', 'PageUp', 'PageDown', 'Home', 'End'].includes(event.key)
       ) {
         lastScrollInput.current = performance.now()
+        scrollbarInput.current = false
         const upward =
           (pageWithSpace && event.shiftKey) || ['ArrowUp', 'PageUp', 'Home'].includes(event.key)
         scrollDirection.current = upward ? 'up' : 'down'
         scrollInputTop.current = area.scrollTop
+        scrollInputBottom.current = area.scrollHeight - area.clientHeight
         adjustedScrollTop.current = null
         if (upward) {
           followBottom.current = false
@@ -217,6 +322,7 @@ export function useChatWorkspace(conversation: ConversationController): ChatWork
     area.addEventListener('keydown', key, true)
     window.addEventListener('pointerup', releasePointer)
     window.addEventListener('pointercancel', releasePointer)
+    window.addEventListener('pointermove', movePointer, true)
     settleScroll(area)
     return () => {
       observer.disconnect()
@@ -227,13 +333,20 @@ export function useChatWorkspace(conversation: ConversationController): ChatWork
       area.removeEventListener('keydown', key, true)
       window.removeEventListener('pointerup', releasePointer)
       window.removeEventListener('pointercancel', releasePointer)
+      window.removeEventListener('pointermove', movePointer, true)
     }
-  }, [conversation.activeConversationId, empty])
+  }, [conversation.activeConversationId, empty, readScrollInput, settleScroll])
 
   useLayoutEffect(() => {
     const area = scrollArea.current
     if (area) settleScroll(area)
-  }, [messages, conversation.toolRuns, conversation.toolActivity, conversation.pendingPlanQuestion])
+  }, [
+    messages,
+    conversation.toolRuns,
+    conversation.toolActivity,
+    conversation.pendingPlanQuestion,
+    settleScroll
+  ])
 
   function send(content: string): boolean | Promise<boolean> {
     const draftAtSend = currentDraft.current
@@ -278,16 +391,10 @@ export function useChatWorkspace(conversation: ConversationController): ChatWork
       Math.abs(area.scrollTop - adjustedScrollTop.current) < 1
     ) {
       adjustedScrollTop.current = null
+      scrollInputTop.current = area.scrollTop
       return
     }
-    if (draggingScrollbar.current || performance.now() - lastScrollInput.current < 1000) {
-      const direction =
-        scrollDirection.current ?? (area.scrollTop > scrollInputTop.current ? 'down' : 'up')
-      followBottom.current =
-        direction === 'down' && area.scrollHeight - area.scrollTop - area.clientHeight < 4
-      scrollInputTop.current = area.scrollTop
-      anchor.current = readingAnchor(area)
-    }
+    readScrollInput(area)
   }
 
   async function clear(): Promise<void> {

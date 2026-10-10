@@ -31,9 +31,13 @@ export function parseResponseMessageId(
   value: unknown
 ): { round: number; attempt: number; index: number } | null {
   if (typeof value !== 'string') return null
-  const match = /^response-([1-9])-attempt-([0-5])-message-([0-9]|[1-4][0-9])$/.exec(value)
-  return match
-    ? { round: Number(match[1]), attempt: Number(match[2]), index: Number(match[3]) }
+  const match = /^response-([1-9][0-9]{0,15})-attempt-([0-5])-message-([0-9]|[1-4][0-9])$/.exec(
+    value
+  )
+  if (!match || match[0] !== value) return null
+  const round = Number(match[1])
+  return Number.isSafeInteger(round)
+    ? { round, attempt: Number(match[2]), index: Number(match[3]) }
     : null
 }
 
@@ -63,7 +67,6 @@ export function parseAgentRetryEvent(value: unknown): AgentRetryEvent | null {
       !isAgentId(event.requestId) ||
       !Number.isSafeInteger(event.round) ||
       (event.round as number) < 1 ||
-      (event.round as number) > 9 ||
       !Number.isSafeInteger(event.retry) ||
       (event.retry as number) < 1 ||
       (event.retry as number) > 5 ||

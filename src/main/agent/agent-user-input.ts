@@ -183,7 +183,7 @@ export function requestAgentUserInput(
       return
     }
     // A user can take time to answer. Runtime scope changes must still release
-    // the wait even when no IPC response arrives and the model timeout is paused.
+    // the wait even when no IPC response arrives and no task deadline applies.
     item.checkTimer = setInterval(() => {
       if (!isCurrent(item)) settle(windowId, item, null)
     }, 500)

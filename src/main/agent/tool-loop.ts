@@ -65,7 +65,6 @@ export async function runToolLoop(
       item.type === 'function_call' && typeof item.call_id === 'string' ? [item.call_id] : []
     )
   )
-  let toolCount = 0
   const messageSnapshots = new Map<string, { phase: AgentMessageEvent['phase']; text: string }>()
   const publishMessage = (
     round: number,
@@ -97,11 +96,12 @@ export async function runToolLoop(
     onMessageEvent({ messageId, phase, text })
   }
 
-  function checkInputSize(): void {
-    if (JSON.stringify(input).length > 128000) throw new AgentError('协议历史过长，任务已停止')
+  function checkInputSize(reservedItems = 0): void {
+    if (input.length - turnStart + reservedItems > 160 || JSON.stringify(input).length > 128000)
+      throw new AgentError('协议历史过长，任务已停止')
   }
 
-  for (let round = 1; round <= 9; round++) {
+  for (let round = 1; ; round++) {
     signal.throwIfAborted()
     checkInputSize()
     record(`第 ${round} 次模型请求`) // trace.push(`第 ${round} 次模型请求`)
@@ -225,7 +225,8 @@ export async function runToolLoop(
     }
     // parallel_tool_calls=false 的教学约束；网关违反约束时直接拒绝。
     if (calls.length !== 1) throw new AgentError('本课每轮只允许一个工具调用')
-    if (round === 9 || toolCount >= 8) throw new AgentError('已达到调用上限，未继续执行工具')
+    // Leave room in the existing turn capacity for this result and a final answer.
+    checkInputSize(2)
     const call = calls[0]
     if (seenCalls.has(call.callId)) throw new AgentError('收到重复 call_id，未重复执行')
     // The hidden-tool defense precedes tool events and all executor side effects.
@@ -256,12 +257,10 @@ export async function runToolLoop(
       durationMs: Math.max(0, Math.round(performance.now() - startedAt))
     })
     signal.throwIfAborted()
-    toolCount++
     // 展示步骤只保留工具名称；call_id 属于协议内部标识，不应出现在聊天记录中。
     record(`执行工具：${call.name}`)
     record(`工具结果已生成（${output.length} 字符）`)
     input.push({ type: 'function_call_output', call_id: call.callId, output })
     checkInputSize()
   }
-  throw new AgentError('任务未产生最终回答')
 }

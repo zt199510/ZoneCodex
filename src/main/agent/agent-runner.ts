@@ -330,20 +330,7 @@ export async function runAgentRequest(
     })
     if (!task) return { status: 'error', error: '任务标识已使用，请重新发起', trace }
     updateTask(windowId, lifecycleId, 'running')
-    let timedOut = false
     let workspaceActionApproved = false
-    let timeoutBudgetMs = 240_000
-    let timeoutArmedAt = performance.now()
-    const armTimeout = (budgetMs = 240_000): NodeJS.Timeout => {
-      timeoutBudgetMs = budgetMs
-      timeoutArmedAt = performance.now()
-      return setTimeout(() => {
-        if (controller.signal.aborted) return
-        timedOut = true
-        cancel()
-      }, budgetMs)
-    }
-    let timer = armTimeout()
     try {
       appendTrace(`工作方式：${mode === 'plan' ? '计划' : '执行'}；真实模型 SSE`)
       const assertWorkspaceAccess = (): boolean => {
@@ -379,7 +366,6 @@ export async function runAgentRequest(
             controller.abort()
             return false
           }
-          clearTimeout(timer)
           return true
         },
         onApproved: (request) => {
@@ -390,8 +376,7 @@ export async function runAgentRequest(
         },
         finishApproval: () => {
           if (!controller.signal.aborted) {
-            if (updateTask(windowId, lifecycleId, 'running')) timer = armTimeout()
-            else controller.abort()
+            if (!updateTask(windowId, lifecycleId, 'running')) controller.abort()
           }
         }
       }
@@ -414,10 +399,6 @@ export async function runAgentRequest(
             controller.abort()
             signal.throwIfAborted()
           }
-          // Only the model's active work consumes the four-minute budget.
-          // Unlike a fresh request, a resumed question keeps its remaining time.
-          const remainingMs = Math.max(0, timeoutBudgetMs - (performance.now() - timeoutArmedAt))
-          clearTimeout(timer)
           const message = '等待用户补充计划信息'
           appendTrace(message)
           if (!sender.isDestroyed()) sender.send('agent:progress', { requestId: id, message })
@@ -445,8 +426,7 @@ export async function runAgentRequest(
             return JSON.stringify(result)
           } finally {
             if (!controller.signal.aborted) {
-              if (updateTask(windowId, lifecycleId, 'running')) timer = armTimeout(remainingMs)
-              else controller.abort()
+              if (!updateTask(windowId, lifecycleId, 'running')) controller.abort()
             }
           }
         },
@@ -651,13 +631,6 @@ export async function runAgentRequest(
           ? error.message
           : null
       if (terminationWarning) appendTrace(`命令停止结果：${terminationWarning}`)
-      if (timedOut) {
-        const message = ['任务超过 4 分钟，已停止请求', terminationWarning, actionWarning]
-          .filter(Boolean)
-          .join('。')
-        updateTask(windowId, lifecycleId, 'timed_out', { error: message })
-        return { status: 'error', error: message, trace, items: observedItems }
-      }
       if (controller.signal.aborted) {
         updateTask(windowId, lifecycleId, 'cancelled', {
           error: ['用户已取消任务', terminationWarning, actionWarning].filter(Boolean).join('。')
@@ -674,8 +647,6 @@ export async function runAgentRequest(
         error: message
       })
       return { status: 'error', error: message, trace, items: observedItems }
-    } finally {
-      clearTimeout(timer)
     }
   } catch (error) {
     return controller.signal.aborted

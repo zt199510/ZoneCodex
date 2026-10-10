@@ -1,6 +1,7 @@
 import { parse, relative } from 'node:path'
 import { readSelectedFile, type ProjectSnapshot, type SourceBaseline } from './project-snapshot'
 import type { PreparationResult } from '../../shared/change-preparation'
+import { boundedChangeText, changeCapacity, WORKSPACE_PATCH_CAPACITY } from './change-capacity'
 
 type Failure = Exclude<PreparationResult, { status: 'ready' }>
 export type PreparedContent = {
@@ -26,17 +27,25 @@ export async function prepareChange(
   const baseline = snapshot.baselines?.get(path)
   const lines = snapshot.files.get(path)
   if (!baseline || !lines) return { status: 'error', error: '缺少原始字节基线，请重新选择文件' }
+  const capacity = baseline.capacity
+  const limit = changeCapacity(capacity)
+  const textError =
+    capacity === WORKSPACE_PATCH_CAPACITY
+      ? '原文或候选内容超过 131072 个规范 LF 字符'
+      : '原文或候选内容超过 80 行或 2000 字符'
+  if (baseline.originalBytes.length > limit.maxBytes)
+    return { status: 'error', error: `原始字节超过 ${limit.maxBytes / 1024} KiB` }
   if (
     typeof raw !== 'string' ||
-    raw.length > 2000 ||
-    lines.length > 80 ||
-    lines.join('\n').length > 2000
+    !boundedChangeText(raw, capacity) ||
+    !boundedChangeText(lines.join('\n'), capacity)
   )
-    return { status: 'error', error: '原文或候选内容超过 80 行或 2000 字符' }
+    return { status: 'error', error: textError }
   try {
     const root = parse(baseline.absolutePath).root
-    const current = (await readSelectedFile(root, relative(root, baseline.absolutePath), signal))
-      .baseline
+    const current = (
+      await readSelectedFile(root, relative(root, baseline.absolutePath), signal, capacity)
+    ).baseline
     signal.throwIfAborted()
     if (
       current.dev !== baseline.dev ||
@@ -53,11 +62,11 @@ export async function prepareChange(
   const proposedText = raw.replace(/\r\n?/g, '\n')
   if (proposedText.startsWith('\uFEFF'))
     return { status: 'unsupported', error: '候选正文不能以 U+FEFF 开头，BOM 由原文件策略保留' }
-  if (proposedText.length > 2000 || proposedText.split('\n').length > 80)
-    return { status: 'error', error: '候选内容超过 80 行或 2000 字符' }
+  if (!boundedChangeText(proposedText, capacity)) return { status: 'error', error: textError }
   const encoded = baseline.newline === 'crlf' ? proposedText.replace(/\n/g, '\r\n') : proposedText
   const candidateBytes = Buffer.from((baseline.hasUtf8Bom ? '\uFEFF' : '') + encoded, 'utf8')
-  if (candidateBytes.length > 32768) return { status: 'error', error: '候选编码超过 32 KiB' }
+  if (candidateBytes.length > limit.maxBytes)
+    return { status: 'error', error: `候选编码超过 ${limit.maxBytes / 1024} KiB` }
   if (candidateBytes.equals(Buffer.from(baseline.originalBytes)))
     return { status: 'no_change', error: '候选与磁盘原始字节完全一致，无需准备' }
   signal.throwIfAborted()

@@ -3,8 +3,10 @@ import { lstat, open, realpath, stat } from 'node:fs/promises'
 import { basename, extname, isAbsolute, join, parse, relative, resolve, sep } from 'node:path'
 import { AgentError } from '../errors'
 import type { ProjectSelection } from '../../shared/project'
+import { changeCapacity, SMALL_CHANGE_CAPACITY, type ChangeCapacityPolicy } from './change-capacity'
 
 export type SourceBaseline = {
+  capacity: ChangeCapacityPolicy
   absolutePath: string
   originalBytes: Uint8Array
   hasUtf8Bom: boolean
@@ -33,7 +35,6 @@ const blockedPathParts = new Set([
   'coverage',
   'package-lock.json'
 ])
-const maxFileBytes = 32768
 const maxTotalBytes = 131072
 
 function inside(root: string, target: string): string {
@@ -92,8 +93,11 @@ function normalizeText(text: string): string[] {
 export async function readSelectedFile(
   root: string,
   relativePath: string,
-  signal: AbortSignal
+  signal: AbortSignal,
+  capacity: ChangeCapacityPolicy = SMALL_CHANGE_CAPACITY
 ): Promise<{ bytes: number; lines: readonly string[]; baseline: SourceBaseline }> {
+  const maxFileBytes = changeCapacity(capacity).maxBytes
+  const sizeError = `单文件最多 ${maxFileBytes / 1024} KiB`
   let candidate = root
   for (const part of relativePath.split(sep)) {
     candidate = join(candidate, part)
@@ -106,7 +110,7 @@ export async function readSelectedFile(
   if (!before.isFile() || before.nlink !== 1) {
     throw new AgentError('只读取普通、非硬链接文件')
   }
-  if (before.size > maxFileBytes) throw new AgentError('单文件最多 32 KiB')
+  if (before.size > maxFileBytes) throw new AgentError(sizeError)
 
   const handle = await open(candidate, 'r')
   try {
@@ -130,7 +134,7 @@ export async function readSelectedFile(
       length += result.bytesRead
     }
     signal.throwIfAborted()
-    if (length > maxFileBytes) throw new AgentError('单文件最多 32 KiB')
+    if (length > maxFileBytes) throw new AgentError(sizeError)
 
     const after = await handle.stat()
     // Recheck every path component after reading, including directory junctions.
@@ -184,6 +188,7 @@ export async function readSelectedFile(
       bytes: length,
       lines: Object.freeze(normalizeText(text)),
       baseline: {
+        capacity,
         absolutePath: candidate,
         originalBytes,
         hasUtf8Bom,
@@ -203,7 +208,8 @@ export async function readSelectedFile(
 export async function createProjectSnapshot(
   directory: string,
   selected: string[],
-  signal: AbortSignal
+  signal: AbortSignal,
+  capacity: ChangeCapacityPolicy = SMALL_CHANGE_CAPACITY
 ): Promise<ProjectSnapshot> {
   signal.throwIfAborted()
   if (typeof directory !== 'string' || !directory) throw new AgentError('请选择有效目录')
@@ -233,7 +239,7 @@ export async function createProjectSnapshot(
     if (identities.has(identity)) throw new AgentError('文件选择结果包含重复路径')
     identities.add(identity)
 
-    const file = await readSelectedFile(root, relativePath.replace(/\//g, sep), signal)
+    const file = await readSelectedFile(root, relativePath.replace(/\//g, sep), signal, capacity)
     totalBytes += file.bytes
     if (totalBytes > maxTotalBytes) throw new AgentError('选中文件合计最多 128 KiB')
     files.set(relativePath, file.lines)

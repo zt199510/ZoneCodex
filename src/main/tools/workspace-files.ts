@@ -187,7 +187,7 @@ export const workspaceReadTools = [
     type: 'function',
     name: 'read_workspace_file',
     description:
-      '按行读取运行权限允许的本地 UTF-8 文本文件；path 接受相对于默认运行目录的路径或本地绝对路径，每次最多 100 行。结果返回实际目标路径、原字节哈希和格式信息；从第一行完整读取且未截断的 80 行、2000 字符以内小文件还提供无 BOM、规范 LF 的 fullText，其余为 null。',
+      '按需读取运行权限允许的本地 UTF-8 文件片段；path 接受相对运行目录或本地绝对路径，原字节最多128 KiB，每次最多100行、每行最多2000字符，结果最多11000字符。返回实际目标路径、原字节sha256、format与真实行号/文字。修改只需本执行请求同hash的必要完整可见行，不要求完整读取或累计全文覆盖；未返回和逐行截断的行不能作为补丁旧文依据。',
     strict: true,
     parameters: {
       type: 'object',

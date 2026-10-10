@@ -14,7 +14,9 @@ import { basename, dirname, isAbsolute, join, parse, relative, sep, win32 } from
 import { commitChange } from './change-commit'
 import { prepareChange } from './change-preparation'
 import { createProjectSnapshot } from './project-snapshot'
-import { applyWorkspacePatch } from './workspace-patch'
+import { applyWorkspacePatch, type LocatedPatchHunk } from './workspace-patch'
+import { WORKSPACE_PATCH_CAPACITY } from './change-capacity'
+import type { WorkspaceReadFormat } from './workspace-files'
 import type { ProjectExecutor } from './project-file-tools'
 import { canonicalLocalPath, insideLocalPath, localPathParts, sameLocalPath } from './local-path'
 
@@ -22,6 +24,13 @@ export type WorkspaceActionOptions = {
   isPathAllowed?: (target: string) => boolean
   onEffect?: () => void
   authorizeCommand?: CommandAuthorize
+  validatePatchEvidence?: (
+    target: string,
+    sha256: string,
+    originalText: string,
+    format: WorkspaceReadFormat,
+    hunks: readonly LocatedPatchHunk[]
+  ) => string | null
 }
 
 export type WorkspaceApprovalRequest =
@@ -55,7 +64,7 @@ export const workspaceActionTools = [
     type: 'function',
     name: 'apply_workspace_patch',
     description:
-      'Apply exact context patches to one existing UTF-8 text file fully read in this request. Send path, the raw-byte sha256 from that read, and patch text: *** Begin Patch, *** Update File: <same path>, one or more bare @@ hunk headers with space-prefixed context, - old lines and + new lines, then *** End Patch (each on its own line). Optional *** End of File anchors the final hunk at the end. Use exact unique old context, never line numbers or @@ descriptions. Do not include line-number prefixes or BOM. The main process preserves BOM, LF/CRLF and the original trailing-newline count. No add/delete/move or multi-file patches. Source and candidate remain limited to 80 lines and 2000 characters. Subject to the current permission and approval policy.',
+      'Apply exact context patches to one existing UTF-8 file after reading enough relevant lines in this execute request. Every context and deleted line must be fully returned by read_workspace_file at the same raw-byte sha256; search summaries, truncated lines and history are not evidence. No full-file or cumulative coverage is required. Send path, expectedSha256, and patch: *** Begin Patch, *** Update File: <same path>, bare @@ hunks with space-prefixed context, - old lines and + new lines, then *** End Patch, each on its own line. Optional *** End of File anchors the final hunk at the real body end. Use exact unique old context, without line numbers, @@ descriptions or BOM. Preserves BOM, LF/CRLF and trailing-newline count. Original bytes and encoded candidate each limited to 128 KiB. No add/delete/move or multi-file patches. Current permission and approval policy still applies; re-read modified lines after success.',
     strict: true,
     parameters: {
       type: 'object',
@@ -639,7 +648,12 @@ export function createWorkspaceActionExecutor(
           parse(target).root,
           relative(parse(target).root, target).split(sep).join('/')
         )
-        const snapshot = await createProjectSnapshot(dirname(target), [target], signal)
+        const snapshot = await createProjectSnapshot(
+          dirname(target),
+          [target],
+          signal,
+          WORKSPACE_PATCH_CAPACITY
+        )
         signal.throwIfAborted()
         if (!assertAccess()) return result('error', { error: '工作区授权已失效' })
         const baseline = snapshot.baselines?.get(alias)
@@ -657,6 +671,21 @@ export function createWorkspaceActionExecutor(
         const candidate = applyWorkspacePatch(originalText, args.patch, args.path)
         if (candidate.status !== 'candidate')
           return result('error', { path, error: candidate.error })
+        const evidenceError = options.validatePatchEvidence
+          ? options.validatePatchEvidence(
+              target,
+              args.expectedSha256,
+              originalText,
+              {
+                encoding: 'utf-8',
+                hasUtf8Bom: baseline.hasUtf8Bom,
+                newline: baseline.newline,
+                trailingNewlines: originalText.match(/\n*$/)?.[0].length ?? 0
+              },
+              candidate.locatedHunks
+            )
+          : '本执行请求缺少目标片段读取凭据'
+        if (evidenceError) return result('error', { path, error: evidenceError })
         const prepared = await prepareChange(snapshot, alias, candidate.text, signal)
         signal.throwIfAborted()
         if (!assertAccess()) return result('error', { error: '工作区授权已失效' })

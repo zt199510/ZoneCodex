@@ -1,11 +1,24 @@
+import { boundedChangeText, WORKSPACE_PATCH_CAPACITY } from './change-capacity'
+
+export type LocatedPatchHunk = {
+  /** One-based line in the normalized original, excluding format-only trailing LF. */
+  startLine: number
+  before: readonly string[]
+  atEnd: boolean
+}
+
 type PatchResult =
-  { status: 'candidate'; text: string; hunks: number } | { status: 'error'; error: string }
+  | {
+      status: 'candidate'
+      text: string
+      hunks: number
+      locatedHunks: readonly LocatedPatchHunk[]
+    }
+  | { status: 'error'; error: string }
 
 type Hunk = { before: string[]; after: string[]; atEnd: boolean }
 type LocatedHunk = Hunk & { start: number }
 
-const maxTextLength = 2000
-const maxTextLines = 80
 const maxPatchLength = 6000
 
 function failure(error: string): PatchResult {
@@ -26,7 +39,7 @@ function validText(value: string): boolean {
 }
 
 function boundedText(value: string): boolean {
-  return value.length <= maxTextLength && value.split('\n').length <= maxTextLines
+  return boundedChangeText(value, WORKSPACE_PATCH_CAPACITY)
 }
 
 /**
@@ -45,7 +58,7 @@ export function applyWorkspacePatch(
     originalText.startsWith('\uFEFF')
   )
     return failure('原文必须是无 BOM、无非法控制字符的 LF 文本')
-  if (!boundedText(originalText)) return failure('原文超过 80 行或 2000 字符')
+  if (!boundedText(originalText)) return failure('原文超过 131072 个规范 LF 字符')
   if (
     typeof targetPath !== 'string' ||
     !targetPath ||
@@ -120,15 +133,26 @@ export function applyWorkspacePatch(
   const candidateLines: string[] = []
   let cursor = 0
   for (const hunk of located) {
-    candidateLines.push(...originalLines.slice(cursor, hunk.start), ...hunk.after)
+    // A byte-bounded file may still contain many short lines; avoid argument limits.
+    for (; cursor < hunk.start; cursor++) candidateLines.push(originalLines[cursor])
+    for (const line of hunk.after) candidateLines.push(line)
     cursor = hunk.start + hunk.before.length
   }
-  candidateLines.push(...originalLines.slice(cursor))
+  for (; cursor < originalLines.length; cursor++) candidateLines.push(originalLines[cursor])
   const candidateBody = candidateLines.join('\n')
   // Reject an implicit tail-format change rather than trim untouched blank lines.
   if (candidateBody.endsWith('\n')) return failure('补丁不能隐式新增或改变尾换行数量')
   if (candidateBody.startsWith('\uFEFF')) return failure('补丁正文不能新增 UTF-8 BOM')
   const text = candidateBody + '\n'.repeat(tailLength)
-  if (!boundedText(text)) return failure('候选内容超过 80 行或 2000 字符')
-  return { status: 'candidate', text, hunks: hunks.length }
+  if (!boundedText(text)) return failure('候选内容超过 131072 个规范 LF 字符')
+  return {
+    status: 'candidate',
+    text,
+    hunks: hunks.length,
+    locatedHunks: located.map((hunk) => ({
+      startLine: hunk.start + 1,
+      before: Object.freeze([...hunk.before]),
+      atEnd: hunk.atEnd
+    }))
+  }
 }

@@ -5,9 +5,17 @@ import type { Stats } from 'node:fs'
 import { readSelectedFile, type ProjectSnapshot } from './project-snapshot'
 import { prepareChange, type PreparedContent } from './change-preparation'
 import type { CommitStatus } from '../../shared/change-commit'
+import type { ChangeCapacityPolicy } from './change-capacity'
 
 export type CommitPhase = 'validating' | 'staging' | 'replacing' | 'verifying' | 'finished'
-export type RecoveryFile = { id: string; path: string; dev: number; ino: number; bytes: Uint8Array }
+export type RecoveryFile = {
+  id: string
+  path: string
+  dev: number
+  ino: number
+  bytes: Uint8Array
+  capacity: ChangeCapacityPolicy
+}
 export type CommitOutcome = {
   status: CommitStatus
   message: string
@@ -20,8 +28,12 @@ const defaultIO: CommitIO = { open, rename, unlink }
 const equal = (a: Uint8Array, b: Uint8Array): boolean => Buffer.from(a).equals(Buffer.from(b))
 const same = (a: { dev: number; ino: number }, b: { dev: number; ino: number }): boolean =>
   a.dev === b.dev && a.ino === b.ino
-const read = (path: string, signal: AbortSignal): ReturnType<typeof readSelectedFile> =>
-  readSelectedFile(parse(path).root, relative(parse(path).root, path), signal)
+const read = (
+  path: string,
+  signal: AbortSignal,
+  capacity: ChangeCapacityPolicy
+): ReturnType<typeof readSelectedFile> =>
+  readSelectedFile(parse(path).root, relative(parse(path).root, path), signal, capacity)
 
 async function checkParent(directory: string, identity?: Stats): Promise<Stats> {
   const root = parse(directory).root
@@ -46,6 +58,7 @@ export async function commitChange(
   io: CommitIO = defaultIO
 ): Promise<CommitOutcome> {
   const target = content.baseline.absolutePath
+  const capacity = content.baseline.capacity
   const directory = dirname(target)
   const alias = [...(snapshot.baselines ?? [])].find(
     ([, baseline]) => baseline === content.baseline
@@ -97,7 +110,7 @@ export async function commitChange(
     } finally {
       await handle.close()
     }
-    const verified = (await read(path, signal)).baseline
+    const verified = (await read(path, signal, capacity)).baseline
     if (!same(identity, verified) || !equal(verified.originalBytes, bytes))
       throw new Error('Staging verification failed')
     return identity
@@ -128,7 +141,8 @@ export async function commitChange(
       path: backupPath,
       dev: backupIdentity.dev,
       ino: backupIdentity.ino,
-      bytes: Uint8Array.from(content.baseline.originalBytes)
+      bytes: Uint8Array.from(content.baseline.originalBytes),
+      capacity
     }
     incompleteBackup = undefined
     result.recovery = recovery
@@ -140,7 +154,7 @@ export async function commitChange(
       [backupPath, backupIdentity, content.baseline.originalBytes],
       [tempPath, tempIdentity, content.candidateBytes]
     ] as const) {
-      const checked = (await read(path, signal)).baseline
+      const checked = (await read(path, signal, capacity)).baseline
       if (!same(identity, checked) || !equal(bytes, checked.originalBytes))
         throw new Error('Staged file changed')
     }
@@ -158,7 +172,7 @@ export async function commitChange(
     await io.rename(tempPath, target)
     onPhase('verifying')
     await checkParent(directory, parent)
-    const after = (await read(target, uncancelled)).baseline
+    const after = (await read(target, uncancelled, capacity)).baseline
     if (!same(tempIdentity, after) || !equal(after.originalBytes, content.candidateBytes))
       throw new Error('Commit verification failed')
     temporary = undefined
@@ -199,7 +213,7 @@ export async function commitChange(
 
 export async function verifyRecovery(file: RecoveryFile): Promise<boolean> {
   try {
-    const readback = (await read(file.path, new AbortController().signal)).baseline
+    const readback = (await read(file.path, new AbortController().signal, file.capacity)).baseline
     return (
       same(file, readback) &&
       equal(file.bytes, readback.originalBytes) &&
