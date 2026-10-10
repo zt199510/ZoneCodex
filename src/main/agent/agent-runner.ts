@@ -1,14 +1,9 @@
 import { performance } from 'node:perf_hooks'
 import type { WebContents } from 'electron'
-import type {
-  AgentMessageEvent,
-  AgentResult,
-  AgentRetryEvent,
-  ToolCallEvent
-} from '../../shared/agent'
-import { parseAgentMode, parseAgentRetryEvent, parseResponseMessageId } from '../../shared/agent'
+import type { AgentResult } from '../../shared/agent'
+import { parseAgentMode } from '../../shared/agent'
 import { parseAgentUserInputResult } from '../../shared/agent-user-input'
-import { parseIncompleteToolTurn, parseToolHistory } from '../../shared/agent-history'
+import { parseToolHistory } from '../../shared/agent-history'
 import type { ProtocolItem } from '../../shared/agent-history'
 import {
   toolScopeForAgentRequest,
@@ -24,7 +19,8 @@ import {
 } from '../../shared/image-input'
 import { isTaskId } from '../../shared/task'
 import { AgentError } from '../errors'
-import { runToolLoop } from './tool-loop'
+import { runAgentCore } from './agent-core'
+import type { AgentCoreEvent } from './agent-core-contract'
 import { createLiveResponse } from '../model/response-client'
 import { withConversationImageInput, type CapturedImageInput } from '../model/image-input'
 import {
@@ -108,7 +104,8 @@ export async function runAgentRequest(
   isPreparationActive: (windowId: number) => boolean
 ): Promise<AgentResult> {
   const startedAt = performance.now()
-  const trace: string[] = []
+  let trace: string[] = []
+  let coreHandledTiming = false
   // Capture once after IPC validation; later UI changes cannot alter this turn.
   const mode = parseAgentMode(checkedContext.mode)
   if (!mode) return { status: 'error', error: '工作方式参数无效', trace }
@@ -330,17 +327,44 @@ export async function runAgentRequest(
     })
     if (!task) return { status: 'error', error: '任务标识已使用，请重新发起', trace }
     updateTask(windowId, lifecycleId, 'running')
-    let workspaceActionApproved = false
     try {
-      appendTrace(`工作方式：${mode === 'plan' ? '计划' : '执行'}；真实模型 SSE`)
+      const sourceFrame = sender.mainFrame
       const assertWorkspaceAccess = (): boolean => {
         for (const captured of capturedImages) captured.assertCurrent()
         for (const image of historyImages) image.captured.assertCurrent()
         return (
           jobs.get(windowId) === job &&
           !controller.signal.aborted &&
+          !sender.isDestroyed() &&
+          sender.mainFrame === sourceFrame &&
           executionStillCurrent(windowId, checkedContext, execution)
         )
+      }
+      const deliver = (event: AgentCoreEvent): void => {
+        if (
+          jobs.get(windowId) !== job ||
+          controller.signal.aborted ||
+          sender.isDestroyed() ||
+          sender.mainFrame !== sourceFrame
+        )
+          return
+        switch (event.type) {
+          case 'progress':
+            sender.send('agent:progress', { requestId: event.requestId, message: event.message })
+            break
+          case 'delta':
+            sender.send('model-stream:delta', { requestId: event.requestId, delta: event.delta })
+            break
+          case 'tool':
+            sender.send('agent:tool-event', event.event)
+            break
+          case 'message':
+            sender.send('agent:message-event', event.event)
+            break
+          case 'retry':
+            sender.send('agent:retry', event.event)
+            break
+        }
       }
       const commandBackend = mode === 'execute' ? await inspectWindowsCommandBackend() : null
       controller.signal.throwIfAborted()
@@ -354,223 +378,8 @@ export async function runAgentRequest(
         commandSandboxAvailable: commandBackend !== null,
         imagePresent: capturedImages.length > 0 || historyImages.length > 0
       })
-      const authorizationOptions: Parameters<typeof createWorkspaceAuthorization>[0] = {
-        windowId,
-        requestId: id,
-        conversationId: checkedContext.conversationId,
-        userRequest: stripImageTurnNotice(prompt),
-        execution,
-        assertCurrent: assertWorkspaceAccess,
-        beginApproval: () => {
-          if (!updateTask(windowId, lifecycleId, 'waiting_approval')) {
-            controller.abort()
-            return false
-          }
-          return true
-        },
-        onApproved: (request) => {
-          workspaceActionApproved = true
-          const message = `工作区操作已批准：${request.kind}`
-          appendTrace(message)
-          if (!sender.isDestroyed()) sender.send('agent:progress', { requestId: id, message })
-        },
-        finishApproval: () => {
-          if (!controller.signal.aborted) {
-            if (!updateTask(windowId, lifecycleId, 'running')) controller.abort()
-          }
-        }
-      }
-      const approveWorkspaceAction = createWorkspaceAuthorization(authorizationOptions)
-      const authorizeWorkspaceCommand = createWorkspaceCommandAuthorization(authorizationOptions)
-      const executeTools = createAgentToolExecutor({
-        mode,
-        execution,
-        assertCurrent: assertWorkspaceAccess,
-        approve: approveWorkspaceAction,
-        authorizeCommand: authorizeWorkspaceCommand,
-        projectSnapshot,
-        projectExecutor,
-        executeCommandProposal,
-        requestUserInput: async (input, signal, callId) => {
-          signal.throwIfAborted()
-          if (mode !== 'plan' || !assertWorkspaceAccess())
-            throw new AgentError('当前请求不允许提问或上下文已失效')
-          if (!updateTask(windowId, lifecycleId, 'waiting_input')) {
-            controller.abort()
-            signal.throwIfAborted()
-          }
-          const message = '等待用户补充计划信息'
-          appendTrace(message)
-          if (!sender.isDestroyed()) sender.send('agent:progress', { requestId: id, message })
-          try {
-            const answers = await requestAgentUserInput(
-              windowId,
-              {
-                requestId: id,
-                conversationId: checkedContext.conversationId,
-                callId,
-                questions: input.questions
-              },
-              signal,
-              assertWorkspaceAccess
-            )
-            signal.throwIfAborted()
-            if (!answers || !assertWorkspaceAccess())
-              throw new AgentError('提问或运行上下文已失效，请重新发送')
-            const result = parseAgentUserInputResult({ answers }, input.questions)
-            if (!result) throw new AgentError('用户回答与计划问题不一致')
-            const resumed = '用户已补充，继续制定方案'
-            appendTrace(resumed)
-            if (!sender.isDestroyed())
-              sender.send('agent:progress', { requestId: id, message: resumed })
-            return JSON.stringify(result)
-          } finally {
-            if (!controller.signal.aborted) {
-              if (!updateTask(windowId, lifecycleId, 'running')) controller.abort()
-            }
-          }
-        },
-        appendTrace,
-        onProgress: (message) => {
-          if (!sender.isDestroyed()) sender.send('agent:progress', { requestId: id, message })
-        },
-        onEffect: () => {
-          workspaceActionApproved = true
-          const message = '本地操作已开始：文件或命令'
-          appendTrace(message)
-          if (!sender.isDestroyed()) sender.send('agent:progress', { requestId: id, message })
-        }
-      })
-      const commentaryPositions = new Map<string, number>()
-      const publicMessages = new Map<string, { phase: AgentMessageEvent['phase']; text: string }>()
-      const roundAttempts = new Map<number, number>()
-      let latestResponseRound = 0
-      const observeRetry = (event: Omit<AgentRetryEvent, 'requestId'>): void => {
-        if (controller.signal.aborted || sender.isDestroyed()) return
-        const retry = parseAgentRetryEvent({ ...event, requestId: id })
-        if (!retry) throw new AgentError('重试事件格式不正确')
-        if (
-          retry.round < latestResponseRound ||
-          retry.retry <= (roundAttempts.get(retry.round) ?? 0)
-        )
-          return
-        latestResponseRound = retry.round
-        roundAttempts.set(retry.round, retry.retry)
-        const removed = new Set<number>()
-        for (const [messageId, position] of commentaryPositions) {
-          if (parseResponseMessageId(messageId)?.round === retry.round) removed.add(position)
-        }
-        // A failed stream contributes no protocol evidence. Remove only its
-        // commentary; actual earlier tool calls and their results stay intact.
-        observedItems = observedItems.filter((_, index) => !removed.has(index))
-        for (const [messageId, position] of commentaryPositions) {
-          if (removed.has(position)) commentaryPositions.delete(messageId)
-          else {
-            const offset = [...removed].filter((index) => index < position).length
-            commentaryPositions.set(messageId, position - offset)
-          }
-        }
-        for (const messageId of publicMessages.keys()) {
-          if (parseResponseMessageId(messageId)?.round === retry.round)
-            publicMessages.delete(messageId)
-        }
-        sender.send('agent:retry', retry)
-      }
-      const observeMessage = (event: Omit<AgentMessageEvent, 'requestId'>): void => {
-        if (controller.signal.aborted || sender.isDestroyed()) return
-        const identity = parseResponseMessageId(event.messageId)
-        if (
-          !identity ||
-          identity.round < latestResponseRound ||
-          identity.attempt !== (roundAttempts.get(identity.round) ?? 0)
-        )
-          return
-        latestResponseRound = identity.round
-        const previous = publicMessages.get(event.messageId)
-        if (previous?.phase === event.phase && previous.text === event.text) return
-        if (previous && previous.phase !== event.phase) throw new AgentError('公开消息阶段不一致')
-        if (event.phase === 'final_answer') {
-          const finalTexts = [...publicMessages]
-            .filter(
-              ([messageId, message]) =>
-                messageId !== event.messageId && message.phase === 'final_answer'
-            )
-            .map(([, message]) => message.text)
-          finalTexts.push(event.text)
-          if (finalTexts.join('\n').length > 16000)
-            throw new AgentError('最终回答超过本轮显示长度上限')
-        }
-        if (event.phase === 'commentary') {
-          const candidate: ProtocolItem[] =
-            observedItems.length > 0
-              ? [...observedItems]
-              : [{ role: 'user', content: prompt.trim() }]
-          const position = commentaryPositions.get(event.messageId)
-          if (position === undefined) {
-            let pendingCall = false
-            for (const item of candidate) {
-              if (item.type === 'function_call') pendingCall = true
-              else if (item.type === 'function_call_output') pendingCall = false
-            }
-            // A late stream callback cannot insert a new message between an
-            // actual invocation and its still-missing result.
-            if (pendingCall) return
-          }
-          const message: ProtocolItem = {
-            type: 'message',
-            role: 'assistant',
-            phase: 'commentary',
-            content: [{ type: 'output_text', text: event.text }]
-          }
-          if (position === undefined) candidate.push(message)
-          else candidate[position] = message
-          const checked = parseIncompleteToolTurn(candidate, checkedScope, prompt.trim(), mode)
-          if (!checked) throw new AgentError('公开过程文字超过本轮保存上限')
-          observedItems = checked
-          if (position === undefined) commentaryPositions.set(event.messageId, candidate.length - 1)
-        }
-        publicMessages.set(event.messageId, { phase: event.phase, text: event.text })
-        sender.send('agent:message-event', { requestId: id, ...event })
-      }
-      const observeToolCall = (event: ToolCallEvent): void => {
-        const candidate: ProtocolItem[] =
-          observedItems.length > 0 ? [...observedItems] : [{ role: 'user', content: prompt.trim() }]
-        if (event.phase === 'start') {
-          if (event.commentary) {
-            candidate.push({
-              type: 'message',
-              role: 'assistant',
-              phase: 'commentary',
-              content: [{ type: 'output_text', text: event.commentary }]
-            })
-          }
-          candidate.push({
-            type: 'function_call',
-            call_id: event.callId,
-            name: event.name,
-            arguments: event.arguments
-          })
-        } else {
-          candidate.push({
-            type: 'function_call_output',
-            call_id: event.callId,
-            output: event.output
-          })
-        }
-        const checked = parseIncompleteToolTurn(candidate, checkedScope, prompt.trim(), mode)
-        if (checked) observedItems = checked
-        else if (event.phase === 'start') {
-          throw new AgentError('调用记录已超过本轮保存上限，未继续执行工具')
-        } else {
-          // A valid tool result can push a failing turn over its save budget.
-          // Keep prior evidence and the pending call rather than inventing an output.
-          appendTrace('工具结果超过本轮保存上限：最后结果未保存')
-        }
-        if (!sender.isDestroyed()) sender.send('agent:tool-event', { requestId: id, ...event })
-      }
       const liveResponse = createLiveResponse(agentRequest.tools, agentRequest.instructions)
-      const completed = await runToolLoop(
-        prompt.trim(),
+      const send =
         capturedImages.length || historyImages.length
           ? withConversationImageInput(
               liveResponse,
@@ -586,67 +395,119 @@ export async function runAgentRequest(
               prompt.trim(),
               assertWorkspaceAccess
             )
-          : liveResponse,
-        controller.signal,
-        trace,
-        (message) => {
-          if (controller.signal.aborted || sender.isDestroyed()) return
-          sender.send('agent:progress', { requestId: id, message })
+          : liveResponse
+      const outcome = await runAgentCore(
+        {
+          requestId: id,
+          conversationId: checkedContext.conversationId,
+          prompt,
+          history: checkedHistory,
+          scope: checkedScope,
+          mode,
+          imageHistory: checkedContext.imageHistory
         },
-        checkedHistory,
-        executeTools,
-        checkedScope,
-        (delta) => {
-          if (controller.signal.aborted || sender.isDestroyed()) return
-          sender.send('model-stream:delta', { requestId: id, delta })
-        },
-        observeToolCall,
-        observeMessage,
-        mode,
-        observeRetry
+        {
+          signal: controller.signal,
+          send,
+          assertCurrent: assertWorkspaceAccess,
+          onEvent: deliver,
+          startedAt,
+          transportLabel: '真实模型 SSE',
+          createTools: (observer) => {
+            const authorizationOptions: Parameters<typeof createWorkspaceAuthorization>[0] = {
+              windowId,
+              requestId: id,
+              conversationId: checkedContext.conversationId,
+              userRequest: stripImageTurnNotice(prompt),
+              execution,
+              assertCurrent: assertWorkspaceAccess,
+              beginApproval: () => {
+                if (!updateTask(windowId, lifecycleId, 'waiting_approval')) {
+                  controller.abort()
+                  return false
+                }
+                return true
+              },
+              onApproved: (request) => observer.actionApproved(request.kind),
+              finishApproval: () => {
+                if (!controller.signal.aborted) {
+                  if (!updateTask(windowId, lifecycleId, 'running')) controller.abort()
+                }
+              }
+            }
+            return createAgentToolExecutor({
+              mode,
+              execution,
+              assertCurrent: assertWorkspaceAccess,
+              approve: createWorkspaceAuthorization(authorizationOptions),
+              authorizeCommand: createWorkspaceCommandAuthorization(authorizationOptions),
+              projectSnapshot,
+              projectExecutor,
+              executeCommandProposal,
+              requestUserInput: async (input, signal, callId) => {
+                signal.throwIfAborted()
+                if (mode !== 'plan' || !assertWorkspaceAccess())
+                  throw new AgentError('当前请求不允许提问或上下文已失效')
+                if (!updateTask(windowId, lifecycleId, 'waiting_input')) {
+                  controller.abort()
+                  signal.throwIfAborted()
+                }
+                const message = '等待用户补充计划信息'
+                observer.appendTrace(message)
+                observer.progress(message)
+                try {
+                  const answers = await requestAgentUserInput(
+                    windowId,
+                    {
+                      requestId: id,
+                      conversationId: checkedContext.conversationId,
+                      callId,
+                      questions: input.questions
+                    },
+                    signal,
+                    assertWorkspaceAccess
+                  )
+                  signal.throwIfAborted()
+                  if (!answers || !assertWorkspaceAccess())
+                    throw new AgentError('提问或运行上下文已失效，请重新发送')
+                  const result = parseAgentUserInputResult({ answers }, input.questions)
+                  if (!result) throw new AgentError('用户回答与计划问题不一致')
+                  const resumed = '用户已补充，继续制定方案'
+                  observer.appendTrace(resumed)
+                  observer.progress(resumed)
+                  return JSON.stringify(result)
+                } finally {
+                  if (!controller.signal.aborted) {
+                    if (!updateTask(windowId, lifecycleId, 'running')) controller.abort()
+                  }
+                }
+              },
+              appendTrace: observer.appendTrace,
+              onProgress: observer.progress,
+              onEffect: observer.effectStarted
+            })
+          }
+        }
       )
-
-      controller.signal.throwIfAborted()
-      const needsApproval = completed.items.some(
-        (item) => item.type === 'function_call' && item.name === 'propose_command'
-      )
-      updateTask(windowId, lifecycleId, needsApproval ? 'waiting_approval' : 'completed', {
-        result: completed.answer
+      trace = outcome.result.trace
+      coreHandledTiming = true
+      observedItems = outcome.result.items ?? []
+      updateTask(windowId, lifecycleId, outcome.task.state, {
+        ...(outcome.task.result !== undefined ? { result: outcome.task.result } : {}),
+        ...(outcome.task.error !== undefined ? { error: outcome.task.error } : {})
       })
-      return { status: 'done', answer: completed.answer, items: completed.items, trace }
+      return outcome.result
     } catch (error) {
-      if (
-        workspaceActionApproved &&
-        !trace.some(
-          (line) => line.startsWith('工作区操作已批准：') || line.startsWith('本地操作已开始：')
-        )
-      ) {
-        appendTrace('本地操作已开始：结果待核对')
-      }
-      const actionWarning = workspaceActionApproved
-        ? '本地操作可能已经执行。请先核对文件或命令结果，再决定是否重新请求。'
-        : null
-      const terminationWarning =
-        error instanceof Error && error.message.includes('进程树是否退出未确认')
-          ? error.message
-          : null
-      if (terminationWarning) appendTrace(`命令停止结果：${terminationWarning}`)
-      if (controller.signal.aborted) {
-        updateTask(windowId, lifecycleId, 'cancelled', {
-          error: ['用户已取消任务', terminationWarning, actionWarning].filter(Boolean).join('。')
-        })
-        return { status: 'cancelled', trace, items: observedItems }
-      }
-      const message = [
-        error instanceof AgentError ? error.message : '请求或工具处理失败，请检查网络和响应格式',
-        actionWarning
-      ]
-        .filter(Boolean)
-        .join('。')
-      updateTask(windowId, lifecycleId, 'failed', {
-        error: message
+      // Preparation after task registration has no tool effects; execution
+      // failures and their truthful evidence are owned by the core above.
+      const cancelled = controller.signal.aborted
+      const message = error instanceof Error ? error.message : '无法准备运行上下文'
+      updateTask(windowId, lifecycleId, cancelled ? 'cancelled' : 'failed', {
+        error: cancelled ? '用户已取消任务' : message
       })
-      return { status: 'error', error: message, trace, items: observedItems }
+      return cancelled
+        ? { status: 'cancelled', trace, items: observedItems }
+        : { status: 'error', error: message, trace, items: observedItems }
     }
   } catch (error) {
     return controller.signal.aborted
@@ -665,6 +526,7 @@ export async function runAgentRequest(
     sender.removeListener('did-start-loading', cancel)
     sender.removeListener('render-process-gone', cancel)
     sender.removeListener('destroyed', cancel)
-    appendTrace(`用时：${Math.max(0, Math.round(performance.now() - startedAt))}毫秒`)
+    if (!coreHandledTiming)
+      appendTrace(`用时：${Math.max(0, Math.round(performance.now() - startedAt))}毫秒`)
   }
 }
