@@ -16,6 +16,7 @@ export type AgentHostInput = {
 
 export type AgentHostOptions = {
   signal?: AbortSignal
+  /** Includes bounded context statistics; never includes summary text or raw model input. */
   onEvent?: (event: AgentCoreEvent) => void
   approve?: (request: ExecutionApprovalInput, signal: AbortSignal) => Promise<boolean>
   answer?: (

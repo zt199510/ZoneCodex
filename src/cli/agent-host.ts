@@ -11,6 +11,7 @@ import { buildAgentRequest } from '../main/agent/agent-instructions'
 import { createAgentToolExecutor } from '../main/agent/agent-tools'
 import { readProjectInstruction } from '../main/project/project-instruction'
 import { createLiveResponse, readModelConfiguration } from '../main/model/response-client'
+import { createContextSummaryResponse } from '../main/model/context-summary'
 import { createApprovalReviewer } from '../main/execution/approval-reviewer'
 import type { ExecutionContext } from '../main/execution/execution-context-policy'
 import {
@@ -250,6 +251,13 @@ export async function runAgentTask(
       {
         signal: controller.signal,
         send,
+        summarize: createContextSummaryResponse(configuration),
+        networkOverhead: {
+          instructionsCharacters: request.instructions.length,
+          toolSchemaCharacters: JSON.stringify(request.tools).length,
+          imageCount: 0,
+          imageBytes: 0
+        },
         assertCurrent,
         startedAt,
         transportLabel: '普通 Node 真实模型 SSE',

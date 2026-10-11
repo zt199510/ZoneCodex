@@ -14,6 +14,10 @@ import {
 } from '../../shared/agent'
 import { parseToolScope, isToolAllowed } from '../../shared/project'
 import type { ToolScope } from '../../shared/project'
+import { RequestContextManager } from './context-manager'
+import type { ContextLoopOptions } from './context-manager'
+
+export type { ContextLoopOptions } from './context-manager'
 
 export type ExecuteTool = (
   name: string,
@@ -44,7 +48,8 @@ export async function runToolLoop(
   onToolEvent: (event: ToolCallEvent) => void = () => undefined,
   onMessageEvent?: (event: Omit<AgentMessageEvent, 'requestId'>) => void,
   mode: AgentMode = 'execute',
-  onRetry?: (event: Omit<AgentRetryEvent, 'requestId'>) => void
+  onRetry?: (event: Omit<AgentRetryEvent, 'requestId'>) => void,
+  contextOptions?: ContextLoopOptions
 ): Promise<{ answer: string; items: ProtocolItem[] }> {
   if (!parseAgentMode(mode)) throw new AgentError('工作方式参数无效')
   const parsedScope = parseToolScope(scope)
@@ -58,8 +63,16 @@ export async function runToolLoop(
     onProgress(line)
   }
 
-  const input: unknown[] = [...structuredClone(history), { role: 'user', content: prompt }]
+  const raw: unknown[] = [...structuredClone(history), { role: 'user', content: prompt }]
   const turnStart = history.length
+  const context = new RequestContextManager(
+    raw,
+    turnStart,
+    checkedScope,
+    mode,
+    signal,
+    contextOptions
+  )
   const seenCalls = new Set<string>(
     history.flatMap((item) =>
       item.type === 'function_call' && typeof item.call_id === 'string' ? [item.call_id] : []
@@ -96,18 +109,15 @@ export async function runToolLoop(
     onMessageEvent({ messageId, phase, text })
   }
 
-  function checkInputSize(reservedItems = 0): void {
-    if (input.length - turnStart + reservedItems > 160 || JSON.stringify(input).length > 128000)
-      throw new AgentError('协议历史过长，任务已停止')
-  }
-
   for (let round = 1; ; round++) {
     signal.throwIfAborted()
-    checkInputSize()
+    const projection = await context.prepare()
+    const groupStart = raw.length
     record(`第 ${round} 次模型请求`) // trace.push(`第 ${round} 次模型请求`)
     let attempt = 0
 
-    const response = await send(input, signal, {
+    const response = await send(projection.input, signal, {
+      originalIndices: projection.originalIndices,
       onTextDelta: (delta) => {
         signal.throwIfAborted()
         onTextDelta(delta)
@@ -140,6 +150,7 @@ export async function runToolLoop(
         : {})
     })
     signal.throwIfAborted()
+    contextOptions?.assertCurrent()
     if (
       !isRecord(response) ||
       response.status !== 'completed' ||
@@ -170,7 +181,11 @@ export async function runToolLoop(
         }
         calls.push({ callId: item.call_id, name: item.name, arguments: item.arguments })
       } else if (item.type === 'message') {
-        if (item.role !== 'assistant' || !Array.isArray(item.content)) {
+        if (
+          item.role !== 'assistant' ||
+          !Array.isArray(item.content) ||
+          (item.phase !== undefined && item.phase !== 'commentary' && item.phase !== 'final_answer')
+        ) {
           throw new AgentError('助手消息格式不正确')
         }
         const messageText: string[] = []
@@ -182,10 +197,20 @@ export async function runToolLoop(
             messageText.push(part.text)
             if (item.phase === undefined || item.phase === 'final_answer') text.push(part.text)
             else if (item.phase === 'commentary') commentary.push(part.text)
-          }
+          } else throw new AgentError('消息内容格式不正确')
         }
         publicMessages.push({ outputIndex, phase: item.phase, text: messageText.join('\n') })
-      } else if (item.type !== 'reasoning') {
+      } else if (item.type === 'reasoning') {
+        if (
+          !Array.isArray(item.summary) ||
+          !item.summary.every(
+            (part) =>
+              isRecord(part) && part.type === 'summary_text' && typeof part.text === 'string'
+          ) ||
+          ('encrypted_content' in item && typeof item.encrypted_content !== 'string')
+        )
+          throw new AgentError('推理协议格式不正确，未执行工具')
+      } else {
         throw new AgentError('本课不支持这种输出项，任务已停止')
       }
     }
@@ -213,12 +238,12 @@ export async function runToolLoop(
     }
 
     // 原样保留完整输出：工具项、reasoning、message 及其 phase 都不重建。
-    input.push(...response.output)
-    checkInputSize()
+    raw.push(...response.output)
+    context.checkRawTurn()
     if (calls.length === 0) {
       const answer = text.join('\n')
       if (!answer.trim() || answer.length > 16000) throw new AgentError('缺少有效的最终回答')
-      const items = parseProtocolTurn(input.slice(turnStart), checkedScope, mode)
+      const items = parseProtocolTurn(raw.slice(turnStart), checkedScope, mode)
       if (!items) throw new AgentError('本轮协议历史不完整或超过保存上限')
       record('获得最终回答')
       return { answer, items }
@@ -226,7 +251,7 @@ export async function runToolLoop(
     // parallel_tool_calls=false 的教学约束；网关违反约束时直接拒绝。
     if (calls.length !== 1) throw new AgentError('本课每轮只允许一个工具调用')
     // Leave room in the existing turn capacity for this result and a final answer.
-    checkInputSize(2)
+    context.checkRawTurn(2)
     const call = calls[0]
     if (seenCalls.has(call.callId)) throw new AgentError('收到重复 call_id，未重复执行')
     // The hidden-tool defense precedes tool events and all executor side effects.
@@ -260,7 +285,8 @@ export async function runToolLoop(
     // 展示步骤只保留工具名称；call_id 属于协议内部标识，不应出现在聊天记录中。
     record(`执行工具：${call.name}`)
     record(`工具结果已生成（${output.length} 字符）`)
-    input.push({ type: 'function_call_output', call_id: call.callId, output })
-    checkInputSize()
+    raw.push({ type: 'function_call_output', call_id: call.callId, output })
+    context.checkRawTurn()
+    context.completedToolGroup(groupStart)
   }
 }

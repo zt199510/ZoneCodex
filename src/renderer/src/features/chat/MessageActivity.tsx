@@ -6,6 +6,7 @@ import type { FileViewOrigin, OpenFileReference, OpenFileView } from '../files/f
 import { MarkdownContent } from './MarkdownContent'
 import { ToolGroup } from './MessageToolGroup'
 import { restoreCollapsedDetailsFocus } from './message-activity-focus'
+import { isContextActivity } from './agent-request'
 import {
   activityBlocks,
   formatElapsed,
@@ -109,10 +110,30 @@ export function MessageActivity({
       interrupted={Boolean(answerStarted)}
     />
   ) : null
+  const contextEntries = entries.filter(isContextActivity)
+  const contextNotice = contextEntries.length ? (
+    <div className="message-response-retry" role="status" aria-live="polite">
+      {contextEntries
+        .filter((line) => /^上下文(?:占用|整理)：/.test(line))
+        .map((line) => (
+          <span key={line}>{line}</span>
+        ))}
+      <details>
+        <summary>查看容量统计</summary>
+        <div>按工作上下文字符计量；指令、工具定义和图片另计。</div>
+        {contextEntries
+          .filter((line) => !/^上下文(?:占用|整理)：/.test(line))
+          .map((line) => (
+            <div key={line}>{line}</div>
+          ))}
+      </details>
+    </div>
+  ) : null
   if (blocks.length)
     return (
       <section className="message-tool-run" aria-label="本轮处理过程">
         {retryNotice}
+        {contextNotice}
         <details
           className="message-tool-overview"
           ref={overview}
@@ -160,10 +181,11 @@ export function MessageActivity({
       ? [{ name, label: toolLabels[name] ?? name, index }]
       : []
   })
-  if (!legacy.length && status !== 'pending' && elapsed === null) return null
+  if (!legacy.length && status !== 'pending' && elapsed === null && !contextNotice) return null
   return (
     <section className="message-tool-run" aria-label="本轮处理过程">
       {retryNotice}
+      {contextNotice}
       {(status === 'pending' || elapsed !== null) && (
         <div className="message-tool-overview-summary message-response-timing">{timingLabel}</div>
       )}

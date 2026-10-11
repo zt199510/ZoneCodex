@@ -10,6 +10,7 @@ import {
 } from '../shared/execution'
 import {
   isAgentId,
+  parseAgentContextEvent,
   parseAgentDelta,
   parseAgentMessageEvent,
   parseAgentProgress,
@@ -59,6 +60,7 @@ export const agentAPI: Pick<
   | 'onAgentToolEvent'
   | 'onAgentMessageEvent'
   | 'onAgentRetryEvent'
+  | 'onAgentContextEvent'
 > = {
   listTasks: async () => {
     try {
@@ -280,6 +282,14 @@ export const agentAPI: Pick<
     }
     ipcRenderer.on('agent:retry', handler)
     return () => ipcRenderer.removeListener('agent:retry', handler)
+  },
+  onAgentContextEvent: (listener) => {
+    const handler = (_event: IpcRendererEvent, value: unknown): void => {
+      const context = parseAgentContextEvent(value)
+      if (context) listener(context)
+    }
+    ipcRenderer.on('agent:context', handler)
+    return () => ipcRenderer.removeListener('agent:context', handler)
   },
   onAgentMessageEvent: (listener) => {
     const handler = (_event: IpcRendererEvent, value: unknown): void => {

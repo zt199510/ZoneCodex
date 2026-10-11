@@ -5,7 +5,7 @@ import type { AgentRequestContext, ProjectSelection, Workspace } from '../../../
 import { toolScopeForAgentRequest } from '../../../../shared/project'
 import type { ChatAttachment, ChatMessage } from '../../../../shared/conversation'
 import type { AgentMode } from '../../../../shared/agent'
-import { parseResponseMessageId } from '../../../../shared/agent'
+import { parseAgentContextEvent, parseResponseMessageId } from '../../../../shared/agent'
 import type {
   AgentUserInputRequest,
   AgentUserInputResponse
@@ -19,7 +19,7 @@ import {
 } from '../../../../shared/execution'
 import { applyConversationTaskEvent } from '../conversation/useConversationTasks'
 import type { OperationControl } from '../conversation/useOperation'
-import { resolveAgentRequest } from './agent-request'
+import { contextActivityEntries, isContextActivity, resolveAgentRequest } from './agent-request'
 import {
   appendImageTurnNotice,
   maxImagesPerMessage,
@@ -49,6 +49,7 @@ type ActiveRequest = {
   permissions: PermissionsState
   expectedExecution?: ExecutionInfo
   phase: 'resolving' | 'running'
+  stopping: boolean
   sideEffectStarted: boolean
   history: ProtocolItem[]
   trace: string[]
@@ -239,6 +240,22 @@ export function useChatRequest({
           ),
           `正在重试 ${event.retry}/5 · 等待 ${event.delayMs / 1000} 秒`
         ].slice(-30)
+      }))
+    })
+    const offContext = window.api.onAgentContextEvent((value) => {
+      const event = parseAgentContextEvent(value)
+      const active = activeRequest.current
+      if (
+        !event ||
+        !active ||
+        active.phase !== 'running' ||
+        active.stopping ||
+        active.requestId !== event.requestId
+      )
+        return
+      setToolActivity((previous) => ({
+        ...previous,
+        [active.assistantId]: contextActivityEntries(event, previous[active.assistantId] ?? [])
       }))
     })
     const offMessage = window.api.onAgentMessageEvent((event) => {
@@ -438,6 +455,7 @@ export function useChatRequest({
       pendingInput.current = null
       offMessage()
       offRetry()
+      offContext()
       offProgress()
       offTool()
       offTask()
@@ -513,7 +531,9 @@ export function useChatRequest({
     }))
     setToolActivity((previous) => {
       const next = { ...previous }
-      delete next[active.assistantId]
+      const contextEntries = (previous[active.assistantId] ?? []).filter(isContextActivity)
+      if (contextEntries.length) next[active.assistantId] = [...finalTrace, ...contextEntries]
+      else delete next[active.assistantId]
       return next
     })
   }
@@ -698,6 +718,7 @@ export function useChatRequest({
       permissions: { ...permissions },
       ...(expectedExecution ? { expectedExecution } : {}),
       phase: 'resolving',
+      stopping: false,
       sideEffectStarted: false,
       history: [],
       trace: [],
@@ -805,6 +826,9 @@ export function useChatRequest({
   async function stop(): Promise<void> {
     const active = activeRequest.current
     if (!active) return
+    // The user stop action retires capacity updates immediately, including
+    // late summary events received while cancellation IPC is in flight.
+    active.stopping = true
     if (active.phase === 'resolving') {
       activeRequest.current = null
       finishToolTurn(active, 'cancelled', active.trace, [])
@@ -815,6 +839,7 @@ export function useChatRequest({
       await window.api.cancelAgentRequest(active.requestId)
     } catch {
       if (activeRequest.current?.requestId === active.requestId) {
+        active.stopping = false
         setError('停止请求失败，请等待回复结束或超时。')
       }
     }

@@ -1,7 +1,7 @@
 import { performance } from 'node:perf_hooks'
 import type { WebContents } from 'electron'
 import type { AgentResult } from '../../shared/agent'
-import { parseAgentMode } from '../../shared/agent'
+import { parseAgentMode, parseAgentContextEvent } from '../../shared/agent'
 import { parseAgentUserInputResult } from '../../shared/agent-user-input'
 import { parseToolHistory } from '../../shared/agent-history'
 import type { ProtocolItem } from '../../shared/agent-history'
@@ -21,7 +21,8 @@ import { isTaskId } from '../../shared/task'
 import { AgentError } from '../errors'
 import { runAgentCore } from './agent-core'
 import type { AgentCoreEvent } from './agent-core-contract'
-import { createLiveResponse } from '../model/response-client'
+import { createLiveResponse, readModelConfiguration } from '../model/response-client'
+import { createContextSummaryResponse } from '../model/context-summary'
 import { withConversationImageInput, type CapturedImageInput } from '../model/image-input'
 import {
   captureImageAccess,
@@ -364,6 +365,12 @@ export async function runAgentRequest(
           case 'retry':
             sender.send('agent:retry', event.event)
             break
+          case 'context': {
+            const checked = parseAgentContextEvent(event.event)
+            if (!checked) throw new AgentError('上下文状态格式不正确')
+            sender.send('agent:context', checked)
+            break
+          }
         }
       }
       const commandBackend = mode === 'execute' ? await inspectWindowsCommandBackend() : null
@@ -378,7 +385,12 @@ export async function runAgentRequest(
         commandSandboxAvailable: commandBackend !== null,
         imagePresent: capturedImages.length > 0 || historyImages.length > 0
       })
-      const liveResponse = createLiveResponse(agentRequest.tools, agentRequest.instructions)
+      const configuration = readModelConfiguration()
+      const liveResponse = createLiveResponse(
+        agentRequest.tools,
+        agentRequest.instructions,
+        configuration
+      )
       const send =
         capturedImages.length || historyImages.length
           ? withConversationImageInput(
@@ -409,6 +421,13 @@ export async function runAgentRequest(
         {
           signal: controller.signal,
           send,
+          summarize: createContextSummaryResponse(configuration),
+          networkOverhead: {
+            instructionsCharacters: agentRequest.instructions.length,
+            toolSchemaCharacters: JSON.stringify(agentRequest.tools).length,
+            imageCount: capturedImages.length + historyImages.length,
+            imageBytes
+          },
           assertCurrent: assertWorkspaceAccess,
           onEvent: deliver,
           startedAt,

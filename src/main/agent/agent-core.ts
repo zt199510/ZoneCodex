@@ -3,6 +3,7 @@ import {
   isAgentId,
   parseAgentMode,
   parseAgentRetryEvent,
+  parseAgentContextEvent,
   parseResponseMessageId,
   type AgentMessageEvent,
   type AgentResult,
@@ -244,7 +245,21 @@ export async function runAgentCore(
       observeToolCall,
       observeMessage,
       mode,
-      observeRetry
+      observeRetry,
+      dependencies.summarize
+        ? {
+            summarize: dependencies.summarize,
+            assertCurrent,
+            imageIndices: [...new Set(input.imageHistory?.map((image) => image.index))],
+            networkOverhead: dependencies.networkOverhead,
+            onContext: (state) => {
+              assertCurrent()
+              const event = parseAgentContextEvent({ requestId, ...state })
+              if (!event) throw new AgentError('上下文状态格式不正确')
+              publish({ type: 'context', event })
+            }
+          }
+        : undefined
     )
     assertCurrent()
     const needsApproval = completed.items.some(

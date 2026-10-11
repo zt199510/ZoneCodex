@@ -112,10 +112,45 @@ export function withConversationImageInput(
   return (input, signal, options) => {
     signal.throwIfAborted()
     if (!assertRequestCurrent()) throw new AgentError('运行上下文已失效，请重新发送')
-    const live = projectConversationImageInput(input, images, turnStart, prompt)
+    const mapped = remapConversationImages(input, images, turnStart, options?.originalIndices)
+    const live = projectConversationImageInput(input, mapped.images, mapped.turnStart, prompt)
     signal.throwIfAborted()
     return send(live, signal, options)
   }
+}
+
+/** Images stay attached to their original user message, even when earlier text is summarized. */
+export function remapConversationImages(
+  input: unknown[],
+  images: readonly CapturedImageInput[],
+  turnStart: number,
+  originalIndices?: readonly number[]
+): { images: readonly CapturedImageInput[]; turnStart: number } {
+  if (originalIndices === undefined) return { images, turnStart }
+  if (!Array.isArray(originalIndices) || originalIndices.length !== input.length)
+    throw new AgentError('上下文图片位置映射无效')
+  const positions = new Map<number, number>()
+  let previous = -1
+  for (const [index, original] of originalIndices.entries()) {
+    if (!Number.isInteger(original) || original < -1 || (original >= 0 && original <= previous))
+      throw new AgentError('上下文图片位置映射无效')
+    if (original === -1) {
+      const item = input[index]
+      if (!item || typeof item !== 'object' || (item as Record<string, unknown>).role === 'user')
+        throw new AgentError('整理资料不能替代图片用户消息')
+    } else {
+      positions.set(original, index)
+      previous = original
+    }
+  }
+  const mappedStart = positions.get(turnStart)
+  if (mappedStart === undefined) throw new AgentError('上下文整理丢失当前用户问题')
+  const mappedImages = images.map((image) => {
+    const index = positions.get(image.index)
+    if (index === undefined) throw new AgentError('上下文整理丢失原图片组')
+    return { ...image, index }
+  })
+  return { images: mappedImages, turnStart: mappedStart }
 }
 
 export function withImageInput(
@@ -125,11 +160,11 @@ export function withImageInput(
   prompt: string,
   assertRequestCurrent: () => boolean
 ): SendResponse {
-  return (input, signal, options) => {
-    signal.throwIfAborted()
-    if (!assertRequestCurrent()) throw new AgentError('运行上下文已失效，请重新发送')
-    const live = projectImageInput(input, turnStart, prompt, captured)
-    signal.throwIfAborted()
-    return send(live, signal, options)
-  }
+  return withConversationImageInput(
+    send,
+    [{ index: turnStart, prompt, captured }],
+    turnStart,
+    prompt,
+    assertRequestCurrent
+  )
 }

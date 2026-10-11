@@ -428,8 +428,10 @@ async function main() {
       const readArgs = { path: 'note.txt', startLine: 30, endLine: 30 }
       const readOutput = await planned('read_workspace_file', JSON.stringify(readArgs), signal())
       const history = [
+        { role: 'user', content: '计划阶段读取必要业务窗口' },
         call('read_workspace_file', readArgs, 'history-read'),
-        { type: 'function_call_output', call_id: 'history-read', output: readOutput }
+        { type: 'function_call_output', call_id: 'history-read', output: readOutput },
+        finalMessage('计划阶段只读观察完成；明确执行仍需当前真实读取。')
       ]
       const events = []
       let rounds = 0

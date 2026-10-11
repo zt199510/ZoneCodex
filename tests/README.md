@@ -1,3 +1,27 @@
+<!-- lesson56-implemented-2026-10-11:start -->
+
+## 第56课当前维护入口（2026-10-11）
+
+第56课已落地共享上下文整理、容量管理及桌面/CLI/脚本适配；当前正在执行最终分层验收，真实模型业务与整进程重开结果仍待填入实际证据，不能提前记通过。 实际状态见[课程第9节](../ZoneCodex学习计划/71-第五十六课-上下文整理与容量管理.md#9-本轮实施与分层验收记录2026-10-11)。
+
+| 命令                               | 当前职责与边界                                                                                                                   |
+| ---------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
+| `npm test`                         | 第56课offline：复用第55课I/O与shared原保护，加context-core、host、adapters；清除模型配置并拒绝网络，不启动Electron或真实模型业务 |
+| `npm run test:list`                | 列出第56课各组和suite；无业务请求                                                                                                |
+| `npm test -- --suite=context-core` | 纯合同、预算、完整组、取消、分块与投影；合成摘要传输                                                                             |
+| `npm test -- --suite=host`         | 图片明确重映射与固定主/摘要配置；合成传输/图片捕获                                                                               |
+| `npm test -- --suite=adapters`     | 公共事件白名单、preload、CLI输出及实际renderer Hook的合成生命周期                                                                |
+| `npm run test:native`              | 保留第55课开发/分发Windows Node、ConPTY/Job/writer/资源/背压保护；模型传输合成                                                   |
+| `npm run test:real:cli`            | 第56课开发CLI与实际Windows launcher；单任务空历史内部真实完整组整理，真实默认gpt-6.1-sol                                         |
+| `npm run test:real:desktop`        | 第56课开发/Windows目录包；合法长历史夹具触发，真实摘要和业务、已有任务新PID同userData重开零请求另验                              |
+| `npm run test:lesson55:offline`    | 保留第55课原维护调度，不读取旧UUID当当前通过                                                                                     |
+
+当前最少维护源在[tests/lesson56/](lesson56/)，调度为[scripts/checks/lesson56.mjs](../scripts/checks/lesson56.mjs)；固定价格需求与八项测试继续复用[第55课合同](lesson55/real/task-contracts.mjs)，Agent不得修改测试、requirements、sidecar、package与价格台账。新结果另存 `.ui-check/test-runs/lesson56/<类型>-UUID/`；context-core独立证据为 `.ui-check/lesson56/context-core/<UUID>/`。复用项目依赖及现有包，不复制整份依赖树。合成传输、真实磁盘、Windows进程、Electron及联网业务分别报告；停止/输出故障不能承诺JSONL终态送达。
+
+首轮host和offline失败均保留，当前单套通过不替代最终组通过；详情及复跑见课程第9节。原课下方旧入口和计数属于相应历史轮。完整原记录保持；摘要仅存在于本次明确请求，帮助、导入、启动、恢复和切换会话不发整理请求。第56课八道自测均待作答，第54/55课原失败、未覆盖和自测保持；持久CLI会话、跨进程任务续接及第57课创建/实施后置。下方旧创建状态按原记录时间阅读。
+
+<!-- lesson56-implemented-2026-10-11:end -->
+
 # 测试工程
 
 第55课的维护入口放在 `tests/lesson55`，统一调度在 `scripts/checks/lesson55.mjs`。旧 `.ui-check/lesson55` 脚本、报告、失败记录和用户资料保持原字节；维护入口不读取旧 UUID 报告。

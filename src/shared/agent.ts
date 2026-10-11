@@ -1,6 +1,7 @@
 import { parseIncompleteToolTurn, parseProtocolTurn } from './agent-history'
 import type { ProtocolItem } from './agent-history'
 import type { ToolScope } from './project'
+import { parseAgentContextState, type AgentContextState } from './agent-context'
 
 // 两种工作方式均使用真实模型 SSE，与执行批准方式独立。
 export type AgentMode = 'execute' | 'plan'
@@ -25,6 +26,30 @@ export type AgentRetryEvent = {
   delayMs: number
   reason: 'http' | 'connection' | 'stream'
   status?: number
+}
+/** Request-local public statistics. Summary text and protocol records are never included. */
+export type AgentContextEvent = AgentContextState & { requestId: string }
+
+export function parseAgentContextEvent(value: unknown): AgentContextEvent | null {
+  try {
+    if (typeof value !== 'object' || value === null || Array.isArray(value)) return null
+    const prototype = Object.getPrototypeOf(value)
+    if (prototype !== Object.prototype && prototype !== null) return null
+    const descriptors = Object.getOwnPropertyDescriptors(value)
+    if (
+      Reflect.ownKeys(descriptors).some(
+        (key) =>
+          typeof key !== 'string' || !descriptors[key].enumerable || !('value' in descriptors[key])
+      ) ||
+      !isAgentId(descriptors.requestId?.value)
+    )
+      return null
+    const { requestId, ...state } = value as Record<string, unknown>
+    const checked = parseAgentContextState(state)
+    return checked ? { requestId: requestId as string, ...checked } : null
+  } catch {
+    return null
+  }
 }
 
 export function parseResponseMessageId(

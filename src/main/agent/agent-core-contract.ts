@@ -1,5 +1,6 @@
 import type {
   AgentMessageEvent,
+  AgentContextEvent,
   AgentMode,
   AgentResult,
   AgentRetryEvent,
@@ -28,6 +29,7 @@ export type AgentCoreEvent =
   | { type: 'tool'; event: AgentToolEvent }
   | { type: 'message'; event: AgentMessageEvent }
   | { type: 'retry'; event: AgentRetryEvent }
+  | { type: 'context'; event: AgentContextEvent }
 
 /** Trusted adapters report facts; these callbacks do not authorize an operation. */
 export type AgentCoreObserver = {
@@ -40,6 +42,14 @@ export type AgentCoreObserver = {
 export type AgentCoreDependencies = {
   signal: AbortSignal
   send: SendResponse
+  /** No business tools or public answer stream; preparation fixes the same model config. */
+  summarize?: SendResponse
+  networkOverhead?: {
+    instructionsCharacters: number
+    toolSchemaCharacters: number
+    imageCount: number
+    imageBytes: number
+  }
   createTools: (observer: AgentCoreObserver) => ExecuteTool
   assertCurrent: () => boolean
   onEvent?: (event: AgentCoreEvent) => void

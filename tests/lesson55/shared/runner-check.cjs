@@ -109,10 +109,21 @@ async function environment(model, options = {}) {
     'node:perf_hooks': { performance: { now: () => clock.now } },
     './agent-user-input': input,
     '../model/response-client': {
+      readModelConfiguration: () =>
+        Object.freeze({
+          endpoint: 'https://fixture.invalid/responses',
+          apiKey: 'fixture-only',
+          model: 'gpt-6.1-sol'
+        }),
       createLiveResponse: () => async (items, signal, callbacks) => {
         spy.requests++
         env.modelSignal = signal
         return model(env, items, signal, callbacks)
+      }
+    },
+    '../model/context-summary': {
+      createContextSummaryResponse: () => async () => {
+        throw new Error('Unexpected summary in short protected fixture')
       }
     },
     '../project/image-access': {

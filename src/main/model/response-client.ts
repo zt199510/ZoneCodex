@@ -20,6 +20,8 @@ export type SendResponseOptions = {
   onTextDelta?: (delta: string) => void
   onMessageEvent?: (event: ResponseMessageEvent) => void
   onRetry?: (event: ResponseRetryEvent) => void
+  /** Local audit positions for an explicit working projection; -1 is derived knowledge. */
+  originalIndices?: readonly number[]
 }
 export type SendResponse = (
   input: unknown[],
@@ -219,7 +221,7 @@ export function createLiveResponse(
     configuration === undefined ? undefined : fixedModelConfiguration(configuration)
   return async (input, signal, options = {}) => {
     signal.throwIfAborted()
-    // Existing desktop callers continue reading their environment for each send.
+    // Trusted hosts fix configuration once for both business and summary requests.
     const { endpoint, model, apiKey } = fixedConfiguration ?? readModelConfiguration()
     // Freeze the body once: a retry repeats only this model request, never
     // any completed local tool, and cannot observe later input mutation.

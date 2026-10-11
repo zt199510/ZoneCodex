@@ -164,12 +164,23 @@ async function environment(model = async () => response(finalMessage('受保护�
     electron: fixture.electron,
     './agent-user-input': input,
     '../model/response-client': {
+      readModelConfiguration: () =>
+        Object.freeze({
+          endpoint: 'https://fixture.invalid/responses',
+          apiKey: 'fixture-only',
+          model: 'gpt-6.1-sol'
+        }),
       createLiveResponse: () => async (items, signal, hooks) => {
         spy.modelRequests++
         env.sentInput = structuredClone(items)
         env.signal = signal
         env.hooks = hooks
         return model(env, items, signal, hooks)
+      }
+    },
+    '../model/context-summary': {
+      createContextSummaryResponse: () => async () => {
+        throw new Error('Unexpected summary in short protected fixture')
       }
     },
     '../project/attachment-access': attachment,

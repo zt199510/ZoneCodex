@@ -204,6 +204,8 @@ async function main() {
       throw new Error('must be frozen')
     }
     dependencies.createTools = undefined
+    for (let index = 0; !callbacks && index < 20; index++) await Promise.resolve()
+    assert.ok(callbacks)
     callbacks.onTextDelta('真实合成增量')
     callbacks.onMessageEvent({
       outputIndex: 0,
@@ -370,6 +372,8 @@ async function main() {
       },
       { signal: controller.signal, onEvent: (event) => events.push(event) }
     )
+    for (let index = 0; !callbacks && index < 20; index++) await Promise.resolve()
+    assert.ok(callbacks)
     callbacks.onMessageEvent({ outputIndex: 0, phase: 'commentary', text: '中断前公开片段' })
     controller.abort()
     const outcome = await completion

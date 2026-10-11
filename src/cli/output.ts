@@ -2,6 +2,7 @@ import type { Writable } from 'node:stream'
 import type { AgentCoreEvent } from '../main/agent/agent-core-contract'
 import {
   isAgentId,
+  parseAgentContextEvent,
   parseAgentMessageEvent,
   parseAgentRetryEvent,
   parseAgentToolEvent,
@@ -85,6 +86,33 @@ export function projectEvent(event: AgentCoreEvent): Record<string, unknown> {
     })
     if (!value) throw new CLIOutputError()
     return { type: 'retry', ...value }
+  }
+  if (event.type === 'context') {
+    const value = parseAgentContextEvent(event.event)
+    if (!value) throw new CLIOutputError()
+    return {
+      type: 'context',
+      requestId: value.requestId,
+      phase: value.phase,
+      rawHistoryItems: value.rawHistoryItems,
+      rawHistoryCharacters: value.rawHistoryCharacters,
+      rawTurnItems: value.rawTurnItems,
+      rawTurnCharacters: value.rawTurnCharacters,
+      workingItems: value.workingItems,
+      workingCharacters: value.workingCharacters,
+      limitCharacters: value.limitCharacters,
+      triggerCharacters: value.triggerCharacters,
+      rawTurnLimitItems: value.rawTurnLimitItems,
+      instructionsCharacters: value.instructionsCharacters,
+      toolSchemaCharacters: value.toolSchemaCharacters,
+      imageCount: value.imageCount,
+      imageBytes: value.imageBytes,
+      summaryRequests: value.summaryRequests,
+      sourceGroups: value.sourceGroups,
+      beforeCharacters: value.beforeCharacters,
+      afterCharacters: value.afterCharacters,
+      reason: value.reason
+    }
   }
   if (event.type === 'tool') {
     const common = {
@@ -272,6 +300,37 @@ export class CLIOutput {
         if (parseResponseMessageId(key)?.round === event.event.round) this.messages.delete(key)
       this.diagnostic(
         `[重试 第${event.event.round}轮 ${event.event.retry}/5] 前一尝试过程已退休；等待${event.event.delayMs}毫秒（${event.event.reason}）`
+      )
+    } else if (event.type === 'context') {
+      const state = event.event
+      const reason: Record<typeof state.reason, string> = {
+        idle: '容量正常',
+        near_limit: '接近容量',
+        summary_ready: '候选摘要已验证',
+        no_eligible_groups: '没有可整理的完整组',
+        invalid_summary: '摘要格式或来源无效',
+        no_reduction: '未减少工作上下文',
+        summary_transport_failed: '摘要请求失败',
+        chunk_limit: '分块次数已达上限',
+        summary_limit: '摘要次数已达上限',
+        working_limit: '工作上下文超过容量',
+        source_material_limit: '摘要材料超过容量',
+        summary_retry: '摘要请求正在重试'
+      }
+      const phase =
+        state.phase === 'compacting'
+          ? '正在整理'
+          : state.phase === 'compacted'
+            ? `整理完成 ${state.beforeCharacters} → ${state.afterCharacters} 字符`
+            : state.phase === 'failed'
+              ? '整理失败'
+              : state.phase === 'blocked'
+                ? '容量阻塞'
+                : state.workingCharacters >= state.triggerCharacters
+                  ? '接近容量'
+                  : '容量统计'
+      this.diagnostic(
+        `[上下文 ${phase}] 工作 ${state.workingCharacters}/${state.limitCharacters} 字符 · ${state.workingItems} 项；${reason[state.reason]}。原历史 ${state.rawHistoryCharacters} 字符，原当轮 ${state.rawTurnItems}/${state.rawTurnLimitItems} 项、${state.rawTurnCharacters} 字符；另计指令 ${state.instructionsCharacters} 字符、工具定义 ${state.toolSchemaCharacters} 字符、图片 ${state.imageCount} 张/${state.imageBytes} 字节。`
       )
     } else if (event.type === 'tool') {
       if (event.event.phase === 'finish') this.deliveredToolResults.add(event.event.callId)
