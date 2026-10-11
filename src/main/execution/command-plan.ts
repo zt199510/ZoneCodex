@@ -14,6 +14,7 @@ import { tmpdir } from 'node:os'
 import { delimiter, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import type { PermissionsState } from '../../shared/execution'
+import { isAgentId } from '../../shared/agent'
 import {
   inspectCommandHost,
   inspectWindowsCommandBackend,
@@ -28,13 +29,20 @@ export type CommandRequest = Readonly<{
   sandbox_permissions?: 'use_default' | 'require_escalated'
   justification?: string | null
 }>
+export type CommandOwner = Readonly<
+  | { kind: 'desktop'; windowId: number; conversationId: string; requestId: string }
+  | { kind: 'cli'; runId: string; conversationId: string; requestId: string }
+>
+
 type PlanContext = {
-  owner: { windowId: number; conversationId: string; requestId: string }
+  owner: CommandOwner
   permissions: PermissionsState
   scopeId: string
   writableRoots: readonly string[]
   environment: 'tool' | 'legacy'
   assertCurrent: () => boolean
+  /** Fixed application resource directory supplied by a trusted ordinary Node host. */
+  runtimeRoot?: string
 }
 export type PreparedCommandExecution = Readonly<{
   command: CommandRequest
@@ -241,6 +249,18 @@ export async function prepareCommandExecution(
   }
   current()
   if (
+    !isAgentId(context.owner.conversationId) ||
+    !isAgentId(context.owner.requestId) ||
+    (context.owner.kind === 'desktop'
+      ? !Number.isSafeInteger(context.owner.windowId) || context.owner.windowId <= 0
+      : context.owner.kind !== 'cli' || !isAgentId(context.owner.runId)) ||
+    (context.runtimeRoot !== undefined &&
+      (typeof context.runtimeRoot !== 'string' || !isAbsolute(context.runtimeRoot)))
+  )
+    throw new Error('命令宿主来源或资源目录无效')
+  if (context.owner.kind === 'cli' && process.platform !== 'win32')
+    throw new Error('此脚本入口的命令执行只支持 Windows，本次未启动命令')
+  if (
     !request.program ||
     request.program.includes('\0') ||
     request.args.some((arg) => arg.includes('\0')) ||
@@ -272,8 +292,10 @@ export async function prepareCommandExecution(
   }
   current()
   const backend =
-    context.permissions.mode === 'full-access' ? null : await inspectWindowsCommandBackend()
-  const host = backend?.host ?? (await inspectCommandHost())
+    context.permissions.mode === 'full-access'
+      ? null
+      : await inspectWindowsCommandBackend(context.runtimeRoot)
+  const host = backend?.host ?? (await inspectCommandHost(context.runtimeRoot))
   current()
   if (process.platform === 'win32' && !host)
     throw new Error('Windows 命令监督器不可用或已变化，本次未启动命令')
@@ -423,12 +445,13 @@ export function claimCommandExecution(
       value.protections.some((item) => protectionIdentity(item.path) !== item.identity)
     )
       throw new Error('命令目录或 Git 指向已变化')
-    if (value.host && !verifyCommandHost(value.host)) throw new Error('命令监督器已变化')
+    if (value.host && !verifyCommandHost(value.host, value.context.runtimeRoot))
+      throw new Error('命令监督器已变化')
     let program = value.executable
     let args = [...value.args]
     const environment = { ...value.environment }
     if (value.sandbox) {
-      if (!value.backend || !verifyWindowsCommandBackend(value.backend))
+      if (!value.backend || !verifyWindowsCommandBackend(value.backend, value.context.runtimeRoot))
         throw new Error('Windows 沙箱后端已变化')
       const entries = [
         { path: { type: 'special', value: { kind: 'root' } }, access: 'read' },

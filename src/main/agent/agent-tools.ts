@@ -1,6 +1,6 @@
 import { AgentError } from '../errors'
 import type { ExecuteTool } from './tool-loop'
-import type { ExecutionContext } from '../execution/execution-context'
+import type { ExecutionContext } from '../execution/execution-context-policy'
 import type { CommandAuthorize } from '../execution/command-plan'
 import { executeTimeTool } from '../tools/current-time'
 import { createWorkspaceReadExecutor, workspaceReadTools } from '../tools/workspace-files'

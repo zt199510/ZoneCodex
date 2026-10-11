@@ -6,6 +6,7 @@ directories:
   buildResources: build
 files:
   - out/**
+  - '!out/cli/**'
   - package.json
   - resources/icon.png
 win:

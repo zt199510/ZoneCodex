@@ -30,11 +30,16 @@ export default defineConfig(
   },
   {
     // Electron 的独立检查脚本使用 CommonJS，不能要求 JavaScript 写 TS 返回类型。
-    files: ['scripts/**/*.cjs'],
+    files: ['scripts/**/*.cjs', 'tests/**/*.cjs'],
     rules: {
       '@typescript-eslint/no-require-imports': 'off',
       '@typescript-eslint/explicit-function-return-type': 'off'
     }
+  },
+  {
+    // 测试与检查入口使用普通 JavaScript，不要求 TypeScript 返回类型标注。
+    files: ['tests/**/*.mjs', 'scripts/checks/**/*.mjs'],
+    rules: { '@typescript-eslint/explicit-function-return-type': 'off' }
   },
   {
     // 保留第七、八课的原始订阅教学写法；正式功能代码仍启用完整 Hooks 检查。

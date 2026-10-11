@@ -1,10 +1,14 @@
-import type { ExecutionApprovalInput } from '../../shared/execution'
 import { createHash } from 'node:crypto'
 import type { WorkspaceApprovalRequest, WorkspaceApprove } from '../tools/workspace-actions'
-import { localPermission, type ExecutionContext } from './execution-context'
+import type { ExecutionContext } from './execution-context-policy'
 import { getExecutionPermissionState } from './permission-state'
 import { requestExecutionApproval } from './execution-approval'
 import { reviewExecutionApproval } from './approval-reviewer'
+import {
+  createHostWorkspaceAuthorization,
+  createHostWorkspaceCommandAuthorization,
+  type HostWorkspaceAuthorizationOptions
+} from './workspace-authorization'
 import {
   prepareCommandExecution,
   authorizeCommandExecution,
@@ -28,135 +32,33 @@ type WorkspaceAuthorizationOptions = {
   onApproved: (request: WorkspaceApprovalRequest) => void
 }
 
-/** Keeps risk review and manual waiting within the originating task lifecycle. */
+function desktopOptions(options: WorkspaceAuthorizationOptions): HostWorkspaceAuthorizationOptions {
+  const windowId = options.windowId
+  return {
+    ...options,
+    owner: {
+      kind: 'desktop',
+      windowId,
+      requestId: options.requestId,
+      conversationId: options.conversationId
+    },
+    requestApproval: (input, signal) => requestExecutionApproval(windowId, input, signal),
+    reviewApproval: reviewExecutionApproval
+  }
+}
+
+/** The desktop broker keeps its original window/source checks and waiting lifecycle. */
 export function createWorkspaceAuthorization(
   options: WorkspaceAuthorizationOptions
 ): WorkspaceApprove {
-  const { windowId, requestId, conversationId, userRequest, execution, assertCurrent } = options
-  return async (request, signal): Promise<boolean> => {
-    signal.throwIfAborted()
-    if (!assertCurrent()) return false
-    // A boolean file grant cannot select or authorize a command backend.
-    if (request.kind === 'command') return false
-    const target = request.path
-    if (!target) return false
-    const decision = localPermission(execution, 'write', target)
-    if (decision === 'allow') return true
-    if (decision === 'deny') return false
-    const common = { requestId, conversationId, cwd: request.cwd }
-    const approval: ExecutionApprovalInput =
-      request.kind === 'create'
-        ? { ...common, kind: 'create', path: request.path, content: request.after }
-        : {
-            ...common,
-            kind: 'edit',
-            path: request.path,
-            before: request.before,
-            after: request.after
-          }
-    if (!options.beginApproval()) return false
-    try {
-      let answer = false
-      if (decision === 'review') {
-        const verdict = await reviewExecutionApproval(approval, userRequest, signal)
-        signal.throwIfAborted()
-        if (!assertCurrent()) return false
-        answer = verdict === 'approve'
-      }
-      if (!answer) {
-        signal.throwIfAborted()
-        if (!assertCurrent()) return false
-        answer = await requestExecutionApproval(windowId, approval, signal)
-      }
-      signal.throwIfAborted()
-      const approved = answer && assertCurrent()
-      if (approved) options.onApproved(request)
-      return approved
-    } finally {
-      options.finishApproval()
-    }
-  }
+  return createHostWorkspaceAuthorization(desktopOptions(options))
 }
 
 /** The returned plan binds the exact command and backend to this originating task. */
 export function createWorkspaceCommandAuthorization(
   options: WorkspaceAuthorizationOptions
 ): CommandAuthorize {
-  return async (request, signal) => {
-    signal.throwIfAborted()
-    if (!options.assertCurrent()) return null
-    const prepared = await prepareCommandExecution(
-      request,
-      {
-        owner: {
-          windowId: options.windowId,
-          conversationId: options.conversationId,
-          requestId: options.requestId
-        },
-        permissions: {
-          mode: options.execution.info.mode,
-          revision: options.execution.info.revision
-        },
-        scopeId: options.execution.info.scopeId,
-        writableRoots: options.execution.writableRoots,
-        environment: 'tool',
-        assertCurrent: options.assertCurrent
-      },
-      signal
-    )
-    try {
-      signal.throwIfAborted()
-      if (!options.assertCurrent()) return null
-      if (prepared.permissions.mode === 'full-access') {
-        return authorizeCommandExecution(prepared, 'full-access')
-      }
-      if (
-        prepared.sandboxAvailable &&
-        prepared.command.sandbox_permissions !== 'require_escalated'
-      ) {
-        return authorizeCommandExecution(prepared, 'sandbox')
-      }
-      const approval: ExecutionApprovalInput = {
-        requestId: options.requestId,
-        conversationId: options.conversationId,
-        kind: 'command',
-        program: prepared.command.program,
-        args: [...prepared.command.args],
-        cwd: prepared.command.cwd,
-        reason: prepared.reason.slice(0, 1000) || '此命令需要在当前受限环境之外运行。'
-      }
-      if (!options.beginApproval()) return null
-      try {
-        let authorization: 'manual' | 'review' = 'manual'
-        let answer = false
-        if (prepared.permissions.mode === 'auto-approve') {
-          const verdict = await reviewExecutionApproval(approval, options.userRequest, signal)
-          signal.throwIfAborted()
-          if (!options.assertCurrent()) return null
-          answer = verdict === 'approve'
-          if (answer) authorization = 'review'
-        }
-        if (!answer) {
-          signal.throwIfAborted()
-          if (!options.assertCurrent()) return null
-          answer = await requestExecutionApproval(options.windowId, approval, signal)
-        }
-        signal.throwIfAborted()
-        if (!answer || !options.assertCurrent()) return null
-        options.onApproved({
-          kind: 'command',
-          program: prepared.command.program,
-          args: [...prepared.command.args],
-          cwd: prepared.command.cwd
-        })
-        return authorizeCommandExecution(prepared, authorization)
-      } finally {
-        options.finishApproval()
-      }
-    } finally {
-      discardCommandExecution(prepared)
-    }
-  }
+  return createHostWorkspaceCommandAuthorization(desktopOptions(options))
 }
 
 /** Legacy proposals lack a verified user request and retain manual review fallback. */
@@ -184,7 +86,12 @@ export async function approveStandaloneCommand(
   const prepared = await prepareCommandExecution(
     request,
     {
-      owner: { windowId, conversationId: request.conversationId, requestId: request.requestId },
+      owner: {
+        kind: 'desktop',
+        windowId,
+        conversationId: request.conversationId,
+        requestId: request.requestId
+      },
       permissions: state,
       scopeId: createHash('sha256')
         .update(

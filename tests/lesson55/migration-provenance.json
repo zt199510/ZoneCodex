@@ -1,0 +1,189 @@
+{
+  "createdAtUTC": "2026-10-11T00:16:06.492Z",
+  "provenance": [
+    {
+      "origin": ".ui-check\\lesson55\\shared-regression-ecb4d72b-e157-4abe-8727-14366931d8bb\\core-check.cjs",
+      "originalSHA256": "93ad63b8e610dd2fbb9c60efa5d8ea129eba615e2afc68b45a0a4744d73c74e8",
+      "destination": "tests/lesson55/shared/core-check.cjs",
+      "currentSHA256": "c3c8964a4d066cc6a1342d146ccd8e89a7e88f2f1083b12e183fc7baccc2843e",
+      "adaptation": "Only project-root resolution changes; shared runner copies these fixed sources to a new UUID directory and supplies the verified project cwd. Assertions remain unchanged. Maintained-source format and test-only unused fixture imports/helpers were cleaned; no protected business assertions changed.",
+      "originalStillUnchanged": true
+    },
+    {
+      "origin": ".ui-check\\lesson55\\shared-regression-ecb4d72b-e157-4abe-8727-14366931d8bb\\protection-check.cjs",
+      "originalSHA256": "4cfa5ed02bafe0601fcf1b155989c7cccc1eb9537fe0acf8f841e82b89fdf844",
+      "destination": "tests/lesson55/shared/protection-check.cjs",
+      "currentSHA256": "24e205dca843ef21d3d903e3afafc069841ed0500dc202fad9ceddf4071aa605",
+      "adaptation": "Only project-root resolution changes; shared runner copies these fixed sources to a new UUID directory and supplies the verified project cwd. Assertions remain unchanged. Maintained-source format and test-only unused fixture imports/helpers were cleaned; no protected business assertions changed.",
+      "originalStillUnchanged": true
+    },
+    {
+      "origin": ".ui-check\\lesson55\\shared-regression-ecb4d72b-e157-4abe-8727-14366931d8bb\\capacity-check.cjs",
+      "originalSHA256": "0c2e24665e0d49a08410e0cc8ba297af62c8f0f21d02362fe39c28934c5a0fd8",
+      "destination": "tests/lesson55/shared/capacity-check.cjs",
+      "currentSHA256": "79e3239ca3892beaa6fd6d711aaf3bfea4c5ef0ef643743701bd72b924462a65",
+      "adaptation": "Only project-root resolution changes; shared runner copies these fixed sources to a new UUID directory and supplies the verified project cwd. Assertions remain unchanged. Maintained-source format and test-only unused fixture imports/helpers were cleaned; no protected business assertions changed.",
+      "originalStillUnchanged": true
+    },
+    {
+      "origin": ".ui-check\\lesson55\\shared-regression-ecb4d72b-e157-4abe-8727-14366931d8bb\\question-source-check.cjs",
+      "originalSHA256": "6a1aded3ce040b050279142e9aded860ee461ebe0bbae4bab41f1cd6aa53bb2c",
+      "destination": "tests/lesson55/shared/question-source-check.cjs",
+      "currentSHA256": "83f2bca00977615e453d0927ff76bcb602f10717c19c1d5a764195d33f6ba4ba",
+      "adaptation": "Only project-root resolution changes; shared runner copies these fixed sources to a new UUID directory and supplies the verified project cwd. Assertions remain unchanged. Maintained-source format and test-only unused fixture imports/helpers were cleaned; no protected business assertions changed.",
+      "originalStillUnchanged": true
+    },
+    {
+      "origin": ".ui-check\\lesson55\\shared-regression-ecb4d72b-e157-4abe-8727-14366931d8bb\\runner-check.cjs",
+      "originalSHA256": "fcf956ef89ef0e55dcfb00335a54b5ec69ce0d88f9d4ae78803c05893aa16bc3",
+      "destination": "tests/lesson55/shared/runner-check.cjs",
+      "currentSHA256": "c17ef03ed1eaf7f96b11334b7bd6f173eed11d7169bc408c4f94a6190ba1672e",
+      "adaptation": "Only project-root resolution changes; shared runner copies these fixed sources to a new UUID directory and supplies the verified project cwd. Assertions remain unchanged. Maintained-source format and test-only unused fixture imports/helpers were cleaned; no protected business assertions changed.",
+      "originalStillUnchanged": true
+    },
+    {
+      "origin": ".ui-check\\lesson55\\shared-regression-ecb4d72b-e157-4abe-8727-14366931d8bb\\desktop-source-material-check.cjs",
+      "originalSHA256": "5f8816fc6d359da023a9a10dee7cfc5bd2980a40010faaf75734c79b5e53f03b",
+      "destination": "tests/lesson55/shared/desktop-source-material-check.cjs",
+      "currentSHA256": "63702aa9dfbad0a90201227b561b7af74b860a101413798a32e1ad5c208d0f2c",
+      "adaptation": "Only project-root resolution changes; shared runner copies these fixed sources to a new UUID directory and supplies the verified project cwd. Assertions remain unchanged. Maintained-source format and test-only unused fixture imports/helpers were cleaned; no protected business assertions changed.",
+      "originalStillUnchanged": true
+    },
+    {
+      "origin": ".ui-check\\lesson55\\shared-regression-ecb4d72b-e157-4abe-8727-14366931d8bb\\command-plan-identity-check.cjs",
+      "originalSHA256": "e7a60e6a25fb4511b11180f8c1a0e0e6aae690a29e259be3fbd42eb3bf76284f",
+      "destination": "tests/lesson55/shared/command-plan-identity-check.cjs",
+      "currentSHA256": "fae371c8a4038a96ff4497ec6f5902298b22b12860a6cea9b738caec22787f7b",
+      "adaptation": "Only project-root resolution changes; shared runner copies these fixed sources to a new UUID directory and supplies the verified project cwd. Assertions remain unchanged. Maintained-source format and test-only unused fixture imports/helpers were cleaned; no protected business assertions changed.",
+      "originalStillUnchanged": true
+    },
+    {
+      "origin": ".ui-check\\lesson55\\shared-regression-ecb4d72b-e157-4abe-8727-14366931d8bb\\patch-capacity-check.cjs",
+      "originalSHA256": "0f8bf50b7b8e2a9adb860f3f35db614929f7a868eb625ccf8f1e14a5e97edde7",
+      "destination": "tests/lesson55/shared/patch-capacity-check.cjs",
+      "currentSHA256": "4ee5e4ef945a07227d4e9e41dbab6e400664bb9866734bcf9bd58bb770520aea",
+      "adaptation": "Only project-root resolution changes; shared runner copies these fixed sources to a new UUID directory and supplies the verified project cwd. Assertions remain unchanged. Maintained-source format and test-only unused fixture imports/helpers were cleaned; no protected business assertions changed.",
+      "originalStillUnchanged": true
+    },
+    {
+      "origin": ".ui-check\\lesson55\\shared-regression-ecb4d72b-e157-4abe-8727-14366931d8bb\\harness.cjs",
+      "originalSHA256": "5d4c80f4f545ca8abcf0debd25d923779aeb1c51b9429fcba76d2943aee2f045",
+      "destination": "tests/lesson55/shared/harness.cjs",
+      "currentSHA256": "d0147cfa92cd9f2ba747730800121598c2d4351db3aef529ad21c61c97f688ad",
+      "adaptation": "Only project-root resolution changes; shared runner copies these fixed sources to a new UUID directory and supplies the verified project cwd. Assertions remain unchanged. Maintained-source format and test-only unused fixture imports/helpers were cleaned; no protected business assertions changed.",
+      "originalStillUnchanged": true
+    },
+    {
+      "origin": ".ui-check\\lesson55\\shared-regression-ecb4d72b-e157-4abe-8727-14366931d8bb\\fixture.cjs",
+      "originalSHA256": "ecd82dd4d2bf8ccaed6fa5a94727c7706c832a18ef958f61c6f4eb5e4dd709cf",
+      "destination": "tests/lesson55/shared/fixture.cjs",
+      "currentSHA256": "395b9f2541395147c19f574db6c70f14845f940a494f2e5c97df587f19a9b3b3",
+      "adaptation": "Only project-root resolution changes; shared runner copies these fixed sources to a new UUID directory and supplies the verified project cwd. Assertions remain unchanged. Maintained-source format and test-only unused fixture imports/helpers were cleaned; no protected business assertions changed.",
+      "originalStillUnchanged": true
+    },
+    {
+      "origin": ".ui-check/lesson55/io-check-53f97807-836a-46e6-9ab4-61ce557be9bb/run.mjs",
+      "originalSHA256": "eb72dcf2d9d255968271e2dcee8df8ccf367f0d246c3c85ef3950abadf565896",
+      "destination": "tests/lesson55/offline/io.mjs",
+      "currentSHA256": "fceddc8836e14d5f1333963b23f0398d97761b5fa5be20199fa433c4bc79de7f",
+      "adaptation": "Project root and output directory are explicit shared runtime; all 54 original IO assertions remain unchanged. Maintained-source format and test-only unused fixture imports/helpers were cleaned; no protected business assertions changed.",
+      "originalStillUnchanged": true
+    },
+    {
+      "origin": ".ui-check/lesson55/cli-backpressure-check.mjs",
+      "originalSHA256": "22c43166402b9720f412b960a4f2b2c7be67b359d521e53c5b401f875e8a6116",
+      "destination": "tests/lesson55/native/cli-backpressure-check.mjs",
+      "adaptation": "Explicit trusted project root, fresh run output and local helper/snapshot resolution; original active assertions retained. JavaScript formatting, documented empty fixture/diagnostic blocks and scoped terminal-regex annotations only. CLI real current-product identity list additionally includes tsconfig.cli.json. Maintained-source format and test-only unused fixture imports/helpers were cleaned; no protected business assertions changed.",
+      "currentSHA256": "720fac225dc1c537d338d915ce62d0a948c0078f6c11fe92f10e51dd71dd3af9",
+      "originalStillUnchanged": true
+    },
+    {
+      "origin": ".ui-check/lesson55/cli-distribution-protection-check.mjs",
+      "originalSHA256": "25f24fbc5910a597c1b89baabd5124e6cee2d7f48797e7510fddbd08b570f3e6",
+      "destination": "tests/lesson55/native/cli-distribution-protection-check.mjs",
+      "adaptation": "Explicit trusted project root, fresh run output and local helper/snapshot resolution; original active assertions retained. JavaScript formatting, documented empty fixture/diagnostic blocks and scoped terminal-regex annotations only. CLI real current-product identity list additionally includes tsconfig.cli.json. Maintained-source format and test-only unused fixture imports/helpers were cleaned; no protected business assertions changed.",
+      "currentSHA256": "a5416fa991328f73360cd2de966f188bc17ba251f70494a6757b69823127c288",
+      "originalStillUnchanged": true
+    },
+    {
+      "origin": ".ui-check/lesson55/cli-process-check.mjs",
+      "originalSHA256": "bffe73e3191bbcf8057603f3bb65cf22447db4626ea53923939be930c44164be",
+      "destination": "tests/lesson55/native/cli-process-check.mjs",
+      "adaptation": "Explicit trusted project root, fresh run output and local helper/snapshot resolution; original active assertions retained. JavaScript formatting, documented empty fixture/diagnostic blocks and scoped terminal-regex annotations only. CLI real current-product identity list additionally includes tsconfig.cli.json. Maintained-source format and test-only unused fixture imports/helpers were cleaned; no protected business assertions changed.",
+      "currentSHA256": "0d985008dbd54e5b6726946eec42ec207553747112ff8329d7cb3d4a85c470bb",
+      "originalStillUnchanged": true
+    },
+    {
+      "origin": ".ui-check/lesson55/cli-synthetic-preload.cjs",
+      "originalSHA256": "255470cc774242c83cd02a8a16230c988c432a04bb34b02d041f9d4c1e19a794",
+      "destination": "tests/lesson55/native/cli-synthetic-preload.cjs",
+      "adaptation": "Explicit trusted project root, fresh run output and local helper/snapshot resolution; original active assertions retained. JavaScript formatting, documented empty fixture/diagnostic blocks and scoped terminal-regex annotations only. CLI real current-product identity list additionally includes tsconfig.cli.json. Maintained-source format and test-only unused fixture imports/helpers were cleaned; no protected business assertions changed.",
+      "currentSHA256": "fd74a058d530968d656b45ddf0a5d5fabf55003ccb1403063dcde6a89c90045b",
+      "originalStillUnchanged": true
+    },
+    {
+      "origin": ".ui-check/lesson55/output-bridge-check.mjs",
+      "originalSHA256": "f9b1c9f0360cb4264b5059a9b70ebfc13a50eef527c74506754091b55d754e0c",
+      "destination": "tests/lesson55/native/output-bridge-check.mjs",
+      "adaptation": "Explicit trusted project root, fresh run output and local helper/snapshot resolution; original active assertions retained. JavaScript formatting, documented empty fixture/diagnostic blocks and scoped terminal-regex annotations only. CLI real current-product identity list additionally includes tsconfig.cli.json. Maintained-source format and test-only unused fixture imports/helpers were cleaned; no protected business assertions changed.",
+      "currentSHA256": "0e38d457728b5f7e0ddd551e920eab9ed906d03ac08c2ec93d4693109b27e45e",
+      "originalStillUnchanged": true
+    },
+    {
+      "origin": ".ui-check/lesson55/public-api-check.mjs",
+      "originalSHA256": "f7df6a26ea775cff3e4c4d2eff5113c3d196142d4ca6c287d58e2baba076f6d5",
+      "destination": "tests/lesson55/native/public-api-check.mjs",
+      "adaptation": "Explicit trusted project root, fresh run output and local helper/snapshot resolution; original active assertions retained. JavaScript formatting, documented empty fixture/diagnostic blocks and scoped terminal-regex annotations only. CLI real current-product identity list additionally includes tsconfig.cli.json. Maintained-source format and test-only unused fixture imports/helpers were cleaned; no protected business assertions changed.",
+      "currentSHA256": "a9b0140aefefbdb529a35791d441575994c6b55229732ebd712ce5937a7a4db5",
+      "originalStillUnchanged": true
+    },
+    {
+      "origin": ".ui-check/lesson55/public-api-driver.cjs",
+      "originalSHA256": "11e110e97ed4227514976ab0a6630f5124a7d5d2b46df4461690e8b8979e1b9b",
+      "destination": "tests/lesson55/native/public-api-driver.cjs",
+      "adaptation": "Explicit trusted project root, fresh run output and local helper/snapshot resolution; original active assertions retained. JavaScript formatting, documented empty fixture/diagnostic blocks and scoped terminal-regex annotations only. CLI real current-product identity list additionally includes tsconfig.cli.json. Maintained-source format and test-only unused fixture imports/helpers were cleaned; no protected business assertions changed.",
+      "currentSHA256": "ca342d4e0ecd6f7f40fa89402d21333986b0b64b5cd63327d8c8bb64bfc67a24",
+      "originalStillUnchanged": true
+    },
+    {
+      "origin": ".ui-check/lesson55/cli-real-observer.cjs",
+      "originalSHA256": "c1c90809128449913ca28e4055e8f1e7807f076af8f36c1b4112d57c3eebc34c",
+      "destination": "tests/lesson55/real/cli-real-observer.cjs",
+      "adaptation": "Explicit trusted project root, fresh run output and local helper/snapshot resolution; original active assertions retained. JavaScript formatting, documented empty fixture/diagnostic blocks and scoped terminal-regex annotations only. CLI real current-product identity list additionally includes tsconfig.cli.json. Maintained-source format and test-only unused fixture imports/helpers were cleaned; no protected business assertions changed.",
+      "currentSHA256": "ee18daf26eef38c3dbc522ec0736cbb8861b1b737de3e75ea5e47524f0dd90d3",
+      "originalStillUnchanged": true
+    },
+    {
+      "origin": ".ui-check/lesson55/cli-real-task-check.mjs",
+      "originalSHA256": "54b90a671dd3395dfc99975a91e6e42a66bbdd4b0b93c1e9d3976c46ac096fc0",
+      "destination": "tests/lesson55/real/cli-real-task-check.mjs",
+      "adaptation": "Explicit trusted project root, fresh run output and local helper/snapshot resolution; original active assertions retained. JavaScript formatting, documented empty fixture/diagnostic blocks and scoped terminal-regex annotations only. CLI real current-product identity list additionally includes tsconfig.cli.json. Maintained-source format and test-only unused fixture imports/helpers were cleaned; no protected business assertions changed.",
+      "currentSHA256": "43dd2ee925634d15d628dd7482d97fa45255ee8358a1b48476d1d03a1d422977",
+      "originalStillUnchanged": true
+    },
+    {
+      "origin": ".ui-check/lesson55/desktop-real-observer.cjs",
+      "originalSHA256": "3ef7f9568ffd8521ad0c3d79e3cb0a7a178d3ebc4ab13de6b627c049ad92418b",
+      "destination": "tests/lesson55/real/desktop-real-observer.cjs",
+      "adaptation": "Explicit trusted project root, fresh run output and local helper/snapshot resolution; original active assertions retained. JavaScript formatting, documented empty fixture/diagnostic blocks and scoped terminal-regex annotations only. CLI real current-product identity list additionally includes tsconfig.cli.json. Maintained-source format and test-only unused fixture imports/helpers were cleaned; no protected business assertions changed.",
+      "currentSHA256": "efbe408797d14941d59e2610329724d50df360b8bf892389706bee895545bebe",
+      "originalStillUnchanged": true
+    },
+    {
+      "origin": ".ui-check/lesson55/desktop-real-task-check.mjs",
+      "originalSHA256": "6ee107f4c0d1c2a98ea51d2ac558ff42080e34cd749a7a26db526740f717b320",
+      "destination": "tests/lesson55/real/desktop-real-task-check.mjs",
+      "adaptation": "Explicit trusted project root, fresh run output and local helper/snapshot resolution; original active assertions retained. JavaScript formatting, documented empty fixture/diagnostic blocks and scoped terminal-regex annotations only. CLI real current-product identity list additionally includes tsconfig.cli.json. Maintained-source format and test-only unused fixture imports/helpers were cleaned; no protected business assertions changed.",
+      "currentSHA256": "11e77351380b946048fd46134e8f69b6c6800d039909153d1dbb6b41c3e8fd52",
+      "originalStillUnchanged": true
+    },
+    {
+      "origin": ".ui-check/lesson55/task-contracts.mjs",
+      "originalSHA256": "fa961e267571e5c4d953a8b16646abdf09f24661420550c9c5fd1482eb664273",
+      "destination": "tests/lesson55/real/task-contracts.mjs",
+      "adaptation": "Explicit trusted project root, fresh run output and local helper/snapshot resolution; original active assertions retained. JavaScript formatting, documented empty fixture/diagnostic blocks and scoped terminal-regex annotations only. CLI real current-product identity list additionally includes tsconfig.cli.json. Maintained-source format and test-only unused fixture imports/helpers were cleaned; no protected business assertions changed.",
+      "currentSHA256": "0d1ad26e09359492390f54242bae7c22d18c37200e3f094fb690a3206f21367a",
+      "originalStillUnchanged": true
+    }
+  ]
+}

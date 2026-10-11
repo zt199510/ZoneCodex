@@ -1,0 +1,5 @@
+{
+  "extends": "@electron-toolkit/tsconfig/tsconfig.node.json",
+  "include": ["src/cli/**/*"],
+  "compilerOptions": { "types": ["node"], "noEmit": true }
+}

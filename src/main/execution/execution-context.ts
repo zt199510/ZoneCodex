@@ -1,9 +1,7 @@
 import { createHash } from 'node:crypto'
 import { lstat, realpath } from 'node:fs/promises'
-import { isAbsolute, relative, resolve, sep } from 'node:path'
 import type { AgentRequestContext } from '../../shared/project'
-import type { ExecutionInfo } from '../../shared/execution'
-import { decideLocalPermission, type LocalPermissionDecision } from '../../shared/permission-policy'
+import type { ExecutionContext } from './execution-context-policy'
 import { captureProjectAccess } from '../project/attachment-access'
 import { captureWorkspaceAccess } from '../project/workspace-access'
 import { isAgentId } from '../../shared/agent'
@@ -14,15 +12,8 @@ import {
   validateConversationDirectory
 } from '../settings/conversation-directory'
 
-export function pathWithin(root: string, candidate: string): boolean {
-  const offset = relative(resolve(root), resolve(candidate))
-  return offset === '' || (!isAbsolute(offset) && offset !== '..' && !offset.startsWith(`..${sep}`))
-}
-
-export type ExecutionContext = {
-  info: ExecutionInfo
-  writableRoots: readonly string[]
-}
+export { pathWithin, localPermission } from './execution-context-policy'
+export type { ExecutionContext } from './execution-context-policy'
 
 export async function resolveExecutionContext(
   windowId: number,
@@ -103,17 +94,4 @@ export function executionStillCurrent(
     !context.attachment ||
     !!captureProjectAccess(windowId, context.conversationId, context.attachment.snapshotId)
   )
-}
-
-export function localPermission(
-  execution: ExecutionContext,
-  operation: 'read' | 'write' | 'command',
-  target: string
-): LocalPermissionDecision {
-  return decideLocalPermission({
-    operation,
-    mode: execution.info.mode,
-    withinWritableRoots: execution.writableRoots.some((root) => pathWithin(root, target)),
-    sandboxAvailable: false
-  })
 }

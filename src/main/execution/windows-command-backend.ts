@@ -50,18 +50,22 @@ function samePath(left: string, right: string): boolean {
 }
 
 /** Only application resources are candidates; neither PATH nor the command cwd is searched. */
-function runtimeRoot(): string | null {
+function runtimeRoot(trustedRoot?: string): string | null {
   const runtime = process as NodeJS.Process & { resourcesPath?: string; defaultApp?: boolean }
   const resourcesPath = runtime.resourcesPath
   const candidates =
-    resourcesPath && runtime.defaultApp !== true
-      ? isAbsolute(resourcesPath)
-        ? [join(resourcesPath, RUNTIME_DIRECTORY)]
+    trustedRoot !== undefined
+      ? typeof trustedRoot === 'string' && isAbsolute(trustedRoot)
+        ? [resolve(trustedRoot)]
         : []
-      : [
-          resolve(__dirname, '..', '..', 'resources', RUNTIME_DIRECTORY),
-          resolve(__dirname, '..', '..', '..', 'resources', RUNTIME_DIRECTORY)
-        ]
+      : resourcesPath && runtime.defaultApp !== true
+        ? isAbsolute(resourcesPath)
+          ? [join(resourcesPath, RUNTIME_DIRECTORY)]
+          : []
+        : [
+            resolve(__dirname, '..', '..', 'resources', RUNTIME_DIRECTORY),
+            resolve(__dirname, '..', '..', '..', 'resources', RUNTIME_DIRECTORY)
+          ]
   for (const candidate of candidates) {
     let info
     try {
@@ -274,16 +278,18 @@ async function inspectHostAt(root: string, manifest: RuntimeManifest): Promise<C
   return Object.freeze({ path, hash: expected, identity: hostIdentity(path, expected) })
 }
 
-export async function inspectCommandHost(): Promise<CommandHost | null> {
+export async function inspectCommandHost(trustedRoot?: string): Promise<CommandHost | null> {
   if (process.platform !== 'win32') return null
-  const root = runtimeRoot()
+  const root = runtimeRoot(trustedRoot)
   const manifest = root ? manifestAt(root) : null
   return root && manifest ? inspectHostAt(root, manifest) : null
 }
 
-export async function inspectWindowsCommandBackend(): Promise<WindowsCommandBackend | null> {
+export async function inspectWindowsCommandBackend(
+  trustedRoot?: string
+): Promise<WindowsCommandBackend | null> {
   if (process.platform !== 'win32') return null
-  const root = runtimeRoot()
+  const root = runtimeRoot(trustedRoot)
   const manifest = root ? manifestAt(root) : null
   const codexHome = currentCodexHome()
   if (!root || !manifest || manifest.cliVersion !== CLI_VERSION || !codexHome) return null
@@ -311,9 +317,9 @@ export async function inspectWindowsCommandBackend(): Promise<WindowsCommandBack
 }
 
 /** Rehash immediately before launch; changed resources invalidate the exact approved plan. */
-export function verifyCommandHost(host: CommandHost): boolean {
+export function verifyCommandHost(host: CommandHost, trustedRoot?: string): boolean {
   if (process.platform !== 'win32') return false
-  const root = runtimeRoot()
+  const root = runtimeRoot(trustedRoot)
   const manifest = root ? manifestAt(root) : null
   if (!root || !manifest) return false
   const path = join(root, 'host.exe')
@@ -327,9 +333,12 @@ export function verifyCommandHost(host: CommandHost): boolean {
   )
 }
 
-export function verifyWindowsCommandBackend(backend: WindowsCommandBackend): boolean {
+export function verifyWindowsCommandBackend(
+  backend: WindowsCommandBackend,
+  trustedRoot?: string
+): boolean {
   if (process.platform !== 'win32') return false
-  const root = runtimeRoot()
+  const root = runtimeRoot(trustedRoot)
   const manifest = root ? manifestAt(root) : null
   const codexHome = currentCodexHome()
   if (

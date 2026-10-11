@@ -7,7 +7,7 @@ import { workspaceReadTools } from '../tools/workspace-files'
 import { workspaceActionTools } from '../tools/workspace-actions'
 import type { ExecutionInfo } from '../../shared/execution'
 import { parseAgentMode, type AgentMode } from '../../shared/agent'
-import { requestUserInputTool } from './agent-user-input'
+import { requestUserInputTool } from './agent-user-input-tool'
 
 type AgentCapabilities = {
   mode: AgentMode

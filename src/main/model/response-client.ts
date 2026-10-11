@@ -27,6 +27,43 @@ export type SendResponse = (
   options?: SendResponseOptions
 ) => Promise<unknown>
 
+export type ModelConfiguration = Readonly<{
+  endpoint: string
+  model: string
+  apiKey: string
+}>
+
+function fixedModelConfiguration(configuration: ModelConfiguration): ModelConfiguration {
+  const { endpoint, model, apiKey } = configuration
+  if (
+    typeof endpoint !== 'string' ||
+    typeof model !== 'string' ||
+    typeof apiKey !== 'string' ||
+    !endpoint ||
+    !model ||
+    !apiKey
+  )
+    throw new AgentError('请配置模型地址、名称和密钥后重启')
+  try {
+    const url = new URL(endpoint)
+    if (url.protocol !== 'https:' || url.username || url.password) throw new Error()
+  } catch {
+    throw new AgentError('模型地址必须是有效的 HTTPS 地址，且不能在 URL 中携带凭据')
+  }
+  return Object.freeze({ endpoint, model, apiKey })
+}
+
+/** Called during trusted host preparation; importing this module reads no credentials. */
+export function readModelConfiguration(
+  environment: NodeJS.ProcessEnv = process.env
+): ModelConfiguration {
+  return fixedModelConfiguration({
+    endpoint: environment.MODEL_ENDPOINT ?? '',
+    model: environment.MODEL_NAME ?? '',
+    apiKey: environment.MODEL_API_KEY ?? ''
+  })
+}
+
 type MessageState = {
   itemId?: string
   phase?: unknown
@@ -173,19 +210,17 @@ function httpErrorMessage(status: number): string {
   return `模型请求失败（HTTP ${status}），请检查模型地址、名称及接口配置`
 }
 
-export function createLiveResponse(tools: readonly unknown[], instructions: string): SendResponse {
+export function createLiveResponse(
+  tools: readonly unknown[],
+  instructions: string,
+  configuration?: ModelConfiguration
+): SendResponse {
+  const fixedConfiguration =
+    configuration === undefined ? undefined : fixedModelConfiguration(configuration)
   return async (input, signal, options = {}) => {
     signal.throwIfAborted()
-    const endpoint = process.env.MODEL_ENDPOINT
-    const model = process.env.MODEL_NAME
-    const apiKey = process.env.MODEL_API_KEY
-    if (!endpoint || !model || !apiKey) throw new AgentError('请配置模型地址、名称和密钥后重启')
-    try {
-      const url = new URL(endpoint)
-      if (url.protocol !== 'https:' || url.username || url.password) throw new Error()
-    } catch {
-      throw new AgentError('模型地址必须是有效的 HTTPS 地址，且不能在 URL 中携带凭据')
-    }
+    // Existing desktop callers continue reading their environment for each send.
+    const { endpoint, model, apiKey } = fixedConfiguration ?? readModelConfiguration()
     // Freeze the body once: a retry repeats only this model request, never
     // any completed local tool, and cannot observe later input mutation.
     const body = JSON.stringify({
