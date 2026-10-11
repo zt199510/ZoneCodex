@@ -10,6 +10,16 @@ const root = process.cwd()
 const evidence = path.join(root, '.ui-check', 'lesson56', 'context-disk', randomUUID())
 await fs.mkdir(evidence, { recursive: true })
 const hash = (bytes) => createHash('sha256').update(bytes).digest('hex')
+const fingerprint = (value) => hash(JSON.stringify(value))
+const knowledgeFrom = (input) => {
+  const item = input.find(
+    (entry) =>
+      typeof entry.content === 'string' &&
+      entry.content.startsWith('ZONECODEX_CONTEXT_KNOWLEDGE_V1\n')
+  )
+  assert(item, 'Actual compacted input must contain local read progress')
+  return JSON.parse(item.content.slice(item.content.indexOf('{')))
+}
 const counters = {
   unexpectedNetwork: 0,
   commandStarts: 0,
@@ -311,6 +321,7 @@ await check(
           .map((entry) => entry.call_id),
         tools: body.tools.length
       }
+      if (!isSummary && entry.hasKnowledge) entry.knowledge = knowledgeFrom(body.input)
       sends.push(entry)
       let output
       if (isSummary) {
@@ -366,6 +377,57 @@ await check(
     assert(
       mainAfter.callIds.includes('material-read-8') && mainAfter.callIds.includes('material-read-9')
     )
+    const targetOutputIndex = outcome.result.items.findIndex(
+      (entry) => entry.type === 'function_call_output' && entry.call_id === 'target-read'
+    )
+    const targetOutput = outcome.result.items[targetOutputIndex]
+    const actualTargetRead = JSON.parse(targetOutput.output)
+    const observed = mainAfter.knowledge.observedToolFacts.find(
+      (entry) => entry.callId === 'target-read'
+    )
+    const source = mainAfter.knowledge.sources.find((entry) => entry.id === observed.sourceId)
+    assert.equal(observed.index, targetOutputIndex)
+    assert.equal(observed.outputFingerprint, fingerprint(targetOutput.output))
+    assert.equal(
+      source.fingerprint,
+      fingerprint(outcome.result.items.slice(source.start, source.end))
+    )
+    assert.deepEqual(observed.observed.readCoverage, {
+      path: actualTargetRead.path,
+      sha256: hash(item.original),
+      totalLines: actualTargetRead.totalLines,
+      ranges: [{ startLine: 29, endLine: 31 }],
+      complete: false
+    })
+    const targetProgress = mainAfter.knowledge.readProgress.find(
+      (entry) => entry.path === actualTargetRead.path
+    )
+    assert.deepEqual(targetProgress, {
+      origin: 'current',
+      ...observed.observed.readCoverage,
+      sourceIds: [source.id]
+    })
+    const materialOutput = JSON.parse(
+      outcome.result.items.find(
+        (entry) => entry.type === 'function_call_output' && entry.call_id === 'material-read-1'
+      ).output
+    )
+    const materialProgress = mainAfter.knowledge.readProgress.find(
+      (entry) => entry.path === materialOutput.path
+    )
+    assert.equal(materialOutput.truncated, true)
+    assert(materialOutput.lines.length > 0 && materialOutput.lines.length < 100)
+    assert(
+      materialOutput.lines.every(
+        (line, index) => line.line === index + 1 && line.truncated === false
+      )
+    )
+    assert.deepEqual(materialProgress.ranges, [
+      { startLine: 1, endLine: materialOutput.lines.at(-1).line }
+    ])
+    assert.equal(materialProgress.totalLines, materialOutput.totalLines)
+    assert.equal(materialProgress.totalLines, 101)
+    assert.equal(materialProgress.complete, false)
     const mainRetries = events.filter((event) => event.type === 'retry')
     assert.equal(mainRetries.length, 1)
     assert.equal(mainRetries[0].event.round, summaryMainRound)
@@ -416,6 +478,10 @@ await check(
         .summaryRequests,
       mainRetryRound: summaryMainRound,
       summaryRetryOnlyContext: true,
+      actualTargetReadProgress: targetProgress,
+      sourceFingerprint: source.fingerprint,
+      outputFingerprint: observed.outputFingerprint,
+      materialReadProgress: materialProgress,
       realNetworkRequests: 0
     }
   }
@@ -482,6 +548,24 @@ await check(
     assert(
       !sends[0].some((entry) => entry.type === 'function_call' && entry.call_id === 'historic-read')
     )
+    const compacted = knowledgeFrom(sends[0])
+    const historicalFact = compacted.observedToolFacts.find(
+      (entry) => entry.callId === 'historic-read'
+    )
+    const historicalCoverage = historicalFact.observed.readCoverage
+    assert.deepEqual(historicalCoverage.ranges, [{ startLine: 29, endLine: 31 }])
+    assert.equal(historicalCoverage.sha256, hash(item.original))
+    assert.equal(historicalCoverage.complete, false)
+    assert.deepEqual(
+      compacted.readProgress.find((entry) => entry.path === historicalCoverage.path),
+      {
+        origin: 'history',
+        ...historicalCoverage,
+        sourceIds: [historicalFact.sourceId]
+      }
+    )
+    assert.equal(historicalFact.outputFingerprint, fingerprint(readOutput))
+    assert(!compacted.readProgress.some((entry) => entry.origin === 'current'))
     const denied = JSON.parse(
       outcome.result.items.find((entry) => entry.type === 'function_call_output').output
     )
@@ -506,6 +590,8 @@ await check(
       currentApprovals: 0,
       currentEffects: 0,
       currentReadCalls: 0,
+      historicalReadProgress: compacted.readProgress,
+      historicalOutputFingerprint: historicalFact.outputFingerprint,
       denied: denied.error
     }
   }

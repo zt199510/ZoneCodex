@@ -37,15 +37,40 @@ function install(config) {
     writers: [],
     ipc: [],
     events: [],
+    saveRetryEvents: [],
     writeFailures: []
   }
+  const saveRetryDelays = [10, 25, 50, 100],
+    saveWait = new Int32Array(new SharedArrayBuffer(4))
   const save = () => {
+    const next = config.auditFile + '.next'
     try {
-      const next = config.auditFile + '.next'
-      fs.writeFileSync(next, JSON.stringify(audit, null, 2))
-      fs.renameSync(next, config.auditFile)
+      for (let attempt = 0; ; attempt++) {
+        fs.writeFileSync(next, JSON.stringify(audit, null, 2))
+        try {
+          fs.renameSync(next, config.auditFile)
+          return
+        } catch (error) {
+          const retryDelayMs = saveRetryDelays[attempt]
+          if (!['EPERM', 'EBUSY'].includes(error.code) || retryDelayMs === undefined) throw error
+          audit.saveRetryEvents.push({
+            operation: 'rename',
+            code: error.code,
+            attempt: attempt + 1,
+            retryDelayMs,
+            atUTC: new Date().toISOString()
+          })
+          Atomics.wait(saveWait, 0, 0, retryDelayMs)
+        }
+      }
     } catch (error) {
       audit.writeFailures.push({ code: error.code ?? null, message: error.message })
+      try {
+        // Preserve the failed candidate for diagnosis; it is never treated as published.
+        fs.writeFileSync(next, JSON.stringify(audit, null, 2))
+      } catch {
+        // The in-memory writeFailures remains authoritative when even this write fails.
+      }
     }
   }
   const text = (item) =>
@@ -57,6 +82,52 @@ function install(config) {
             .map((part) => part.text)
             .join('\n')
         : ''
+  const derivedContextMetadata = (item) => {
+    const value = text(item),
+      marker = 'ZONECODEX_CONTEXT_KNOWLEDGE_V1\n'
+    if (!value.startsWith(marker)) return undefined
+    try {
+      const separator = value.indexOf('\n', marker.length)
+      if (separator < 0) return { parsed: false }
+      const derived = JSON.parse(value.slice(separator + 1))
+      return {
+        parsed: true,
+        sha256: fingerprint(derived),
+        characters: JSON.stringify(derived).length,
+        sources: (derived.sources ?? []).map((source) => ({
+          id: source.id,
+          origin: source.origin,
+          fingerprint: source.fingerprint
+        })),
+        readProgress: (derived.readProgress ?? []).map((progress) => ({
+          origin: progress.origin,
+          path: progress.path,
+          sha256: progress.sha256,
+          totalLines: progress.totalLines,
+          ranges: (progress.ranges ?? []).map((range) => ({
+            startLine: range.startLine,
+            endLine: range.endLine
+          })),
+          complete: progress.complete,
+          sourceIds: progress.sourceIds
+        })),
+        observedToolFacts: (derived.observedToolFacts ?? []).map((fact) => ({
+          sourceId: fact.sourceId,
+          index: fact.index,
+          name: fact.name,
+          callId: fact.callId,
+          outputFingerprint: fact.outputFingerprint,
+          outputCharacters: fact.outputCharacters,
+          sha256: fingerprint(fact),
+          observedSHA256: fingerprint(fact.observed),
+          observedCharacters: JSON.stringify(fact.observed).length
+        }))
+      }
+    } catch {
+      // Observation failures do not alter or reject the original request.
+      return { parsed: false }
+    }
+  }
   const metadata = (item) => ({
     type: item.type ?? 'user-message',
     role: item.role ?? null,
@@ -107,7 +178,10 @@ function install(config) {
       toolNames: body.tools.map((tool) => tool.name),
       inputCharacters: JSON.stringify(body.input).length,
       inputItems: body.input.length,
-      input: body.input.map(metadata),
+      input: body.input.map((item) => ({
+        ...metadata(item),
+        ...(category === 'main' && { derivedContext: derivedContextMetadata(item) })
+      })),
       httpStatus: null,
       completed: false,
       output: [],
@@ -115,6 +189,15 @@ function install(config) {
     }
     if (category === 'summary') {
       const material = JSON.parse(body.input[0].content)
+      entry.outputCharacterBudget = material.outputCharacterBudget ?? null
+      if (material.currentTaskReference) {
+        entry.currentTaskReference = {
+          sha256: fingerprint(material.currentTaskReference),
+          characters: JSON.stringify(material.currentTaskReference).length,
+          mode: material.currentTaskReference.mode,
+          scopeKind: material.currentTaskReference.scopeKind
+        }
+      }
       entry.sourceIds = material.sourceIds
       entry.sources = material.material.map((source) => ({
         sourceId: source.sourceId,
