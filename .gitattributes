@@ -1,2 +1,6 @@
 # Auto detect text files and perform LF normalization
 * text=auto
+
+# Cleanup resources have byte-locked hashes in their manifest.
+scripts/node-pty-cleanup/*.cjs text eol=lf
+scripts/node-pty-cleanup/upstream/*.js.txt text eol=lf

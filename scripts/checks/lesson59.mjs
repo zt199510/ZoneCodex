@@ -6,7 +6,8 @@ import { root, createEvidence, runProcess } from '../../tests/lesson59/runtime.m
 const groups = {
   offline: [
     ['terminal-ipc', 'terminal-ipc-check.mjs'],
-    ['isolation', 'isolation-check.mjs']
+    ['isolation', 'isolation-check.mjs'],
+    ['node-pty-cleanup', 'node-pty-cleanup-check.mjs']
   ],
   desktop: [
     ['desktop-development', 'desktop-check.mjs'],
@@ -16,7 +17,7 @@ const groups = {
 const [group = 'offline', ...args] = process.argv.slice(2)
 if (group === 'list') {
   console.log(
-    'lesson59 offline: present terminal IPC/preload/shared modules with synthetic Electron/PTY boundaries; owner, bounds, cleanup and isolation guards, ordinary Node, zero network.'
+    'lesson59 offline: present terminal IPC/preload/shared modules with synthetic Electron/PTY boundaries; owner, bounds, asynchronous cleanup and isolation guards, byte-locked node-pty preparation/cleanup fault timing, ordinary Node, zero network.'
   )
   console.log(
     'lesson59 desktop: actual existing development/Windows directory builds and real local PTY harmless commands; Agent business transport is synthetic and reported separately.'

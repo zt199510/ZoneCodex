@@ -269,23 +269,23 @@ try {
   console.error(JSON.stringify(result))
   process.exitCode = 1
 } finally {
-  await fs.writeFile(path.join(evidence, 'raw-terminal.txt'), raw)
-  if (exited) {
-    terminal._agent._inSocket.destroy()
-    terminal._agent._ptyNative.kill(terminal._agent._pty, terminal._agent._useConptyDll)
-    terminal._agent._conoutSocketWorker.dispose()
-  } else if (!forcedKill) {
-    await fs.writeFile(
-      path.join(evidence, 'release-pipe.txt'),
-      'Failure cleanup for the owned paused child pipe.\n'
-    )
-    terminal.write('\x03')
-    await bounded(done, 3000)
-    if (!exited) terminal.kill()
-    if (exited) {
-      terminal._agent._inSocket.destroy()
-      terminal._agent._ptyNative.kill(terminal._agent._pty, terminal._agent._useConptyDll)
-      terminal._agent._conoutSocketWorker.dispose()
+  try {
+    // Natural onExit owns native cleanup; failure cleanup uses only the public PTY API.
+    if (!exited && !forcedKill) {
+      await fs.writeFile(
+        path.join(evidence, 'release-pipe.txt'),
+        'Failure cleanup for the owned paused child pipe.\n'
+      )
+      terminal.write('\x03')
+      await bounded(done, 3000)
+      if (!exited) terminal.kill()
     }
+    if (!exited)
+      assert.ok(
+        await bounded(done, 3000),
+        'Owned backpressure TTY cleanup must confirm public onExit'
+      )
+  } finally {
+    await fs.writeFile(path.join(evidence, 'raw-terminal.txt'), raw)
   }
 }

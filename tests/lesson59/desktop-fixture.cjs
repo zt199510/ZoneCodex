@@ -2,6 +2,7 @@
 function install(config) {
   const require = process.getBuiltinModule('module').createRequire(config.root + '/package.json')
   const fs = require('node:fs')
+  const crypto = require('node:crypto')
   const Module = require('node:module')
   const workerThreads = require('node:worker_threads')
   const childProcess = require('node:child_process')
@@ -24,6 +25,34 @@ function install(config) {
           ? withoutInspector(options)
           : options
       )
+      const owned = String(filename)
+        .replaceAll('\\', '/')
+        .includes('/node-pty/lib/worker/conoutSocketWorker.js')
+      if (owned) {
+        const record = {
+          filename: String(filename),
+          threadId: this.threadId,
+          online: false,
+          exitCode: null,
+          errors: []
+        }
+        audit.workers.push(record)
+        save()
+        this.once('online', () => {
+          record.online = true
+          record.onlineAtUTC = new Date().toISOString()
+          save()
+        })
+        this.once('exit', (exitCode) => {
+          record.exitCode = exitCode
+          record.exitAtUTC = new Date().toISOString()
+          save()
+        })
+        this.on('error', (error) => {
+          record.errors.push(error.message)
+          save()
+        })
+      }
     }
   }
   const fork = childProcess.fork
@@ -33,12 +62,28 @@ function install(config) {
       .includes('/node-pty/lib/conpty_console_list_agent')
     const child = fork(filename, args, owned ? withoutInspector(options) : options)
     if (owned) {
-      const record = { pid: child.pid, args, exitCode: null, signal: null }
+      const record = {
+        pid: child.pid,
+        args,
+        exitCode: null,
+        signal: null,
+        messages: [],
+        errors: []
+      }
       audit.helpers.push(record)
       save()
       child.once('exit', (exitCode, signal) => {
         record.exitCode = exitCode
         record.signal = signal
+        record.exitAtUTC = new Date().toISOString()
+        save()
+      })
+      child.on('message', (message) => {
+        record.messages.push(message)
+        save()
+      })
+      child.on('error', (error) => {
+        record.errors.push(error.message)
         save()
       })
     }
@@ -58,7 +103,11 @@ function install(config) {
     events: [],
     terminals: [],
     helpers: [],
-    windowDestroyed: false
+    workers: [],
+    nativeModules: [],
+    ptyModulePaths: [],
+    windowDestroyed: false,
+    quitEvents: []
   }
   let syntheticStartFailure = false
   let syntheticCloseFailures = 0
@@ -67,7 +116,19 @@ function install(config) {
   // Observe the actual packaged or development node-pty module, never replace its child.
   Module._load = function (name, parent, isMain) {
     const exported = load.call(this, name, parent, isMain)
+    if (/[/\\]conpty\.node$/.test(String(name))) {
+      const resolved = Module._resolveFilename(name, parent)
+      if (!audit.nativeModules.some((item) => item.resolved === resolved)) {
+        audit.nativeModules.push({
+          resolved,
+          sha256: crypto.createHash('sha256').update(fs.readFileSync(resolved)).digest('hex')
+        })
+        save()
+      }
+    }
     if (name !== 'node-pty') return exported
+    const resolved = Module._resolveFilename(name, parent)
+    if (!audit.ptyModulePaths.includes(resolved)) audit.ptyModulePaths.push(resolved)
     return {
       ...exported,
       spawn(program, args, options) {
@@ -81,6 +142,7 @@ function install(config) {
           writes: [],
           sizes: [],
           killCalls: 0,
+          outputBeforeKill: '',
           output: '',
           exit: null
         }
@@ -88,6 +150,7 @@ function install(config) {
         const kill = child.kill.bind(child)
         child.kill = (...args) => {
           record.killCalls += 1
+          record.outputBeforeKill = record.output
           save()
           return kill(...args)
         }
@@ -182,13 +245,18 @@ function install(config) {
   const handle = ipcMain.handle.bind(ipcMain)
   ipcMain.handle = (channel, handler) =>
     handle(channel, async (event, ...args) => {
-      if (channel.startsWith('agent:') || channel.startsWith('terminal:')) {
+      if (
+        channel.startsWith('agent:') ||
+        channel.startsWith('terminal:') ||
+        channel.startsWith('window:')
+      ) {
         audit.ipc.push({ channel, args, atUTC: new Date().toISOString() })
         save()
       }
       if (channel === 'terminal:start' && syntheticStartFailure) {
         syntheticStartFailure = false
         const created = await handler(event, ...args)
+        if (created.ok) audit.terminals.at(-1).sessionId = args[0]
         if (!created.ok) throw new Error('Real PTY did not start before synthetic response fault')
         throw new Error('LESSON59_SYNTHETIC_START_REPLY_FAILURE_' + 'x'.repeat(1000))
       }
@@ -197,6 +265,7 @@ function install(config) {
         return { ok: false, error: 'LESSON59_SYNTHETIC_CLOSE_FAILURE_' + 'x'.repeat(1000) }
       }
       const result = await handler(event, ...args)
+      if (channel === 'terminal:start' && result.ok) audit.terminals.at(-1).sessionId = args[0]
       save()
       return result
     })
@@ -224,18 +293,39 @@ function install(config) {
       for (const window of BrowserWindow.getAllWindows()) window.destroy()
       audit.windowDestroyed = true
       save()
-      setTimeout(() => app.exit(0), 200)
+      // Failed checks still use the production quit barrier before the driver's bounded rescue.
+      app.quit()
     })
     return true
   })
   app.on('web-contents-created', (_event, contents) => {
     const send = contents.send.bind(contents)
     contents.send = (channel, ...args) => {
-      if (channel.startsWith('agent:') || channel === 'execution:approval-change')
+      if (
+        channel.startsWith('agent:') ||
+        channel === 'execution:approval-change' ||
+        channel === 'window:close-requested'
+      )
         audit.events.push({ channel, value: args[0] })
       save()
       return send(channel, ...args)
     }
+  })
+  app.on('before-quit', () => {
+    audit.quitEvents.push({ type: 'before-quit', atUTC: new Date().toISOString() })
+    save()
+  })
+  app.on('will-quit', () => {
+    audit.quitEvents.push({
+      type: 'will-quit',
+      atUTC: new Date().toISOString(),
+      unsettledWorkers: audit.workers.filter((worker) => worker.exitCode === null).length
+    })
+    save()
+  })
+  app.on('quit', (_event, exitCode) => {
+    audit.quitEvents.push({ type: 'quit', exitCode, atUTC: new Date().toISOString() })
+    save()
   })
   globalThis.__lesson59FixtureReady = true
   save()

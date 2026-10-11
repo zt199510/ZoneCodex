@@ -1,15 +1,16 @@
 ## 第59课当前维护入口（2026-10-11）
 
-终端回挂的合同、分层结果与失败记录见[第59课第9节](../ZoneCodex学习计划/74-第五十九课-终端面板回挂与独立交互宿主.md#9-本轮实施与分层验收记录2026-10-11)。维护源位于 [tests/lesson59](lesson59/)，调度为 [lesson59.mjs](../scripts/checks/lesson59.mjs)；每轮另建 `.ui-check/test-runs/lesson59/<类型>-UUID/`，不读取旧报告当本轮通过。
+终端回挂的合同、分层结果与失败记录见[第59课第9节](../ZoneCodex学习计划/74-第五十九课-终端面板回挂与独立交互宿主.md#9-本轮实施与分层验收记录2026-10-11)，当前清理优化见[9.6节](../ZoneCodex学习计划/74-第五十九课-终端面板回挂与独立交互宿主.md#96-终端清理优化2026-10-11)。维护源位于 [tests/lesson59](lesson59/)，调度为 [lesson59.mjs](../scripts/checks/lesson59.mjs)；每轮另建 `.ui-check/test-runs/lesson59/<类型>-UUID/`，不读取旧报告当本轮通过。
 
 | 命令 | 当前职责与边界 |
 | ---- | -------------- |
 | `npm test` / `npm run test:list` | 保留第58课全部11套断网行为锁与列表；不会自动构建、启动桌面或联网 |
-| `npm run test:lesson59:offline` | 普通 Node；当前终端 IPC/preload/shared、owner/输入尺寸/生命周期与静态依赖/工具表/权限/checkpoint 隔离；Electron/PTY边界合成，不冒称真实shell |
-| `npm run test:lesson59:desktop` | 先准备当前开发构建及Windows目录包；实际Electron/xterm/本地PTY/隔离存储，无害echo输出；主模型传输与失败注入合成并单独标记 |
+| `npm run test:lesson59:offline` | 普通 Node；terminal-ipc 29项、isolation 10项、node-pty-cleanup 22项；覆盖关闭等待/重试/退出时序、补丁原始及已应用字节与隔离。Electron/PTY/socket/helper/worker边界合成，不冒称真实shell |
+| `npm run prepare:node-pty-cleanup` | 预检 node-pty 1.1.0 及完整 SHA 后幂等应用局部补丁；未知版本/字节拒绝。`node scripts/prepare-node-pty-cleanup.mjs --check` 只检查合法二态，不应用补丁；postinstall/predev/prestart/prebuild自动准备 |
+| `npm run test:lesson59:desktop` | 使用已有当前开发构建及Windows目录包，命令不自动构建；实际Electron/xterm/本地PTY/隔离存储，PowerShell/cmd无害echo和自然exit、首提示符前关闭、重复关闭、持续输出子孙与worker/helper退出；主模型传输与失败注入合成并单独标记 |
 | `npm run test:lesson59:list` | 本课分组和suite列表；desktop可用 `--suite=desktop-development` / `--suite=desktop-packaged` 单独选择 |
 
-桌面组在开/用终端阶段核对主/摘要/title/approval/start/resume均0、raw/checkpoint无PTY数据、权限不变；另跑实际时间工具的合成Agent业务及停止任务保留PTY。真实shell PID、面板关闭/快速开关/窗口销毁与失败重试另记。调试器只用于隔离夹具引导，移除向PTY辅助线程/进程继承的inspect参数；不修改产品依赖或PTY协议。第56–58原open、自测与用户确认状态保持；联网模型、非Windows、MCP/Skills/SSH不属于本课通过范围。
+桌面组在开/用终端阶段核对主/摘要/title/approval/start/resume均0、raw/checkpoint无PTY数据、权限不变；另跑实际时间工具的合成Agent业务及停止任务保留PTY。开发/目录包各含独立新UUID的关闭保护子阶段：取消关闭保留同PTY，随后保存并关闭；实际shell/helper/worker及可严格归属的ConPTY host退休分别记录。调试器仅用于隔离夹具引导，并移除向PTY辅助线程/进程继承的inspect参数；夹具不改产品依赖，产品的局部补丁由上述独立preparation管理，原五API/IPC保持。全部HPCON/native pipe handles回收、任意detached/new-console后代及未观察到的短周期host未证明。第56–58原open、自测与用户确认状态保持；联网模型、非Windows、MCP/Skills/SSH不属于本课通过范围。
 
 ## 第58课当前维护入口（2026-10-11）
 

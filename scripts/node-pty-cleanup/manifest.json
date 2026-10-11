@@ -1,0 +1,29 @@
+{
+  "package": "node-pty",
+  "version": "1.1.0",
+  "files": {
+    "windowsPtyAgent.js": {
+      "originalSha256": "8636d16b38266112204061a22b135734177c242837982fd3a4055be726efa64a",
+      "patchedSha256": "6adad9882f021f4d8ab4dc7cd94428f9e624ef5600e0bc88d7079e0cf7e2dbbd"
+    },
+    "windowsTerminal.js": {
+      "originalSha256": "c3a65716f53fed0135a8a633373d5f9c2ab092544d651f27ef0a67096dd3bcd9",
+      "patchedSha256": "f5de83a0c4a8d79c9801f1e83b076ab175c4f7aa3c6caf52893af58ac5a11f7e"
+    },
+    "windowsConoutConnection.js": {
+      "originalSha256": "1440f70908fb1f55911ac8e936a1230f68a9c00c03096fcef6788eac6aad9d62",
+      "patchedSha256": "73d24fa18a6302df18b301b692365c90d6a5f1c8a7992fc70ad9c023a6277efa",
+      "resource": "windowsConoutConnection.cjs"
+    },
+    "conpty_console_list_agent.js": {
+      "originalSha256": "0d010879bb6680a0253d44363183d53e631f42972594eb6dcb1fb842c8c85e52",
+      "patchedSha256": "7a6affa844f148d64f652eefd94d6f06931caf95cfd03a75cc33d065868695bd",
+      "resource": "conpty_console_list_agent.cjs"
+    },
+    "zonecodexWindowsCleanup.js": {
+      "originalSha256": null,
+      "patchedSha256": "7964ac530ff8f41ccf76c5d4e101403bede9f740942c9eeb9d1d956a81f12adc",
+      "resource": "zonecodexWindowsCleanup.cjs"
+    }
+  }
+}

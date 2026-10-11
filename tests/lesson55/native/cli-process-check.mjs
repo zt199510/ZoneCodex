@@ -560,12 +560,15 @@ async function runTTY(label, fixture, mode, inputDriver, permission) {
     )
     return result
   } finally {
-    if (exited) {
-      terminal._agent._inSocket.destroy()
-      terminal._agent._ptyNative.kill(terminal._agent._pty, terminal._agent._useConptyDll)
-      terminal._agent._conoutSocketWorker.dispose()
-    } else if (!forcedKill) terminal.kill()
-    await fs.writeFile(path.join(item.directory, 'raw-terminal.txt'), raw)
+    try {
+      // Natural onExit owns native cleanup; do not kill an already retired ConPTY again.
+      if (!exited) {
+        if (!forcedKill) terminal.kill()
+        assert.ok(await bounded(done, 3000), 'Owned TTY cleanup must confirm public onExit')
+      }
+    } finally {
+      await fs.writeFile(path.join(item.directory, 'raw-terminal.txt'), raw)
+    }
   }
 }
 await check(
