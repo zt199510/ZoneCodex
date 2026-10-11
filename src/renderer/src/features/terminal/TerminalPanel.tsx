@@ -1,18 +1,51 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useImperativeHandle, useRef, useState } from 'react'
+import type { Ref } from 'react'
 import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import type { TerminalResult, TerminalSize } from '../../../../shared/terminal'
 import '@xterm/xterm/css/xterm.css'
 
-type Controls = { start: () => void; focus: () => void }
+export type TerminalPanelHandle = { close: () => void }
+type Controls = TerminalPanelHandle & { start: () => void; focus: () => void; fit: () => void }
 
-export function TerminalPanel({ onClose }: { onClose: () => void }): React.JSX.Element {
+function boundedError(reason: unknown, fallback: string): string {
+  const message = reason instanceof Error ? reason.message : reason
+  return typeof message === 'string' && message ? message.slice(0, 300) : fallback
+}
+
+export function TerminalPanel({
+  onClose,
+  visible = true,
+  ref
+}: {
+  onClose: () => void
+  visible?: boolean
+  ref?: Ref<TerminalPanelHandle>
+}): React.JSX.Element {
   const hostRef = useRef<HTMLDivElement>(null)
   const controlsRef = useRef<Controls | null>(null)
   const [ready, setReady] = useState(false)
   const [status, setStatus] = useState('未启动')
   const [size, setSize] = useState('等待测量')
   const [error, setError] = useState('')
+  const [closing, setClosing] = useState(false)
+  const [cleanupRequired, setCleanupRequired] = useState(false)
+
+  useImperativeHandle(
+    ref,
+    () => ({
+      close: () => {
+        if (controlsRef.current) controlsRef.current.close()
+        else onClose()
+      }
+    }),
+    [onClose]
+  )
+
+  useEffect(() => {
+    // 设置只隐藏面板；恢复可见时重新测量，不抢设置页的返回焦点。
+    if (visible) controlsRef.current?.fit()
+  }, [visible])
 
   useEffect(() => {
     const element = hostRef.current
@@ -22,6 +55,8 @@ export function TerminalPanel({ onClose }: { onClose: () => void }): React.JSX.E
     let id: string | null = null
     let active = false
     let starting = false
+    let closePending = false
+    let requiresCleanup = false
     let frame: number | null = null
     let lastSize = ''
     let observer: ResizeObserver | null = null
@@ -36,6 +71,21 @@ export function TerminalPanel({ onClose }: { onClose: () => void }): React.JSX.E
     })
     const fit = new FitAddon()
 
+    function interactive(): boolean {
+      return (
+        !disposed &&
+        host.isConnected &&
+        host.clientWidth > 0 &&
+        host.clientHeight > 0 &&
+        !host.closest('[hidden], [inert]') &&
+        !document.querySelector('dialog[open], [popover]:popover-open')
+      )
+    }
+
+    function focus(): void {
+      if (interactive()) term.focus()
+    }
+
     function dimensions(): TerminalSize {
       return {
         cols: Math.max(2, Math.min(term.cols, 500)),
@@ -46,11 +96,12 @@ export function TerminalPanel({ onClose }: { onClose: () => void }): React.JSX.E
     function report(request: Promise<TerminalResult>, sessionId: string): void {
       void request
         .then((result) => {
-          if (!disposed && id === sessionId && !result.ok) setError(result.error)
+          if (!disposed && id === sessionId && !result.ok)
+            setError(boundedError(result.error, '终端通信失败'))
         })
         .catch((reason: unknown) => {
           if (!disposed && id === sessionId) {
-            setError(reason instanceof Error ? reason.message : '终端通信失败')
+            setError(boundedError(reason, '终端通信失败'))
           }
         })
     }
@@ -76,8 +127,37 @@ export function TerminalPanel({ onClose }: { onClose: () => void }): React.JSX.E
       })
     }
 
+    async function failedStart(sessionId: string, reason: unknown): Promise<void> {
+      const startupError = boundedError(reason, '终端启动失败')
+      let cleanupError = ''
+      try {
+        const result = await window.api.closeTerminal(sessionId)
+        if (!result.ok) cleanupError = boundedError(result.error, '终端清理失败')
+      } catch (cause: unknown) {
+        cleanupError = boundedError(cause, '终端清理失败')
+      }
+      if (disposed) {
+        if (cleanupError) console.error('终端清理失败：', cleanupError)
+        return
+      }
+      if (id !== sessionId) return
+      starting = false
+      active = false
+      requiresCleanup = Boolean(cleanupError)
+      setCleanupRequired(requiresCleanup)
+      if (requiresCleanup) {
+        // 关闭未确认成功时保留旧 ID；不得新建会话而丢失可重试的清理句柄。
+        setStatus('清理失败')
+        setError(`${startupError.slice(0, 180)}；${cleanupError.slice(0, 80)}。请重试关闭终端。`)
+      } else {
+        id = null
+        setStatus('启动失败')
+        setError(startupError)
+      }
+    }
+
     async function start(): Promise<void> {
-      if (disposed || active || starting) return
+      if (!interactive() || active || starting || closePending || requiresCleanup) return
       // 在 invoke 前确定 ID；启动输出可能比 invoke 的结果更早到。
       const sessionId = crypto.randomUUID()
       id = sessionId
@@ -96,10 +176,7 @@ export function TerminalPanel({ onClose }: { onClose: () => void }): React.JSX.E
         if (id !== sessionId) return
         starting = false
         if (!result.ok) {
-          active = false
-          id = null
-          setStatus('启动失败')
-          setError(result.error)
+          await failedStart(sessionId, result.error)
           return
         }
         // shell 可能已快速退出，不能把 exit 事件覆盖为“运行中”。
@@ -107,22 +184,33 @@ export function TerminalPanel({ onClose }: { onClose: () => void }): React.JSX.E
           setStatus('运行中')
           lastSize = ''
           scheduleFit()
-          term.focus()
+          focus()
         }
       } catch (reason) {
         // 创建可能已成功，只是响应失败；尝试关闭这次 ID。
-        void window.api
-          .closeTerminal(sessionId)
-          .then((result) => {
-            if (!result.ok) console.error('终端清理失败：', result.error)
-          })
-          .catch(console.error)
-        if (!disposed && id === sessionId) {
-          starting = false
-          active = false
-          id = null
-          setStatus('启动失败')
-          setError(reason instanceof Error ? reason.message : '终端启动失败')
+        await failedStart(sessionId, reason)
+      }
+    }
+
+    async function close(): Promise<void> {
+      if (disposed || closePending) return
+      closePending = true
+      setClosing(true)
+      setError('')
+      try {
+        if (id) {
+          const result = await window.api.closeTerminal(id)
+          if (disposed) return
+          if (!result.ok) throw new Error(result.error)
+        }
+        active = false
+        id = null
+        onClose()
+      } catch (reason: unknown) {
+        if (!disposed) {
+          closePending = false
+          setClosing(false)
+          setError(boundedError(reason, '终端关闭失败，请重试。'))
         }
       }
     }
@@ -133,7 +221,7 @@ export function TerminalPanel({ onClose }: { onClose: () => void }): React.JSX.E
       try {
         term.loadAddon(fit)
         term.open(host)
-        term.writeln('点击“启动 PowerShell”，工作目录固定为用户主目录。')
+        term.writeln('点击“启动终端”使用设置中选择的 Shell，工作目录为用户主目录。')
         // 先订阅，再允许按钮启动进程，避免丢掉最初的提示符。
         unsubscribe = window.api.onTerminalEvent((event) => {
           if (disposed || event.sessionId !== id) return
@@ -141,12 +229,16 @@ export function TerminalPanel({ onClose }: { onClose: () => void }): React.JSX.E
             term.write(event.data)
           } else {
             active = false
+            starting = false
+            id = null
+            requiresCleanup = false
+            setCleanupRequired(false)
             setStatus(`已退出（${event.exitCode}）`)
-            term.writeln(`\r\n[PowerShell 已退出，退出码 ${event.exitCode}]`)
+            term.writeln(`\r\n[Shell 已退出，退出码 ${event.exitCode}]`)
           }
         })
         input = term.onData((data) => {
-          if (disposed || !id || !active || starting) return
+          if (!interactive() || !id || !active || starting || closePending) return
           // 不自行回显、不 trim，也不把 Ctrl+C 转换成关闭整个终端。
           report(window.api.writeTerminal(id, data), id)
         })
@@ -156,7 +248,11 @@ export function TerminalPanel({ onClose }: { onClose: () => void }): React.JSX.E
           start: () => {
             void start()
           },
-          focus: () => term.focus()
+          focus,
+          fit: scheduleFit,
+          close: () => {
+            void close()
+          }
         }
         setReady(true)
         scheduleFit()
@@ -186,25 +282,37 @@ export function TerminalPanel({ onClose }: { onClose: () => void }): React.JSX.E
       }
       term.dispose()
     }
-  }, [])
+  }, [onClose])
 
   const busy = status === '启动中' || status === '运行中'
   return (
-    <section className="terminal-panel" aria-label="本地终端">
+    <section className="terminal-panel" id="terminal-panel" aria-label="本地终端">
       <div className="terminal-toolbar">
-        <strong>PowerShell · {status}</strong>
+        <strong role="status">本地 Shell · {closing ? '关闭中' : status}</strong>
         <span>{size}</span>
         <button
           type="button"
-          disabled={!ready || busy}
+          disabled={!ready || busy || closing || cleanupRequired}
           onClick={() => controlsRef.current?.start()}
         >
-          启动 PowerShell
+          启动终端
         </button>
-        <button type="button" disabled={!ready} onClick={() => controlsRef.current?.focus()}>
+        <button
+          type="button"
+          disabled={!ready || closing}
+          onClick={() => controlsRef.current?.focus()}
+        >
           聚焦输入
         </button>
-        <button type="button" onClick={onClose}>
+        <button
+          id="terminal-panel-close"
+          type="button"
+          disabled={closing}
+          onClick={() => {
+            if (controlsRef.current) controlsRef.current.close()
+            else onClose()
+          }}
+        >
           关闭面板并结束终端
         </button>
       </div>

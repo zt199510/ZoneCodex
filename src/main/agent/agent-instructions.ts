@@ -7,6 +7,7 @@ import { workspaceReadTools } from '../tools/workspace-files'
 import { workspaceActionTools } from '../tools/workspace-actions'
 import type { ExecutionInfo } from '../../shared/execution'
 import { parseAgentMode, type AgentMode } from '../../shared/agent'
+import { agentResumeSafetyInstructions } from '../../shared/agent-resume'
 import { requestUserInputTool } from './agent-user-input-tool'
 
 type AgentCapabilities = {
@@ -17,6 +18,7 @@ type AgentCapabilities = {
   execution?: ExecutionInfo | null
   commandSandboxAvailable?: boolean
   imagePresent?: boolean
+  resuming?: boolean
 }
 
 const commonRules =
@@ -67,7 +69,8 @@ export function buildAgentRequest({
   workspaceId = null,
   execution = null,
   commandSandboxAvailable = false,
-  imagePresent = false
+  imagePresent = false,
+  resuming = false
 }: AgentCapabilities): { tools: readonly unknown[]; instructions: string } {
   if (!parseAgentMode(mode)) throw new Error('工作方式参数无效')
   const tools = [
@@ -88,6 +91,8 @@ export function buildAgentRequest({
     referenceRules,
     timeRules
   ]
+
+  if (resuming) sections.push(agentResumeSafetyInstructions)
 
   if (imagePresent) {
     sections.push(

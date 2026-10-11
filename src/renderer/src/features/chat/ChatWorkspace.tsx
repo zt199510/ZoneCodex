@@ -14,6 +14,7 @@ import { WorkspaceStatus } from '../project/WorkspaceStatus'
 import type { OpenFileView } from '../files/file-view-origin'
 import { ImagePreview } from '../project/ImagePreview'
 import type { ImageDescriptor } from '../../../../shared/image-input'
+import { agentResumeSafetyNotice } from '../../../../shared/agent-resume'
 
 export function ChatWorkspace({
   conversation,
@@ -85,6 +86,20 @@ export function ChatWorkspace({
         workspace={conversation.workspace}
         permissions={conversation.executionPermissions.state}
       />
+      {conversation.resumableTask && (
+        <div className="task-resume-bar" role="status">
+          <span>
+            此会话有可继续的任务。继续时会重新核对目录和当前权限。{agentResumeSafetyNotice}
+          </span>
+          <button
+            type="button"
+            disabled={!conversation.canSend}
+            onClick={() => conversation.resumeTask()}
+          >
+            继续此任务
+          </button>
+        </div>
+      )}
       {errors.length > 0 && (
         <div className="error-banner" role="alert">
           {errors.map((error, index) => (

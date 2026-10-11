@@ -1,3 +1,42 @@
+## 第59课当前维护入口（2026-10-11）
+
+终端回挂的合同、分层结果与失败记录见[第59课第9节](../ZoneCodex学习计划/74-第五十九课-终端面板回挂与独立交互宿主.md#9-本轮实施与分层验收记录2026-10-11)。维护源位于 [tests/lesson59](lesson59/)，调度为 [lesson59.mjs](../scripts/checks/lesson59.mjs)；每轮另建 `.ui-check/test-runs/lesson59/<类型>-UUID/`，不读取旧报告当本轮通过。
+
+| 命令 | 当前职责与边界 |
+| ---- | -------------- |
+| `npm test` / `npm run test:list` | 保留第58课全部11套断网行为锁与列表；不会自动构建、启动桌面或联网 |
+| `npm run test:lesson59:offline` | 普通 Node；当前终端 IPC/preload/shared、owner/输入尺寸/生命周期与静态依赖/工具表/权限/checkpoint 隔离；Electron/PTY边界合成，不冒称真实shell |
+| `npm run test:lesson59:desktop` | 先准备当前开发构建及Windows目录包；实际Electron/xterm/本地PTY/隔离存储，无害echo输出；主模型传输与失败注入合成并单独标记 |
+| `npm run test:lesson59:list` | 本课分组和suite列表；desktop可用 `--suite=desktop-development` / `--suite=desktop-packaged` 单独选择 |
+
+桌面组在开/用终端阶段核对主/摘要/title/approval/start/resume均0、raw/checkpoint无PTY数据、权限不变；另跑实际时间工具的合成Agent业务及停止任务保留PTY。真实shell PID、面板关闭/快速开关/窗口销毁与失败重试另记。调试器只用于隔离夹具引导，移除向PTY辅助线程/进程继承的inspect参数；不修改产品依赖或PTY协议。第56–58原open、自测与用户确认状态保持；联网模型、非Windows、MCP/Skills/SSH不属于本课通过范围。
+
+## 第58课当前维护入口（2026-10-11）
+
+后续职责/续接安全补强见[第58课9.6节](../ZoneCodex学习计划/73-第五十八课-宿主边界收敛与agent-runner瘦身.md#96-职责收口与续接安全补强2026-10-11)。默认组追加 `resume-safety`（也可 `npm test -- --suite=resume-safety`）：真实隔离磁盘写入后、完整checkpoint提交前强制退出普通Node进程，再由新PID装载旧指针并重新核验；主/摘要模型仍合成，不保证任意任务跨进程恰好执行一次。两版CLI/桌面维护夹具新增请求instructions和风险提示断言，原raw/prompt、JSONL白名单及零启动保护保持。下面359项与第9节制品身份属于补强前历史，新结果另建UUID。
+
+本课执行结果见[第58课第9节](../ZoneCodex学习计划/73-第五十八课-宿主边界收敛与agent-runner瘦身.md#9-本轮实施与分层验收记录2026-10-11)。`npm test` / `npm run test:list` 当前由 [lesson58.mjs](../scripts/checks/lesson58.mjs) 调度，保留55/56/57原九套行为锁，追加 [boundary](lesson58/boundary-check.mjs)。`npm test -- --suite=boundary` 检查含类型边的核心/共享/CLI闭包、薄入口、唯一循环、导入零启动及全部冻结容量；导入反例校验异步尝试也会被拦截。
+
+`npm run test:lesson58:resume:cli` 与 `npm run test:lesson58:resume:desktop` 原样复用第57四入口维护夹具，分别验开发/分发CLI、开发/目录包桌面的真实新进程与隔离磁盘；模型/摘要仍为合成传输。本课调度每次另建 `.ui-check/test-runs/lesson58/<类型>-UUID/`，复用夹具的子报告仍在原课目录下新UUID；不读取旧报告冒充本轮通过。`test:lesson57:offline`、原第57续接及第56显式真实组继续可复跑，第56/57 open 与各课八题状态保持。
+
+## 第57课当前维护入口（2026-10-11）
+
+第57课已接通共享 TaskCheckpoint v1、安全再水合、桌面显式继续与 CLI `--resume`；当前分层结果与新 UUID 见[课程第9节](../ZoneCodex学习计划/72-第五十七课-跨进程可恢复的Agent任务续接.md#9-本轮实施与分层验收记录2026-10-11)。下面第55/56记录保留为各轮历史，不从旧报告继承本轮通过。
+
+| 命令                                                  | 当前职责与边界                                                                                                                            |
+| ----------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| `npm test` / `npm run test:list`                      | 第57默认断网组/列表；保留第55 I/O/shared 与第56 context/disk/host/adapters，再加 checkpoint/core/cli-terminal；无真实模型或 Electron 启动 |
+| `npm test -- --suite=checkpoint`                      | schema、禁止项、raw/目录/scope、指纹、坏文件保护；普通 Node 与真实隔离磁盘                                                                |
+| `npm test -- --suite=core`                            | 合成传输、安全再水合、旧 call_id、当前读取/批准/命令票据、同轮160/128000与摘要限额                                                        |
+| `npm test -- --suite=cli-terminal`                    | public host 真实写入后终态保存故障；保留 effects/工具事实/完整 raw，不覆盖坏指针                                                          |
+| `npm run test:lesson57:resume:cli`                    | 开发与实际 `agent.cmd` 分发；人为宿主退出→新 Node PID→显式 resume→固定价格八项独立测试；合成 SSE，真实磁盘和启动器                        |
+| `npm run test:lesson57:resume:desktop`                | 开发与目录包实际 Electron；UI停止→新 PID→被动重开/切换零请求→显式继续→独立固定八例测试；模型/摘要为夹具，读取/补丁/记录实际落盘           |
+| `npm run test:lesson56:offline`                       | 保留第56原调度，当前共享源码运行，不读取旧 UUID 冒充通过                                                                                  |
+| `npm run test:native`                                 | 原第55 Windows原生组；本课矩阵不能关闭原资源符号链接 EPERM                                                                                |
+| `npm run test:real:cli` / `npm run test:real:desktop` | 保留第56显式联网业务入口；本课未将合成续接计为真实联网                                                                                    |
+
+本课源码在 [tests/lesson57](lesson57/)，统一调度 [lesson57.mjs](../scripts/checks/lesson57.mjs)，每次另建 `.ui-check/test-runs/lesson57/<类型>-UUID/`。旧桌面生命周期夹具新增明确的 checkpoint persistence 替身，原保护断言保留；真实 checkpoint/新 PID 单独验收。各组的真实/合成边界、首次失败、制品身份、未覆盖及复跑命令以第9节和本轮独立报告为准。八道自测与用户实测待补，第56用户确认/八题/EPERM/真实多图/自然修错继续 open。
+
 <!-- lesson56-cli-completion-2026-10-11:start -->
 
 ## 第56课CLI业务闭环补验维护（2026-10-11）

@@ -2,6 +2,7 @@ const { assert, fs, path, root, load, FakeClock, electronFixture, suite } = requ
 const { finalMessage, response } = require('./fixture.cjs')
 const { randomUUID, createHash } = require('node:crypto')
 const { deflateSync } = require('node:zlib')
+const { desktopCheckpointFixture } = require('./desktop-checkpoint-fixture.cjs')
 const checks = suite('lesson55-desktop-source-material-final')
 const isolatedMaterialPaths = []
 const hash = (bytes) => createHash('sha256').update(bytes).digest('hex')
@@ -160,7 +161,9 @@ async function environment(model = async () => response(finalMessage('受保护�
       picked = values
     }
   }
+  const checkpoints = desktopCheckpointFixture()
   const deps = {
+    './desktop-checkpoints': checkpoints,
     electron: fixture.electron,
     './agent-user-input': input,
     '../model/response-client': {
@@ -230,7 +233,8 @@ async function environment(model = async () => response(finalMessage('受保护�
   })
   const ipc = await load('src/main/agent/agent-ipc.ts', {
     electron: fixture.electron,
-    './agent-runner': env.runner,
+    './desktop-agent-host': env.runner,
+    './desktop-checkpoints': checkpoints,
     './agent-user-input': input
   })
   ipc.registerAgentRequest()
@@ -637,6 +641,8 @@ async function main() {
   for (const relative of [
     'src/main/agent/agent-ipc.ts',
     'src/main/agent/agent-runner.ts',
+    'src/main/agent/desktop-agent-host.ts',
+    'src/main/agent/agent-runtime.ts',
     'src/main/agent/agent-core.ts',
     'src/main/execution/execution-context.ts',
     'src/main/execution/execution-approval.ts',

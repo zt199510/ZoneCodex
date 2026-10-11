@@ -27,7 +27,8 @@ function emit(owner: WebContents, event: TerminalEvent): void {
 }
 // 终端操作失败的统一处理
 function failure(error: unknown): TerminalResult {
-  return { ok: false, error: error instanceof Error ? error.message : '终端操作失败' }
+  const message = error instanceof Error ? error.message : '终端操作失败'
+  return { ok: false, error: message.slice(0, 300) || '终端操作失败' }
 }
 // 停止终端会话
 function stop(ownerId: number, id?: string): TerminalResult {

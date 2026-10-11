@@ -7,11 +7,9 @@ import type { ProtocolItem } from '../shared/agent-history'
 import { parsePermissionMode } from '../shared/execution'
 import { parseAgentUserInputRequest, parseAgentUserInputResult } from '../shared/agent-user-input'
 import { runAgentCore } from '../main/agent/agent-core'
-import { buildAgentRequest } from '../main/agent/agent-instructions'
-import { createAgentToolExecutor } from '../main/agent/agent-tools'
+import { createAgentRuntime, createAgentRuntimeTools } from '../main/agent/agent-runtime'
 import { readProjectInstruction } from '../main/project/project-instruction'
-import { createLiveResponse, readModelConfiguration } from '../main/model/response-client'
-import { createContextSummaryResponse } from '../main/model/context-summary'
+import { readModelConfiguration } from '../main/model/response-client'
 import { createApprovalReviewer } from '../main/execution/approval-reviewer'
 import type { ExecutionContext } from '../main/execution/execution-context-policy'
 import {
@@ -20,6 +18,14 @@ import {
   type HostWorkspaceAuthorizationOptions
 } from '../main/execution/workspace-authorization'
 import { inspectWindowsCommandBackend } from '../main/execution/windows-command-backend'
+import {
+  captureTaskDirectoryBinding,
+  createTaskCheckpoint,
+  loadTaskCheckpoint,
+  saveTaskCheckpoint,
+  type LoadedTaskCheckpoint
+} from '../main/storage/task-checkpoint-store'
+import { TaskCheckpointError, type TaskCheckpoint } from '../shared/task-checkpoint'
 import {
   CLIInputError,
   InteractionUnavailableError,
@@ -107,8 +113,34 @@ export async function runAgentTask(
 ): Promise<AgentHostResult> {
   const startedAt = performance.now()
   // Capture primitive input and callback identities before the first await.
-  const { mode: rawMode, prompt, cwd, workspace, permission: rawPermission } = supplied
-  const mode = parseAgentMode(rawMode)
+  const captured = { ...supplied }
+  const rawPermission = captured.permission
+  let loaded: LoadedTaskCheckpoint | undefined
+  if (captured.resume !== undefined) {
+    if (
+      captured.mode !== undefined ||
+      captured.prompt !== undefined ||
+      captured.checkpoint !== undefined
+    )
+      throw new CLIInputError('续接与新任务输入互斥')
+    try {
+      loaded = await loadTaskCheckpoint(captured.resume, {
+        cwd: captured.cwd,
+        workspace: captured.workspace
+      })
+    } catch (cause) {
+      throw new CLIInputError(
+        cause instanceof TaskCheckpointError
+          ? `${cause.code}: ${cause.message}`
+          : '任务续接记录装载失败'
+      )
+    }
+  }
+  const prompt = loaded?.checkpoint.prompt ?? captured.prompt
+  const mode = parseAgentMode(loaded?.checkpoint.mode ?? captured.mode)
+  const cwd = captured.cwd ?? loaded?.checkpoint.bindings.cwd.path
+  const workspace = captured.workspace ?? loaded?.checkpoint.bindings.workspace?.path
+  const checkpointFile = captured.resume ?? captured.checkpoint
   const permission = parsePermissionMode(rawPermission ?? 'default')
   if (!mode || !permission || typeof prompt !== 'string' || !prompt.trim() || prompt.length > 2000)
     throw new CLIInputError('必须提供明确的工作方式、有效权限及非空、最多2000字符的原始任务')
@@ -134,8 +166,12 @@ export async function runAgentTask(
   }
   externalSignal?.addEventListener('abort', abort, { once: true })
   if (externalSignal?.aborted) abort()
-  const requestId = randomUUID()
-  const conversationId = randomUUID()
+  const requestId = loaded?.requestId ?? randomUUID()
+  const conversationId = loaded?.checkpoint.conversationId ?? randomUUID()
+  const taskId = loaded?.checkpoint.taskId ?? randomUUID()
+  let latestCheckpoint: TaskCheckpoint | undefined = loaded?.checkpoint
+  let latestRaw: ProtocolItem[] = loaded?.history ?? []
+  let checkpointBindings: TaskCheckpoint['bindings'] | undefined
   const runId = randomUUID()
   const runtimeRoot = resolve(__dirname, 'windows-command-runtime')
   let active = true
@@ -219,21 +255,83 @@ export async function runAgentTask(
     const workspaceId = workspace === undefined ? undefined : randomUUID()
     const backend = await inspectWindowsCommandBackend(runtimeRoot)
     controller.signal.throwIfAborted()
-    const request = buildAgentRequest({
-      mode,
-      execution: execution.info,
-      workspaceId,
-      workspaceInstruction: instructions
-        .map((item, index) =>
-          item.status === 'read'
-            ? `目录 ${roots[index]} 的 AGENTS.md：\n${item.instruction.content}`
-            : ''
+    const scope = {
+      kind: 'time' as const,
+      executionId: execution.info.scopeId,
+      ...(workspaceId ? { workspaceId } : {})
+    }
+    if (loaded) {
+      try {
+        const rechecked = await loadTaskCheckpoint(captured.resume!, {
+          cwd: directories[0].selected,
+          workspace: workspace ?? null,
+          mode,
+          scope
+        })
+        if (
+          rechecked.checkpoint.taskId !== taskId ||
+          rechecked.checkpoint.prompt !== prompt ||
+          rechecked.checkpoint.conversationId !== loaded.checkpoint.conversationId ||
+          rechecked.checkpoint.raw.fingerprint !== loaded.checkpoint.raw.fingerprint
         )
-        .filter(Boolean)
-        .join('\n\n'),
-      commandSandboxAvailable: backend !== null
+          throw new TaskCheckpointError('RAW_INVALID')
+        loaded = rechecked
+      } catch (cause) {
+        throw new CLIInputError(
+          cause instanceof TaskCheckpointError
+            ? `${cause.code}: ${cause.message}`
+            : '任务续接范围复核失败'
+        )
+      }
+    }
+    if (checkpointFile)
+      checkpointBindings = {
+        cwd: await captureTaskDirectoryBinding(directories[0].selected),
+        workspace: workspace === undefined ? null : await captureTaskDirectoryBinding(workspace)
+      }
+    const persist = async (
+      history: ProtocolItem[],
+      summary?: TaskCheckpoint['summary'],
+      progress: TaskCheckpoint['progress'] = 'resumable',
+      reason: TaskCheckpoint['reason'] = 'saved'
+    ): Promise<void> => {
+      if (!checkpointFile || !checkpointBindings) return
+      const checkpoint = createTaskCheckpoint({
+        taskId,
+        conversationId,
+        createdAt: latestCheckpoint?.createdAt,
+        mode,
+        prompt,
+        scope,
+        bindings: checkpointBindings,
+        history,
+        summary,
+        progress,
+        reason
+      })
+      const saved = await saveTaskCheckpoint(checkpointFile, checkpoint, history)
+      if (!saved.ok) fail(1, `${saved.code}: ${saved.error}`)
+      latestCheckpoint = checkpoint
+      latestRaw = structuredClone(history)
+    }
+    const runtime = createAgentRuntime({
+      configuration,
+      capabilities: {
+        mode,
+        execution: execution.info,
+        workspaceId,
+        resuming: Boolean(loaded),
+        workspaceInstruction: instructions
+          .map((item, index) =>
+            item.status === 'read'
+              ? `目录 ${roots[index]} 的 AGENTS.md：\n${item.instruction.content}`
+              : ''
+          )
+          .filter(Boolean)
+          .join('\n\n'),
+        commandSandboxAvailable: backend !== null
+      }
     })
-    const send = createLiveResponse(request.tools, request.instructions, configuration)
     const reviewApproval = createApprovalReviewer(configuration)
     const outcome = await runAgentCore(
       {
@@ -241,26 +339,25 @@ export async function runAgentTask(
         conversationId,
         mode,
         prompt,
-        history: [],
-        scope: {
-          kind: 'time',
-          executionId: execution.info.scopeId,
-          ...(workspaceId ? { workspaceId } : {})
-        }
+        history: loaded?.history ?? [],
+        scope,
+        ...(loaded ? { resume: loaded.resume, contextSummary: loaded.summary } : {})
       },
       {
         signal: controller.signal,
-        send,
-        summarize: createContextSummaryResponse(configuration),
-        networkOverhead: {
-          instructionsCharacters: request.instructions.length,
-          toolSchemaCharacters: JSON.stringify(request.tools).length,
-          imageCount: 0,
-          imageBytes: 0
-        },
+        ...runtime,
         assertCurrent,
         startedAt,
         transportLabel: '普通 Node 真实模型 SSE',
+        onRawCheckpoint: checkpointFile
+          ? (history, summary, completed) =>
+              persist(
+                history,
+                summary,
+                completed ? 'completed' : 'resumable',
+                completed ? 'completed' : 'saved'
+              )
+          : undefined,
         onEvent: onEvent
           ? (event) => {
               try {
@@ -294,51 +391,81 @@ export async function runAgentTask(
               return accepted === true
             }
           }
-          return createAgentToolExecutor({
-            mode,
-            execution,
-            assertCurrent,
-            approve: createHostWorkspaceAuthorization(authorization),
-            authorizeCommand: createHostWorkspaceCommandAuthorization(authorization),
-            projectSnapshot: null,
-            projectExecutor: undefined,
-            executeCommandProposal: async () => {
-              throw new Error('脚本入口不支持桌面命令提案')
+          return createAgentRuntimeTools(
+            {
+              conversationId,
+              mode,
+              execution,
+              assertCurrent,
+              approve: createHostWorkspaceAuthorization(authorization),
+              authorizeCommand: createHostWorkspaceCommandAuthorization(authorization),
+              projectSnapshot: null,
+              executeCommandProposal: async () => {
+                throw new Error('脚本入口不支持桌面命令提案')
+              },
+              requestUserInput: async (input, signal, callId) => {
+                signal.throwIfAborted()
+                if (!answer) fail(3, '计划需要补充信息，但当前入口未提供问答能力')
+                const question = parseAgentUserInputRequest({
+                  requestId,
+                  conversationId,
+                  inputId: randomUUID(),
+                  callId,
+                  questions: input.questions
+                })
+                if (!question) fail(3, '当前计划提问参数无效')
+                // A callback may inspect, but cannot mutate the pending canonical request.
+                question!.questions.forEach((q) => {
+                  q.options.forEach(Object.freeze)
+                  Object.freeze(q.options)
+                  Object.freeze(q)
+                })
+                Object.freeze(question!.questions)
+                Object.freeze(question)
+                observer.progress('等待用户补充计划信息')
+                const answers = await wait(question!.inputId, (signal) =>
+                  answer!(question!, signal)
+                )
+                if (!assertCurrent()) signal.throwIfAborted()
+                const result = parseAgentUserInputResult({ answers }, input.questions)
+                if (!result) fail(3, '用户回答与当前计划问题不一致，未继续请求')
+                observer.progress('用户已补充，继续制定方案')
+                return JSON.stringify(result)
+              }
             },
-            requestUserInput: async (input, signal, callId) => {
-              signal.throwIfAborted()
-              if (!answer) fail(3, '计划需要补充信息，但当前入口未提供问答能力')
-              const question = parseAgentUserInputRequest({
-                requestId,
-                conversationId,
-                inputId: randomUUID(),
-                callId,
-                questions: input.questions
-              })
-              if (!question) fail(3, '当前计划提问参数无效')
-              // A callback may inspect, but cannot mutate the pending canonical request.
-              question!.questions.forEach((q) => {
-                q.options.forEach(Object.freeze)
-                Object.freeze(q.options)
-                Object.freeze(q)
-              })
-              Object.freeze(question!.questions)
-              Object.freeze(question)
-              observer.progress('等待用户补充计划信息')
-              const answers = await wait(question!.inputId, (signal) => answer!(question!, signal))
-              if (!assertCurrent()) signal.throwIfAborted()
-              const result = parseAgentUserInputResult({ answers }, input.questions)
-              if (!result) fail(3, '用户回答与当前计划问题不一致，未继续请求')
-              observer.progress('用户已补充，继续制定方案')
-              return JSON.stringify(result)
-            },
-            onEffect: observer.effectStarted,
-            appendTrace: observer.appendTrace,
-            onProgress: observer.progress
-          })
+            observer
+          )
         }
       }
     )
+    if (checkpointFile && latestCheckpoint && latestCheckpoint.progress !== 'completed') {
+      const completed = outcome.task.state === 'completed'
+      try {
+        await persist(
+          latestRaw,
+          latestCheckpoint.summary,
+          completed ? 'completed' : 'interrupted',
+          completed
+            ? 'completed'
+            : outcome.task.state === 'cancelled'
+              ? 'user_cancelled'
+              : outcome.task.error?.includes('128000') || outcome.task.error?.includes('160 项')
+                ? 'budget_stop'
+                : 'failure'
+        )
+      } catch {
+        // Saving the terminal pointer cannot erase facts from an executed tool.
+        const warning =
+          outcome.effects.approved || outcome.effects.started
+            ? '本地操作可能已经执行，请先核对文件或命令结果。'
+            : ''
+        const previousFailure = hostFailure as { code: 1 | 3; message: string } | null
+        hostFailure = {
+          code: 1,
+          message: `${previousFailure?.message ?? '任务续接终态保存失败'}。${warning}`
+        }
+      }
+    }
     const failure = hostFailure as { code: 1 | 3; message: string } | null
     const task = failure
       ? {

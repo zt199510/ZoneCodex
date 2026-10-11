@@ -9,6 +9,7 @@ import type {
 import type { ProtocolItem } from '../../shared/agent-history'
 import type { ImageHistoryReference } from '../../shared/image-input'
 import type { ToolScope } from '../../shared/project'
+import type { TaskCheckpoint } from '../../shared/task-checkpoint'
 import type { SendResponse } from '../model/response-client'
 import type { ExecuteTool } from './tool-loop'
 
@@ -21,9 +22,12 @@ export type AgentCoreInput = {
   history: ProtocolItem[]
   scope: ToolScope
   imageHistory?: ImageHistoryReference[]
+  resume?: { taskId: string; previousUpdatedAt: string; summaryStatus: string }
+  contextSummary?: TaskCheckpoint['summary']
 }
 
 export type AgentCoreEvent =
+  | { type: 'resume'; requestId: string; taskId: string; summaryStatus: string }
   | { type: 'progress'; requestId: string; message: string }
   | { type: 'delta'; requestId: string; delta: string }
   | { type: 'tool'; event: AgentToolEvent }
@@ -56,6 +60,12 @@ export type AgentCoreDependencies = {
   /** Optional host preparation start, on the same performance.now() clock. */
   startedAt?: number
   transportLabel?: string
+  /** Awaited at safe raw boundaries, even when public delivery has been cancelled. */
+  onRawCheckpoint?: (
+    history: ProtocolItem[],
+    summary?: TaskCheckpoint['summary'],
+    completed?: boolean
+  ) => Promise<void>
 }
 
 export type AgentCoreOutcome = {

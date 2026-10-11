@@ -10,9 +10,14 @@ import {
   type AgentRetryEvent,
   type ToolCallEvent
 } from '../../shared/agent'
-import { parseIncompleteToolTurn, parseToolHistory } from '../../shared/agent-history'
+import {
+  parseIncompleteToolTurn,
+  parseToolHistory,
+  parseResumableHistory
+} from '../../shared/agent-history'
 import type { ProtocolItem } from '../../shared/agent-history'
 import { parseToolScope } from '../../shared/project'
+import { parseTaskCheckpointSummary } from '../../shared/task-checkpoint'
 import { AgentError } from '../errors'
 import { runToolLoop } from './tool-loop'
 import type {
@@ -81,6 +86,8 @@ export async function runAgentCore(
     const mode = parseAgentMode(input.mode)
     const scope = parseToolScope(input.scope)
     const prompt = typeof input.prompt === 'string' ? input.prompt.trim() : ''
+    const resume = input.resume ? structuredClone(input.resume) : undefined
+    const contextSummary = parseTaskCheckpointSummary(input.contextSummary) ?? undefined
     if (
       !isAgentId(requestId) ||
       !isAgentId(input.conversationId) ||
@@ -90,8 +97,27 @@ export async function runAgentCore(
       input.prompt.length > 2000
     )
       throw new AgentError('任务或工具上下文参数无效')
-    const history = parseToolHistory(input.history, scope, input.imageHistory, mode)
+    if (
+      resume &&
+      (!isAgentId(resume.taskId) ||
+        !Number.isFinite(Date.parse(resume.previousUpdatedAt)) ||
+        !['absent', 'accepted', 'discarded'].includes(resume.summaryStatus))
+    )
+      throw new AgentError('续接任务身份无效')
+    const history = resume
+      ? parseResumableHistory(input.history, scope, mode)
+      : parseToolHistory(input.history, scope, input.imageHistory, mode)
     if (!history) throw new AgentError('工具历史参数无效')
+    let resumeTurnStart = history.length
+    if (resume && history.length > 0) {
+      let start = history.length - 1
+      while (start > 0 && history[start].role !== 'user') start--
+      const tail = history.slice(start)
+      if (!parseToolHistory(tail, scope, [], mode)) {
+        if (tail[0]?.content !== prompt) throw new AgentError('续接任务与原始意图不一致')
+        resumeTurnStart = start
+      }
+    }
     if (
       typeof send !== 'function' ||
       typeof createTools !== 'function' ||
@@ -103,6 +129,13 @@ export async function runAgentCore(
       if (!isCurrent()) throw new AgentError('运行上下文已失效，请重新发送')
     }
     assertCurrent()
+    if (resume)
+      publish({
+        type: 'resume',
+        requestId,
+        taskId: resume.taskId,
+        summaryStatus: resume.summaryStatus
+      })
     appendTrace(
       `工作方式：${mode === 'plan' ? '计划' : '执行'}；${transportLabel ?? '模型与工具循环'}`
     )
@@ -246,10 +279,15 @@ export async function runAgentCore(
       observeMessage,
       mode,
       observeRetry,
-      dependencies.summarize
+      dependencies.summarize || dependencies.onRawCheckpoint || resume
         ? {
             summarize: dependencies.summarize,
             assertCurrent,
+            resumableHistory: !!resume,
+            resumeTurnStart,
+            resumeSourceItems: resume ? history.length : undefined,
+            contextSummary,
+            onRawCheckpoint: dependencies.onRawCheckpoint,
             imageIndices: [...new Set(input.imageHistory?.map((image) => image.index))],
             networkOverhead: dependencies.networkOverhead,
             onContext: (state) => {

@@ -14,6 +14,8 @@ export type CLIArguments = {
   output: OutputMode
   prompt?: string
   stdin: boolean
+  resume?: string
+  checkpoint?: string
 }
 
 export const HELP = `ZoneCodex Agent — 一次明确任务
@@ -21,6 +23,7 @@ export const HELP = `ZoneCodex Agent — 一次明确任务
 用法：
   zonecodex-agent --mode plan|execute --prompt "任务" [选项]
   zonecodex-agent --mode plan|execute --stdin [选项]
+  zonecodex-agent --resume <checkpoint文件> [选项]
 
 选项：
   --cwd <目录>                 本次工作目录；默认当前调用目录
@@ -29,9 +32,13 @@ export const HELP = `ZoneCodex Agent — 一次明确任务
   --output <格式>              text（缺省）或 jsonl
   --prompt <文字>              原字符串最多 2000 个 JS 字符，不能为空
   --stdin                      从标准输入读取任务；最多 8192 字节、严格 UTF-8
+  --checkpoint <文件>          明确保存独立任务指针与完整 raw，供新进程续接
+  --resume <文件>              显式续接；与 mode/prompt/stdin/checkpoint 互斥
   --help                       单独显示帮助，不启动任务
 
 任务只取 --prompt 或 --stdin 之一；mode 必须明确提供。
+resume 沿用已校验的任务意图；可用 cwd/workspace 复核原目录，权限缺省仍为 default。
+不会恢复旧批准、读取凭据或命令票据；无 checkpoint/resume 时保持空历史单次任务。
 审批和计划问答只使用未被任务占用的交互终端；缺少交互时以 3 结束。
 模型需预先配置 MODEL_ENDPOINT、MODEL_NAME、MODEL_API_KEY；密钥不放命令参数。
 text 的 stdout 仅为最终回答；公开过程和交互提示在 stderr。
@@ -72,7 +79,17 @@ export function parseCLIArguments(argv: readonly string[]): CLIArguments {
     return { help: true, permission: 'default', output: 'text', stdin: false }
   const values = new Map<string, string>()
   const seen = new Set<string>()
-  const names = new Set(['mode', 'cwd', 'workspace', 'permission', 'output', 'prompt', 'stdin'])
+  const names = new Set([
+    'mode',
+    'cwd',
+    'workspace',
+    'permission',
+    'output',
+    'prompt',
+    'stdin',
+    'resume',
+    'checkpoint'
+  ])
   for (let i = 0; i < argv.length; i++) {
     const token = argv[i]
     if (typeof token !== 'string' || !token.startsWith('--'))
@@ -92,7 +109,7 @@ export function parseCLIArguments(argv: readonly string[]): CLIArguments {
     values.set(name, value)
   }
   const mode = parseAgentMode(values.get('mode'))
-  if (!mode) throw new CLIInputError('--mode 必须明确为 plan 或 execute')
+  if (!values.has('resume') && !mode) throw new CLIInputError('--mode 必须明确为 plan 或 execute')
   const permission = values.has('permission')
     ? parsePermissionMode(values.get('permission'))
     : 'default'
@@ -101,14 +118,21 @@ export function parseCLIArguments(argv: readonly string[]): CLIArguments {
   const output = values.get('output') ?? 'text'
   if (output !== 'text' && output !== 'jsonl')
     throw new CLIInputError('--output 必须为 text 或 jsonl')
-  if (seen.has('stdin') === values.has('prompt'))
+  if (
+    values.has('resume') &&
+    ['mode', 'prompt', 'stdin', 'checkpoint'].some((name) => seen.has(name))
+  )
+    throw new CLIInputError('--resume 与 --mode、--prompt、--stdin、--checkpoint 互斥')
+  if (!values.has('resume') && seen.has('stdin') === values.has('prompt'))
     throw new CLIInputError('必须且只能提供 --prompt 或 --stdin 之一')
   return {
     help: false,
-    mode,
+    mode: mode ?? undefined,
     permission,
     output,
     stdin: seen.has('stdin'),
+    ...(values.has('resume') ? { resume: directory(values.get('resume')!) } : {}),
+    ...(values.has('checkpoint') ? { checkpoint: directory(values.get('checkpoint')!) } : {}),
     ...(values.has('cwd') ? { cwd: directory(values.get('cwd')!) } : {}),
     ...(values.has('workspace') ? { workspace: directory(values.get('workspace')!) } : {}),
     ...(values.has('prompt') ? { prompt: validatePrompt(values.get('prompt')!) } : {})

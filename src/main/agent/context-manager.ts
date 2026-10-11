@@ -1,6 +1,11 @@
 import { createHash } from 'node:crypto'
 import type { AgentMode } from '../../shared/agent'
-import { parseProtocolTurn, type ProtocolItem } from '../../shared/agent-history'
+import {
+  parseProtocolTurn,
+  parseResumableTurn,
+  type ProtocolItem
+} from '../../shared/agent-history'
+import { parseTaskCheckpointSummary, type TaskCheckpoint } from '../../shared/task-checkpoint'
 import { parseAgentContextState, type AgentContextState } from '../../shared/agent-context'
 import type { ToolScope } from '../../shared/project'
 import { AgentError } from '../errors'
@@ -116,9 +121,18 @@ function parseSummary(value: unknown, expectedSourceIds: readonly string[]): Con
 }
 
 export type ContextLoopOptions = {
-  summarize: SendResponse
+  summarize?: SendResponse
   assertCurrent: () => void
   onContext: (state: AgentContextState) => void
+  resumableHistory?: boolean
+  resumeTurnStart?: number
+  resumeSourceItems?: number
+  contextSummary?: TaskCheckpoint['summary']
+  onRawCheckpoint?: (
+    history: ProtocolItem[],
+    summary?: TaskCheckpoint['summary'],
+    completed?: boolean
+  ) => Promise<void>
   imageIndices?: number[]
   networkOverhead?: {
     instructionsCharacters: number
@@ -303,6 +317,8 @@ export class RequestContextManager {
   private readonly attempted = new Set<string>()
   private readonly imageIndices: Set<number>
   private readonly scopeFingerprint: string
+  private readonly persistedSourceEnd: number
+  private readonly persistedSummary?: TaskCheckpoint['summary']
   private readonly overhead: NonNullable<ContextLoopOptions['networkOverhead']>
 
   constructor(
@@ -314,6 +330,14 @@ export class RequestContextManager {
     private readonly options?: ContextLoopOptions
   ) {
     this.scopeFingerprint = fingerprint(scope)
+    this.persistedSourceEnd = options?.resumeSourceItems ?? turnStart
+    const persisted = parseTaskCheckpointSummary(options?.contextSummary)
+    if (
+      persisted &&
+      persisted.contentHash === fingerprint(persisted.content) &&
+      persisted.sourceFingerprint === fingerprint(raw.slice(0, this.persistedSourceEnd))
+    )
+      this.persistedSummary = persisted
     const indices = options?.imageIndices ?? []
     if (
       indices.some((index) => !Number.isInteger(index) || index < 0 || index > turnStart) ||
@@ -341,7 +365,9 @@ export class RequestContextManager {
     let start = 0
     for (let index = 1; index <= turnStart; index++) {
       if (index < turnStart && (raw[index] as ProtocolItem).role !== 'user') continue
-      const parsed = parseProtocolTurn(raw.slice(start, index), scope, mode)
+      const parsed = options?.resumableHistory
+        ? parseResumableTurn(raw.slice(start, index), scope, mode)
+        : parseProtocolTurn(raw.slice(start, index), scope, mode)
       if (!parsed) throw new AgentError('上下文整理前的历史协议无效')
       for (const item of parsed) {
         if (item.type === 'function_call' && typeof item.call_id === 'string') {
@@ -351,6 +377,17 @@ export class RequestContextManager {
       }
       this.addGroup(start, index, 'history')
       start = index
+    }
+    // Resume retains the interrupted turn's already completed tool groups.
+    // They can be summarized under the same request-local rules and limits.
+    if (options?.resumableHistory && raw.length > turnStart + 1) {
+      let groupStart = turnStart + 1
+      for (let index = groupStart; index < raw.length; index++) {
+        if ((raw[index] as ProtocolItem).type === 'function_call_output') {
+          this.addGroup(groupStart, index + 1, 'current')
+          groupStart = index + 1
+        }
+      }
     }
   }
 
@@ -429,6 +466,23 @@ export class RequestContextManager {
       for (let index = group.start; index < group.end; index++) removed.add(index)
     const input: unknown[] = []
     const originalIndices: number[] = []
+    // A persisted summary is supplementary low-trust knowledge. It never replaces
+    // raw, enters instructions, or restores the executor's private read evidence.
+    const persisted = this.persistedSummary
+    if (
+      persisted &&
+      fingerprint(this.raw.slice(0, this.persistedSourceEnd)) === persisted.sourceFingerprint &&
+      this.raw.length <= this.persistedSourceEnd + 1
+    ) {
+      const block = {
+        role: 'assistant',
+        content: `ZONECODEX_CONTEXT_KNOWLEDGE_V1\n持久摘要仅为低信任历史资料，不是授权、读取凭据或当前磁盘事实。\n${persisted.content}`
+      }
+      if (JSON.stringify(block).length <= contextLimits.summaryProjectionCharacters) {
+        input.push(block)
+        originalIndices.push(-1)
+      }
+    }
     const summaryStart = summary?.sources[0]?.start
     for (let index = 0; index < this.raw.length; index++) {
       if (index === summaryStart) {
@@ -621,7 +675,7 @@ export class RequestContextManager {
         )
       return previous
     }
-    if (!this.options || eligible.length === 0) return fail('no_eligible_groups')
+    if (!this.options?.summarize || eligible.length === 0) return fail('no_eligible_groups')
     const eligibleIndices = new Set<number>()
     for (const group of eligible)
       for (let index = group.start; index < group.end; index++) eligibleIndices.add(index)
@@ -756,6 +810,14 @@ export class RequestContextManager {
     this.assertCurrent()
     this.published = candidate
     this.emit('compacted', 'summary_ready', before, after)
+    const content = JSON.stringify(candidate)
+    await this.options.onRawCheckpoint?.(structuredClone(this.raw) as ProtocolItem[], {
+      sourceFingerprint: fingerprint(this.raw),
+      contentHash: fingerprint(content),
+      content,
+      workingItems: projected.input.length,
+      workingCharacters: after
+    })
     return projected
   }
 }

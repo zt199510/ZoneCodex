@@ -31,6 +31,7 @@ import {
 } from '../shared/command-preparation'
 import { isTaskId, parseTaskRecord, parseTaskRecords } from '../shared/task'
 import { parseAgentUserInputRequest, parseAgentUserInputResponse } from '../shared/agent-user-input'
+import { parseResumableAgentTask } from '../shared/agent-resume'
 
 export const agentAPI: Pick<
   AppAPI,
@@ -55,6 +56,8 @@ export const agentAPI: Pick<
   | 'respondToAgentUserInput'
   | 'onAgentUserInputChange'
   | 'startAgentRequest'
+  | 'getResumableAgentTask'
+  | 'resumeAgentRequest'
   | 'cancelAgentRequest'
   | 'onAgentProgress'
   | 'onAgentToolEvent'
@@ -251,6 +254,31 @@ export const agentAPI: Pick<
       ),
       checkedScope,
       prompt.trim(),
+      checkedContext.mode
+    )
+  },
+  getResumableAgentTask: async (conversationId) => {
+    if (!isAgentId(conversationId)) throw new Error('会话标识无效')
+    const value: unknown = await ipcRenderer.invoke('agent:resume-info', conversationId)
+    if (value === null) return null
+    const checked = parseResumableAgentTask(value)
+    if (!checked) throw new Error('任务续接信息格式不正确')
+    return checked
+  },
+  resumeAgentRequest: async (requestId, checkpointTaskId, context, taskId) => {
+    if (!isAgentId(requestId) || !isTaskId(checkpointTaskId)) throw new Error('续接标识无效')
+    const checkedContext = parseAgentRequestContext(context)
+    if (!checkedContext || checkedContext.images?.length || checkedContext.imageHistory?.length)
+      throw new Error('续接上下文格式不正确')
+    const source = parseResumableAgentTask(
+      await ipcRenderer.invoke('agent:resume-info', checkedContext.conversationId)
+    )
+    if (!source || source.taskId !== checkpointTaskId)
+      throw new Error('可继续任务已变化，请重新核对')
+    return parseAgentResult(
+      await ipcRenderer.invoke('agent:resume', requestId, checkpointTaskId, checkedContext, taskId),
+      toolScopeForAgentRequest(checkedContext),
+      source.prompt,
       checkedContext.mode
     )
   },

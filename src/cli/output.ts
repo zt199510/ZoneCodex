@@ -9,6 +9,7 @@ import {
   parseResponseMessageId
 } from '../shared/agent'
 import type { OutputMode } from './arguments'
+import { agentResumeSafetyNotice } from '../shared/agent-resume'
 
 export type CLIResult = {
   requestId: string
@@ -46,6 +47,20 @@ export function terminalText(value: string): string {
 
 /** Every record is rebuilt from an explicit allowlist, never a spread protocol object. */
 export function projectEvent(event: AgentCoreEvent): Record<string, unknown> {
+  if (event.type === 'resume') {
+    if (
+      !isAgentId(event.requestId) ||
+      !isAgentId(event.taskId) ||
+      !['absent', 'accepted', 'discarded'].includes(event.summaryStatus)
+    )
+      throw new CLIOutputError()
+    return {
+      type: 'resume',
+      requestId: event.requestId,
+      taskId: event.taskId,
+      summaryStatus: event.summaryStatus
+    }
+  }
   if (event.type === 'progress') {
     if (
       !isAgentId(event.requestId) ||
@@ -294,7 +309,11 @@ export class CLIOutput {
       this.enqueue(this.stdout, JSON.stringify(projected) + '\n')
       return
     }
-    if (event.type === 'progress') this.diagnostic(`[进展] ${event.message}`)
+    if (event.type === 'resume')
+      this.diagnostic(
+        `[继续任务] ${event.taskId}；摘要 ${event.summaryStatus}。${agentResumeSafetyNotice}`
+      )
+    else if (event.type === 'progress') this.diagnostic(`[进展] ${event.message}`)
     else if (event.type === 'retry') {
       for (const key of this.messages.keys())
         if (parseResponseMessageId(key)?.round === event.event.round) this.messages.delete(key)

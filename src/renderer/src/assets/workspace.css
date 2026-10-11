@@ -33,6 +33,20 @@ body,
   height: min(32px, 100%);
 }
 
+.title-terminal-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 26px;
+  margin-left: 5px;
+  padding: 2px 8px;
+}
+
+.title-terminal-toggle[aria-expanded='true'] {
+  background: var(--hover);
+  color: var(--accent);
+}
+
 .window-controls {
   display: flex;
   align-self: stretch;
@@ -375,12 +389,21 @@ button.conversation-item:disabled {
   cursor: not-allowed;
 }
 
+.workspace-shell,
 .workspace-body {
   display: flex;
   flex-direction: column;
   min-width: 0;
   min-height: 0;
   overflow: hidden;
+}
+
+.workspace-shell[hidden] {
+  display: none;
+}
+
+.workspace-shell > .workspace-body {
+  flex: 1 1 0;
 }
 
 .workspace-status {

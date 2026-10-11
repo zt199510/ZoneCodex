@@ -3,8 +3,11 @@ import type { AgentResult } from '../../shared/agent'
 import { isAgentId } from '../../shared/agent'
 import { parseAgentRequestContext } from '../../shared/project'
 import { getIpcWindow } from '../ipc-source'
-import { runAgentRequest, cancelAgentJob } from './agent-runner'
+import { runAgentRequest, cancelAgentJob } from './desktop-agent-host'
 import { registerAgentUserInput } from './agent-user-input'
+import { getResumableAgentTask } from './desktop-checkpoints'
+import { agentResumePrompt, type ResumableAgentTask } from '../../shared/agent-resume'
+import { isTaskId } from '../../shared/task'
 
 export function registerAgentRequest(
   isPreparationActive: (windowId: number) => boolean = () => false
@@ -44,4 +47,38 @@ export function registerAgentRequest(
     if (!isAgentId(id)) return false
     return cancelAgentJob(window.id, id)
   })
+  ipcMain.handle(
+    'agent:resume-info',
+    async (event, conversationId: unknown): Promise<ResumableAgentTask | null> => {
+      getIpcWindow(event, '不支持的任务续接来源')
+      if (!isAgentId(conversationId)) throw new Error('会话标识无效')
+      return getResumableAgentTask(conversationId)
+    }
+  )
+  ipcMain.handle(
+    'agent:resume',
+    async (event, id: unknown, checkpointTaskId: unknown, context: unknown, taskId?: unknown) => {
+      const window = getIpcWindow(event, '不支持的任务续接来源')
+      const checkedContext = parseAgentRequestContext(context)
+      if (
+        !isAgentId(id) ||
+        !isTaskId(checkpointTaskId) ||
+        !checkedContext ||
+        checkedContext.images?.length ||
+        checkedContext.imageHistory?.length
+      )
+        return { status: 'error', error: '任务续接参数无效', trace: [] }
+      return runAgentRequest(
+        window.id,
+        event.sender,
+        id,
+        agentResumePrompt,
+        [],
+        checkedContext,
+        taskId,
+        isPreparationActive,
+        checkpointTaskId
+      )
+    }
+  )
 }

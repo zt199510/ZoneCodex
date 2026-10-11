@@ -1,6 +1,7 @@
 const { assert, fs, path, root, load, FakeClock, electronFixture, suite } = require('./harness.cjs')
 const { finalMessage, call, response, clone } = require('./fixture.cjs')
 const crypto = require('node:crypto')
+const { desktopCheckpointFixture } = require('./desktop-checkpoint-fixture.cjs')
 const checks = suite('lesson55-desktop-runner-protection')
 const elapsed = 30 * 60 * 1000
 const prompt = '请研究计划，或执行已明确要求的隔离文件操作。'
@@ -105,6 +106,7 @@ async function environment(model, options = {}) {
     { clock }
   )
   const dependencies = {
+    './desktop-checkpoints': desktopCheckpointFixture(options.checkpointSave),
     electron: fixture.electron,
     'node:perf_hooks': { performance: { now: () => clock.now } },
     './agent-user-input': input,
@@ -582,9 +584,64 @@ async function main() {
       released(env)
     }
   )
+  await checks.test(
+    'lesson57 completed safe boundary is persisted once without a redundant terminal write',
+    async () => {
+      const statuses = []
+      const env = await environment(async () => response(finalMessage('任务完整结束。')), {
+        checkpointSave: async (checkpoint) => {
+          statuses.push(checkpoint.progress)
+          return { ok: true, file: 'synthetic-safe-completion', checkpoint }
+        }
+      })
+      const result = await settled(env.start())
+      assert.equal(result.status, 'done')
+      assert.deepEqual(statuses, ['resumable', 'completed'])
+      released(env)
+    }
+  )
+  await checks.test(
+    'lesson57 interrupted terminal persistence failure retains real effect evidence and reports STORAGE despite cancellation',
+    async () => {
+      const env = await environment(
+        async (env, _items, signal) => {
+          if (env.spy.requests === 1) return createCall()
+          env.gate = gate(signal)
+          return env.gate.promise
+        },
+        {
+          mode: 'execute',
+          permission: 'full-access',
+          checkpointSave: async (checkpoint) =>
+            checkpoint.progress === 'interrupted'
+              ? { ok: false, code: 'STORAGE', error: 'synthetic terminal disk failure' }
+              : { ok: true, file: 'synthetic-safe-prefix', checkpoint }
+        }
+      )
+      const completion = env.start()
+      await waitUntil(() => env.gate, 'post-effect stream before failing terminal save')
+      assert.equal(env.runner.cancelAgentJob(1, 'request-check'), true)
+      const result = await settled(completion)
+      assert.equal(result.status, 'error')
+      assert.match(result.error, /STORAGE/)
+      assert.match(result.error, /本地操作可能已经执行/)
+      assert.equal(env.record().status, 'failed')
+      assert.equal(
+        await fs.readFile(path.join(env.cwd, 'result.txt'), 'utf8'),
+        'isolated local effect\n'
+      )
+      const output = result.items.find((item) => item.type === 'function_call_output')
+      assert.equal(JSON.parse(output.output).status, 'created')
+      assert.ok(result.trace.some((line) => line.startsWith('本地操作已开始：')))
+      assert.ok(env.history.parseIncompleteToolTurn(result.items, env.scope, prompt, 'execute'))
+      released(env)
+    }
+  )
   const sourceHashes = {}
   for (const relative of [
     'src/main/agent/agent-runner.ts',
+    'src/main/agent/desktop-agent-host.ts',
+    'src/main/agent/agent-runtime.ts',
     'src/main/agent/tool-loop.ts',
     'src/main/agent/agent-instructions.ts',
     'src/main/agent/agent-user-input.ts',
@@ -597,7 +654,7 @@ async function main() {
       .digest('hex')
   await checks.finish({
     method:
-      'Actual current runner, tool loop, task registry, authorization, user-input channel, executor and real isolated file writes. Electron/window/model/backend are explicitly synthetic. FakeClock advances 30 simulated minutes (not real wall clock); no model API or user data used.',
+      'Actual current runner, tool loop, task registry, authorization, user-input channel, executor and real isolated file writes. Electron/window/model/backend/checkpoint persistence are explicitly synthetic. FakeClock advances 30 simulated minutes (not real wall clock); no model API or user data used.',
     sourceHashes,
     simulatedActiveDurationMs: elapsed,
     realModel: false,

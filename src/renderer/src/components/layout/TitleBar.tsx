@@ -4,11 +4,17 @@ import { useWindowControls } from './useWindowControls'
 export function TitleBar({
   sidebarOpen,
   showSidebarToggle = true,
-  onToggleSidebar
+  onToggleSidebar,
+  terminalOpen,
+  terminalDisabled,
+  onToggleTerminal
 }: {
   sidebarOpen: boolean
   showSidebarToggle?: boolean
   onToggleSidebar: () => void
+  terminalOpen: boolean
+  terminalDisabled: boolean
+  onToggleTerminal: () => void
 }): React.JSX.Element {
   const label = sidebarOpen ? '收起侧栏' : '展开侧栏'
   const controls = useWindowControls()
@@ -25,6 +31,20 @@ export function TitleBar({
           <Icon name="panel" />
         </button>
       )}
+      <button
+        id="terminal-panel-toggle"
+        type="button"
+        className="quiet-button title-terminal-toggle"
+        aria-label={terminalOpen ? '关闭终端' : '打开终端'}
+        title={terminalOpen ? '关闭终端' : '打开终端'}
+        aria-controls="terminal-panel"
+        aria-expanded={terminalOpen}
+        disabled={terminalDisabled}
+        onClick={onToggleTerminal}
+      >
+        <Icon name="terminal" size={15} />
+        终端
+      </button>
       {controls.error && (
         <span className="window-error" role="status">
           {controls.error}

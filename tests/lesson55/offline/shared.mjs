@@ -19,7 +19,7 @@ const suites = [
   'patch-capacity-check.cjs'
 ]
 const provenance = []
-for (const name of [...suites, 'harness.cjs', 'fixture.cjs']) {
+for (const name of [...suites, 'harness.cjs', 'fixture.cjs', 'desktop-checkpoint-fixture.cjs']) {
   const bytes = await fs.readFile(path.join(source, name))
   await fs.writeFile(path.join(evidence, name), bytes, { flag: 'wx' })
   provenance.push({ name, sha256: createHash('sha256').update(bytes).digest('hex') })
@@ -73,7 +73,7 @@ const result = {
   runs,
   provenance,
   boundary:
-    'Current source, original assertions, isolated disk and fixed synthetic transport. Electron, command backend and selected CommitIO races are substitutes. No old UUID reports are read. Test sources are copied to this new run directory; attachment cases also create uniquely named self-authored system-temp materials. Offline network guard remains installed around synthetic transport overrides.'
+    'Current source, original assertions, isolated disk and fixed synthetic transport. Electron, checkpoint persistence, command backend and selected CommitIO races are substitutes. Actual checkpoint disk/new-PID continuation is independently verified in lesson57. No old UUID reports are read. Test sources are copied to this new run directory; attachment cases also create uniquely named self-authored system-temp materials. Offline network guard remains installed around synthetic transport overrides.'
 }
 await fs.writeFile(path.join(evidence, 'process-summary.json'), JSON.stringify(result, null, 2))
 console.log(JSON.stringify({ pass: result.pass, evidence, suites: runs.length }))

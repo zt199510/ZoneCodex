@@ -6,11 +6,15 @@ import { useConversation } from './features/conversation/useConversation'
 import { useFileView } from './features/files/useFileView'
 import { FileViewPanel } from './features/files/FileViewPanel'
 import { SettingsPage } from './features/settings/SettingsPage'
+import { TerminalPanel } from './features/terminal/TerminalPanel'
+import type { TerminalPanelHandle } from './features/terminal/TerminalPanel'
 
 function App(): React.JSX.Element {
   const conversation = useConversation()
   const [sidebarOpen, setSidebarOpen] = useState(() => window.innerWidth > 760)
   const [settingsOpen, setSettingsOpen] = useState(false)
+  const [terminalOpen, setTerminalOpen] = useState(false)
+  const terminalPanel = useRef<TerminalPanelHandle>(null)
   const [settingsSaving, setSettingsSaving] = useState(false)
   const settingsSavingRef = useRef(false)
   const onSettingsSavingChange = useCallback((saving: boolean): void => {
@@ -18,6 +22,15 @@ function App(): React.JSX.Element {
     setSettingsSaving(saving)
   }, [])
   const [settingsReturnFocus, setSettingsReturnFocus] = useState<HTMLElement>()
+  const closeTerminalPanel = useCallback((): void => {
+    setTerminalOpen(false)
+    requestAnimationFrame(() => {
+      if (document.querySelector('dialog[open], [popover]:popover-open')) return
+      if (document.querySelector('.workspace-shell[hidden], .workspace-shell[inert]')) return
+      if (document.activeElement && document.activeElement !== document.body) return
+      document.getElementById('terminal-panel-toggle')?.focus({ preventScroll: true })
+    })
+  }, [])
   const fileView = useFileView(conversation, !settingsOpen)
   const openSettings = useCallback(
     (returnFocus?: HTMLElement): void => {
@@ -103,6 +116,13 @@ function App(): React.JSX.Element {
       <TitleBar
         sidebarOpen={sidebarOpen}
         onToggleSidebar={() => setSidebarOpen((previous) => !previous)}
+        terminalOpen={terminalOpen}
+        terminalDisabled={settingsOpen}
+        onToggleTerminal={() => {
+          if (settingsOpen || document.querySelector('dialog[open], [popover]:popover-open')) return
+          if (terminalOpen) terminalPanel.current?.close()
+          else setTerminalOpen(true)
+        }}
       />
       {sidebarOpen && (
         <button
@@ -131,13 +151,16 @@ function App(): React.JSX.Element {
           onOpenSettings={openSettings}
         />
       )}
-      <div
-        className={`workspace-body${fileView.state.status !== 'idle' ? ' with-file-view' : ''}`}
-        hidden={settingsOpen}
-        inert={settingsOpen}
-      >
-        <ChatWorkspace conversation={conversation} onOpenFile={fileView.open} />
-        <FileViewPanel state={fileView.state} onClose={fileView.close} />
+      <div className="workspace-shell" hidden={settingsOpen} inert={settingsOpen}>
+        <div
+          className={`workspace-body${fileView.state.status !== 'idle' ? ' with-file-view' : ''}`}
+        >
+          <ChatWorkspace conversation={conversation} onOpenFile={fileView.open} />
+          <FileViewPanel state={fileView.state} onClose={fileView.close} />
+        </div>
+        {terminalOpen && (
+          <TerminalPanel ref={terminalPanel} visible={!settingsOpen} onClose={closeTerminalPanel} />
+        )}
       </div>
       <SettingsPage
         open={settingsOpen}

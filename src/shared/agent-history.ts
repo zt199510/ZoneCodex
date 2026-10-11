@@ -148,10 +148,32 @@ export function parseProtocolTurn(
   scope: ToolScope = { kind: 'time' },
   mode: AgentMode = 'execute'
 ): ProtocolItem[] | null {
+  return parseRecordedTurn(value, scope, mode, true)
+}
+
+/** Checkpoint-only boundary: actual raw, including a safe unfinished tool group. */
+export function parseResumableTurn(
+  value: unknown,
+  scope: ToolScope = { kind: 'time' },
+  mode: AgentMode = 'execute'
+): ProtocolItem[] | null {
+  return parseRecordedTurn(value, scope, mode, false)
+}
+
+function parseRecordedTurn(
+  value: unknown,
+  scope: ToolScope,
+  mode: AgentMode,
+  requireFinal: boolean
+): ProtocolItem[] | null {
   const checkedScope = parseToolScope(scope)
   if (!checkedScope || !parseAgentMode(mode)) return null
   const items = cloneJsonArray(value, 160, 128000)
-  if (!items || items.length < 2 || !items.every((item): item is ProtocolItem => isRecord(item)))
+  if (
+    !items ||
+    items.length < (requireFinal ? 2 : 1) ||
+    !items.every((item): item is ProtocolItem => isRecord(item))
+  )
     return null
   const first = items[0]
   if (
@@ -222,10 +244,44 @@ export function parseProtocolTurn(
     } else return null
   }
   const last = items[items.length - 1]
-  if (pendingCall !== null || last.type !== 'message' || last.phase === 'commentary') return null
+  if (pendingCall !== null) return null
+  if (!requireFinal && !hasFinal) return items
+  if (last.type !== 'message' || last.phase === 'commentary') return null
   const answer = finalText(items)
   if (!answer.trim() || answer.length > 16000 || !finalText([last]).trim()) return null
   return items
+}
+
+/** Raw checkpoint rounds retain their real stop boundary; no invented answer is saved. */
+export function parseResumableHistory(
+  value: unknown,
+  scope: ToolScope = { kind: 'time' },
+  mode: AgentMode = 'execute'
+): ProtocolItem[] | null {
+  if (!parseToolScope(scope) || !parseAgentMode(mode)) return null
+  const items = cloneJsonArray(value)
+  if (!items || !items.every((item): item is ProtocolItem => isRecord(item))) return null
+  const result: ProtocolItem[] = []
+  const calls = new Set<string>()
+  let start = 0
+  for (let index = 1; index <= items.length; index++) {
+    if (index < items.length && items[index].role !== 'user') continue
+    const turn =
+      index === items.length
+        ? parseResumableTurn(items.slice(start, index), scope, mode)
+        : parseProtocolTurn(items.slice(start, index), scope, mode)
+    if (!turn || typeof turn[0].content !== 'string' || hasImageTurnNotice(turn[0].content))
+      return null
+    for (const item of turn) {
+      if (item.type === 'function_call' && typeof item.call_id === 'string') {
+        if (calls.has(item.call_id)) return null
+        calls.add(item.call_id)
+      }
+    }
+    result.push(...turn)
+    start = index
+  }
+  return result
 }
 
 // 多轮历史不设独立总量门槛；每轮仍须完整，且整条历史不能复用 call_id。

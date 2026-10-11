@@ -29,7 +29,7 @@ export async function runCLI(
   }
   const interrupt = (): void => cancel(new Error('用户已取消任务'), 130)
   const bridge = new WindowsOutputBridge(io.stdout, io.stderr)
-  const output = new CLIOutput(requestedOutput(argv), bridge.stdout, bridge.stderr, (error) =>
+  let output = new CLIOutput(requestedOutput(argv), io.stdout, io.stderr, (error) =>
     cancel(error, 1)
   )
   const fallback = { requestId: randomUUID(), conversationId: randomUUID() }
@@ -37,15 +37,17 @@ export async function runCLI(
   if (io.signals !== false) process.on('SIGINT', interrupt)
   try {
     const args = parseCLIArguments(argv)
-    await bridge.ready(controller.signal)
     if (args.help) {
       output.help(HELP)
       await output.flush(controller.signal)
       exitCode = stopCode ?? 0
     } else {
-      if (!args.mode) throw new CLIInputError('必须明确提供工作方式')
+      if (!args.mode && !args.resume) throw new CLIInputError('必须明确提供工作方式')
       const prompt = args.stdin ? await readTaskInput(io.stdin, controller.signal) : args.prompt!
       controller.signal.throwIfAborted()
+      output.dispose()
+      output = new CLIOutput(args.output, bridge.stdout, bridge.stderr, (error) => cancel(error, 1))
+      await bridge.ready(controller.signal)
       interaction = new TerminalInteraction(io.stdin, io.stderr, args.stdin, controller.signal, {
         diagnostic: (text) => output.diagnostic(text),
         flush: () => output.flush(controller.signal),
@@ -54,8 +56,13 @@ export async function runCLI(
       })
       const result = await runAgentTask(
         {
-          prompt,
-          mode: args.mode,
+          ...(args.resume
+            ? { resume: args.resume }
+            : {
+                prompt,
+                mode: args.mode!,
+                ...(args.checkpoint ? { checkpoint: args.checkpoint } : {})
+              }),
           permission: args.permission,
           ...(args.cwd !== undefined ? { cwd: args.cwd } : {}),
           ...(args.workspace !== undefined ? { workspace: args.workspace } : {})

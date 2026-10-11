@@ -1,7 +1,7 @@
 .terminal-panel {
   display: flex;
   flex-direction: column;
-  flex: 0 0 clamp(140px, 28vh, 260px);
+  flex: 0 0 clamp(180px, 30vh, 300px);
   min-width: 0;
   min-height: 0;
   border-top: 1px solid var(--border);
@@ -18,11 +18,24 @@
   font-size: 12px;
 }
 
+.terminal-toolbar strong {
+  flex: 1 1 auto;
+}
+
 .terminal-toolbar button {
   padding: 3px 8px;
   border: 1px solid #77847b;
   border-radius: 4px;
   background: transparent;
+  white-space: nowrap;
+}
+
+.terminal-toolbar button:hover:not(:disabled) {
+  background: #ffffff12;
+}
+
+.terminal-panel :focus-visible {
+  outline-color: #9fcab2;
 }
 
 .terminal-host {
@@ -48,6 +61,24 @@
 }
 
 .terminal-error {
+  flex: 0 0 auto;
+  max-height: 48px;
+  overflow: auto;
   padding: 4px 10px;
   color: #ffb3a9;
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 600px) {
+  .terminal-toolbar {
+    gap: 4px 6px;
+  }
+
+  .terminal-toolbar strong {
+    flex-basis: 60%;
+  }
+
+  .terminal-toolbar button {
+    padding: 2px 5px;
+  }
 }

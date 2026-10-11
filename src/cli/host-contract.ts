@@ -6,9 +6,20 @@ import type { AgentCoreEvent } from '../main/agent/agent-core-contract'
 export class CLIInputError extends Error {}
 export class InteractionUnavailableError extends Error {}
 
-export type AgentHostInput = {
-  mode: AgentMode
-  prompt: string
+export type AgentHostInput = (
+  | {
+      mode: AgentMode
+      prompt: string
+      resume?: never
+      checkpoint?: string
+    }
+  | {
+      resume: string
+      mode?: never
+      prompt?: never
+      checkpoint?: never
+    }
+) & {
   cwd?: string
   workspace?: string
   permission?: PermissionMode

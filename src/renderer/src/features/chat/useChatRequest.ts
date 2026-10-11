@@ -5,6 +5,7 @@ import type { AgentRequestContext, ProjectSelection, Workspace } from '../../../
 import { toolScopeForAgentRequest } from '../../../../shared/project'
 import type { ChatAttachment, ChatMessage } from '../../../../shared/conversation'
 import type { AgentMode } from '../../../../shared/agent'
+import { type ResumableAgentTask } from '../../../../shared/agent-resume'
 import { parseAgentContextEvent, parseResponseMessageId } from '../../../../shared/agent'
 import type {
   AgentUserInputRequest,
@@ -63,6 +64,7 @@ type ActiveRequest = {
   taskId: string
   startedAt: number
   imageIds?: readonly string[]
+  checkpointTaskId?: string
 }
 type ChatRetrySource = {
   conversationId: string
@@ -104,6 +106,8 @@ type ChatRequest = {
   error: string | null
   toolActivity: ToolActivity
   pendingPlanQuestion: PendingPlanQuestion | null
+  resumableTask: ResumableAgentTask | null
+  resume: () => boolean
   respondToPlanQuestion: (response: AgentUserInputResponse) => Promise<boolean>
   send: (
     rawContent: string,
@@ -116,7 +120,8 @@ type ChatRequest = {
     onAccepted?: (accepted: AcceptedChatRequest) => void,
     messageAttachments?: readonly ChatAttachment[],
     expectedExecution?: ExecutionInfo,
-    imageIds?: readonly string[]
+    imageIds?: readonly string[],
+    checkpointTaskId?: string
   ) => boolean
   canRetry: (assistantId: string) => boolean
   retry: (assistantId: string) => boolean
@@ -157,6 +162,41 @@ export function useChatRequest({
   const activeRequest = useRef<ActiveRequest | null>(null)
   const retrySources = useRef(new Map<string, ChatRetrySource>())
   const subscribed = useRef(false)
+  const [resumable, setResumable] = useState<{
+    conversationId: string
+    task: ResumableAgentTask
+  } | null>(null)
+  const viewedConversation = useRef(conversationId)
+
+  // Passive metadata discovery performs no model/summary/title/approval work.
+  useEffect(() => {
+    let disposed = false
+    viewedConversation.current = conversationId
+    if (conversationId && window.api.getResumableAgentTask)
+      void window.api
+        .getResumableAgentTask(conversationId)
+        .then((task) => {
+          if (!disposed) setResumable(task ? { conversationId, task } : null)
+        })
+        .catch((cause) => {
+          if (!disposed) setError(cause instanceof Error ? cause.message : '读取任务续接信息失败')
+        })
+    return () => {
+      disposed = true
+    }
+  }, [conversationId])
+
+  async function refreshResumable(targetId: string): Promise<void> {
+    if (!window.api.getResumableAgentTask) return
+    try {
+      const task = await window.api.getResumableAgentTask(targetId)
+      if (viewedConversation.current === targetId)
+        setResumable(task ? { conversationId: targetId, task } : null)
+    } catch (cause) {
+      if (viewedConversation.current === targetId)
+        setError(cause instanceof Error ? cause.message : '读取任务续接信息失败')
+    }
+  }
 
   useEffect(() => {
     const receiveInput = (request: AgentUserInputRequest | null): void => {
@@ -559,12 +599,14 @@ export function useChatRequest({
       // Keep the original project and attachment fields; only the execution
       // information comes from the main-process resolver.
       const scope = toolScopeForAgentRequest(active.context)
-      const selected = selectToolContext(
-        active.sourceMessages,
-        active.sourceToolRuns,
-        active.context.mode,
-        scope
-      )
+      const selected = active.checkpointTaskId
+        ? { history: [], imageHistory: [] }
+        : selectToolContext(
+            active.sourceMessages,
+            active.sourceToolRuns,
+            active.context.mode,
+            scope
+          )
       active.history = selected.history
       if (selected.imageHistory.length)
         active.context = { ...active.context, imageHistory: selected.imageHistory }
@@ -586,13 +628,20 @@ export function useChatRequest({
         ]
       }))
       active.phase = 'running'
-      const result = await window.api.startAgentRequest(
-        active.requestId,
-        active.prompt,
-        active.history,
-        active.context,
-        active.taskId
-      )
+      const result = active.checkpointTaskId
+        ? await window.api.resumeAgentRequest(
+            active.requestId,
+            active.checkpointTaskId,
+            active.context,
+            active.taskId
+          )
+        : await window.api.startAgentRequest(
+            active.requestId,
+            active.prompt,
+            active.history,
+            active.context,
+            active.taskId
+          )
       if (activeRequest.current?.requestId !== active.requestId) return
       if (result.status === 'done') {
         finishToolTurn(active, 'complete', result.trace, result.items, result.answer)
@@ -623,6 +672,7 @@ export function useChatRequest({
         setPendingPlanQuestion(null)
         activeRequest.current = null
         finish('generating')
+        void refreshResumable(active.conversationId)
       }
     }
   }
@@ -638,7 +688,8 @@ export function useChatRequest({
     onAccepted?: (accepted: AcceptedChatRequest) => void,
     messageAttachments: readonly ChatAttachment[] = [],
     expectedExecution?: ExecutionInfo,
-    imageIds: readonly string[] = []
+    imageIds: readonly string[] = [],
+    checkpointTaskId?: string
   ): boolean {
     const frozenImageIds = [...imageIds]
     const question = frozenImageIds.length
@@ -706,9 +757,12 @@ export function useChatRequest({
       bytes: file.bytes,
       lines: file.lines
     }))
+    let nextRequestId = crypto.randomUUID()
+    while (sourceToolRuns.some((run) => run.requestId === nextRequestId))
+      nextRequestId = crypto.randomUUID()
     const active: ActiveRequest = {
       conversationId: targetConversationId,
-      requestId: crypto.randomUUID(),
+      requestId: nextRequestId,
       userId: crypto.randomUUID(),
       assistantId: crypto.randomUUID(),
       prompt: content,
@@ -731,6 +785,7 @@ export function useChatRequest({
       attachments,
       taskId: crypto.randomUUID(),
       startedAt: performance.now(),
+      ...(checkpointTaskId ? { checkpointTaskId } : {}),
       ...(frozenImageIds.length ? { imageIds: frozenImageIds } : {})
     }
     if (active.context.images)
@@ -786,6 +841,30 @@ export function useChatRequest({
     })
     void run(active)
     return true
+  }
+
+  function resume(): boolean {
+    const source = resumable?.conversationId === conversationId ? resumable.task : null
+    if (!source || !conversationId || activeRequest.current || !operations.isIdle()) return false
+    if (source.requiresWorkspace && !workspace) {
+      setError('继续前请重新选择原工作区文件夹；保存的记录不会恢复目录授权。')
+      return false
+    }
+    // Fresh identities and current host scope; source messages remain intact.
+    return send(
+      source.prompt,
+      source.mode,
+      messages,
+      toolRuns,
+      conversationId,
+      projectSelection,
+      workspace,
+      undefined,
+      [],
+      undefined,
+      [],
+      source.taskId
+    )
   }
 
   function canRetry(assistantId: string): boolean {
@@ -865,6 +944,8 @@ export function useChatRequest({
     error,
     toolActivity,
     pendingPlanQuestion,
+    resumableTask: resumable?.conversationId === conversationId ? resumable.task : null,
+    resume,
     respondToPlanQuestion,
     send,
     canRetry,

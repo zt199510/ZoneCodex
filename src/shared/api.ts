@@ -45,6 +45,7 @@ import type {
   PermissionsState
 } from './execution'
 import type { AgentUserInputRequest, AgentUserInputResponse } from './agent-user-input'
+import type { ResumableAgentTask } from './agent-resume'
 
 // 正式聊天与 Agent 共用的流式文字增量事件。
 export type StreamDelta = AgentDelta
@@ -123,6 +124,13 @@ export interface AppAPI {
     requestId: string,
     prompt: string,
     history: ProtocolItem[],
+    context: AgentRequestContext,
+    taskId?: string
+  ) => Promise<AgentResult>
+  getResumableAgentTask: (conversationId: string) => Promise<ResumableAgentTask | null>
+  resumeAgentRequest: (
+    requestId: string,
+    checkpointTaskId: string,
     context: AgentRequestContext,
     taskId?: string
   ) => Promise<AgentResult>

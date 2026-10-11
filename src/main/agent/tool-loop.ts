@@ -63,8 +63,9 @@ export async function runToolLoop(
     onProgress(line)
   }
 
-  const raw: unknown[] = [...structuredClone(history), { role: 'user', content: prompt }]
-  const turnStart = history.length
+  const turnStart = contextOptions?.resumeTurnStart ?? history.length
+  const raw: unknown[] = [...structuredClone(history)]
+  if (turnStart === history.length) raw.push({ role: 'user', content: prompt })
   const context = new RequestContextManager(
     raw,
     turnStart,
@@ -78,6 +79,7 @@ export async function runToolLoop(
       item.type === 'function_call' && typeof item.call_id === 'string' ? [item.call_id] : []
     )
   )
+  await contextOptions?.onRawCheckpoint?.(structuredClone(raw) as ProtocolItem[])
   const messageSnapshots = new Map<string, { phase: AgentMessageEvent['phase']; text: string }>()
   const publishMessage = (
     round: number,
@@ -245,6 +247,11 @@ export async function runToolLoop(
       if (!answer.trim() || answer.length > 16000) throw new AgentError('缺少有效的最终回答')
       const items = parseProtocolTurn(raw.slice(turnStart), checkedScope, mode)
       if (!items) throw new AgentError('本轮协议历史不完整或超过保存上限')
+      await contextOptions?.onRawCheckpoint?.(
+        structuredClone(raw) as ProtocolItem[],
+        undefined,
+        true
+      )
       record('获得最终回答')
       return { answer, items }
     }
@@ -281,12 +288,13 @@ export async function runToolLoop(
       output,
       durationMs: Math.max(0, Math.round(performance.now() - startedAt))
     })
-    signal.throwIfAborted()
     // 展示步骤只保留工具名称；call_id 属于协议内部标识，不应出现在聊天记录中。
     record(`执行工具：${call.name}`)
     record(`工具结果已生成（${output.length} 字符）`)
     raw.push({ type: 'function_call_output', call_id: call.callId, output })
     context.checkRawTurn()
     context.completedToolGroup(groupStart)
+    await contextOptions?.onRawCheckpoint?.(structuredClone(raw) as ProtocolItem[])
+    signal.throwIfAborted()
   }
 }

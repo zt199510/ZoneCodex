@@ -12,6 +12,7 @@ import {
 import type { Conversation, ConversationLibrary } from '../../../../shared/conversation-library'
 import { useChatRequest, type ToolActivity, type PendingPlanQuestion } from '../chat/useChatRequest'
 import type { AgentUserInputResponse } from '../../../../shared/agent-user-input'
+import type { ResumableAgentTask } from '../../../../shared/agent-resume'
 import { useProjectSelection } from '../project/useProjectSelection'
 import { useImageSelection, type ImageSelectionController } from '../project/useImageSelection'
 import {
@@ -43,6 +44,8 @@ export type ConversationController = ConversationReviewController & {
   messages: ChatMessage[]
   canRetryMessage: (messageId: string) => boolean
   retryMessage: (messageId: string) => boolean | Promise<boolean>
+  resumableTask: ResumableAgentTask | null
+  resumeTask: () => boolean
   operation: Operation
   canEdit: boolean
   canSend: boolean
@@ -621,6 +624,12 @@ export function useConversation(): ConversationController {
     messages,
     canRetryMessage,
     retryMessage,
+    resumableTask: request.resumableTask,
+    resumeTask: () => {
+      if (!active || !canSubmit) return false
+      invalidateTitle(active.id)
+      return request.resume()
+    },
     operation: operations.operation,
     canNavigate,
     canChangeSettings,
