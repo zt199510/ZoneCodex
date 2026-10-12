@@ -23,7 +23,7 @@ async function ordinaryBytes(path, allowMissing = false) {
   return readFile(path)
 }
 
-/** Preflight every byte before writing; interrupted mixed original/patched states are recoverable. */
+/** Preflight every byte before writing; known original/previous/patched mixed states are recoverable. */
 export async function prepareNodePtyCleanup({
   projectRoot = resolve(scriptRoot, '..'),
   checkOnly = false
@@ -44,13 +44,26 @@ export async function prepareNodePtyCleanup({
   }
   const plan = []
   for (const [name, entry] of Object.entries(manifest.files)) {
-    if (!/^[A-Za-z_]+\.js$/.test(name) || !/^[a-f0-9]{64}$/.test(entry.patchedSha256)) {
+    if (
+      !/^[A-Za-z_]+\.js$/.test(name) ||
+      !/^[a-f0-9]{64}$/.test(entry.patchedSha256) ||
+      (entry.originalSha256 !== null && !/^[a-f0-9]{64}$/.test(entry.originalSha256)) ||
+      (entry.previousPatchedSha256 !== undefined &&
+        (!entry.resource ||
+          !/^[a-f0-9]{64}$/.test(entry.previousPatchedSha256) ||
+          entry.previousPatchedSha256 === entry.originalSha256 ||
+          entry.previousPatchedSha256 === entry.patchedSha256))
+    ) {
       throw new Error('Invalid node-pty cleanup file manifest')
     }
     const path = join(lib, name)
     const before = await ordinaryBytes(path, entry.originalSha256 === null)
     const beforeHash = before === null ? null : hash(before)
-    if (beforeHash !== entry.originalSha256 && beforeHash !== entry.patchedSha256) {
+    if (
+      beforeHash !== entry.originalSha256 &&
+      beforeHash !== entry.previousPatchedSha256 &&
+      beforeHash !== entry.patchedSha256
+    ) {
       throw new Error('Unknown node-pty bytes; refusing to patch ' + name + ' (' + beforeHash + ')')
     }
     let after
@@ -72,7 +85,12 @@ export async function prepareNodePtyCleanup({
       name,
       path,
       after,
-      state: beforeHash === entry.patchedSha256 ? 'patched' : 'original'
+      state:
+        beforeHash === entry.patchedSha256
+          ? 'patched'
+          : beforeHash === entry.previousPatchedSha256
+            ? 'previous'
+            : 'original'
     })
   }
   if (plan.length !== 5 || !plan.some((entry) => entry.name === 'zonecodexWindowsCleanup.js')) {
@@ -95,7 +113,7 @@ export async function prepareNodePtyCleanup({
     version: manifest.version,
     mode: checkOnly ? 'check' : 'prepare',
     files: Object.fromEntries(plan.map(({ name, state }) => [name, state])),
-    changed: checkOnly ? 0 : plan.filter((entry) => entry.state === 'original').length
+    changed: checkOnly ? 0 : plan.filter((entry) => entry.state !== 'patched').length
   }
 }
 

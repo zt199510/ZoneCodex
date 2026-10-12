@@ -7,11 +7,16 @@ const groups = {
   offline: [
     ['terminal-ipc', 'terminal-ipc-check.mjs'],
     ['isolation', 'isolation-check.mjs'],
+    ['terminal-host', 'terminal-host-check.mjs'],
     ['node-pty-cleanup', 'node-pty-cleanup-check.mjs']
   ],
   desktop: [
     ['desktop-development', 'desktop-check.mjs'],
     ['desktop-packaged', 'desktop-check.mjs', '--packaged']
+  ],
+  startup: [
+    ['startup-development', 'terminal-startup-check.mjs'],
+    ['startup-packaged', 'terminal-startup-check.mjs', '--packaged']
   ]
 }
 const [group = 'offline', ...args] = process.argv.slice(2)
@@ -21,6 +26,9 @@ if (group === 'list') {
   )
   console.log(
     'lesson59 desktop: actual existing development/Windows directory builds and real local PTY harmless commands; Agent business transport is synthetic and reported separately.'
+  )
+  console.log(
+    'lesson59 startup: actual normal, inspect-brk and VS Code NodeWorker waitForDebuggerOnStart startup in both development/directory builds; passive fixture never changes PTY/Worker/fork options, no model transport, real clicks/echo/ANSI colors/close and bounded failure evidence.'
   )
   console.log('Default npm test remains the lesson58 behavior-lock group.')
   for (const [name, entries] of Object.entries(groups))
@@ -69,9 +77,10 @@ if (group === 'list') {
     selection: selection ?? null,
     evidence,
     ordinaryNodeOnly: group === 'offline',
-    syntheticTransport: true,
+    syntheticTransport: group !== 'startup',
     realTransport: false,
-    nativePty: group === 'desktop',
+    nativePty: group === 'desktop' || group === 'startup',
+    testOverridesPTYWorkerForkArguments: false,
     defaultRegressionGroup: 'lesson58',
     runs
   }

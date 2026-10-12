@@ -26,6 +26,8 @@ class ConoutConnection {
     })
     const scriptPath = __dirname.replace('node_modules.asar', 'node_modules.asar.unpacked')
     this._worker = new Worker(join(scriptPath, 'worker/conoutSocketWorker.js'), {
+      // Electron may inherit inspector flags even when process.execArgv appears empty.
+      execArgv: [],
       workerData: { conoutPipeName }
     })
     this._worker.on('message', (value) => {

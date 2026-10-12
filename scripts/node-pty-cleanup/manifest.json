@@ -12,7 +12,8 @@
     },
     "windowsConoutConnection.js": {
       "originalSha256": "1440f70908fb1f55911ac8e936a1230f68a9c00c03096fcef6788eac6aad9d62",
-      "patchedSha256": "73d24fa18a6302df18b301b692365c90d6a5f1c8a7992fc70ad9c023a6277efa",
+      "previousPatchedSha256": "73d24fa18a6302df18b301b692365c90d6a5f1c8a7992fc70ad9c023a6277efa",
+      "patchedSha256": "feb471e8871aaee34362e6b28556015363037f7f21de3f7394dd505cc972e7c0",
       "resource": "windowsConoutConnection.cjs"
     },
     "conpty_console_list_agent.js": {
@@ -22,7 +23,8 @@
     },
     "zonecodexWindowsCleanup.js": {
       "originalSha256": null,
-      "patchedSha256": "7964ac530ff8f41ccf76c5d4e101403bede9f740942c9eeb9d1d956a81f12adc",
+      "previousPatchedSha256": "7964ac530ff8f41ccf76c5d4e101403bede9f740942c9eeb9d1d956a81f12adc",
+      "patchedSha256": "6830e1631055f9124fc60579bd0a7fd1951af78812de6b466fb75822b6cacf55",
       "resource": "zonecodexWindowsCleanup.cjs"
     }
   }

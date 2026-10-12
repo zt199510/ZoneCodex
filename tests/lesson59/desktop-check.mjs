@@ -32,8 +32,15 @@ const executable = path.join(
 const artifacts = [
   ...(packaged
     ? ['dist/win-unpacked/zonecodex.exe', 'dist/win-unpacked/resources/app.asar']
-    : ['out/main/index.js', 'out/preload/index.js', 'out/renderer/index.html']),
-  'scripts/node-pty-cleanup/manifest.json'
+    : [
+        'out/main/index.js',
+        'out/main/terminal-host.js',
+        'out/preload/index.js',
+        'out/renderer/index.html'
+      ]),
+  'scripts/node-pty-cleanup/manifest.json',
+  'tests/lesson59/desktop-check.mjs',
+  'tests/lesson59/desktop-fixture.cjs'
 ]
 const report = {
   pass: false,
@@ -47,18 +54,23 @@ const report = {
   actualElectron: true,
   actualPTY: true,
   actualDiskStorage: true,
+  observerMovedToUtility: true,
+  testOverridesUtilityForkArguments: false,
+  nativeShells: [],
+  utilityHosts: [],
   processes: [],
   checks: [],
   failures: [],
   uncovered: ['Real network model not invoked.', 'Non-Windows terminals are not supported.'],
   notCovered: [
     'JavaScript exit callbacks and process/thread retirement do not prove every HPCON and native pipe handle has been released. No native C++ instrumentation or rebuild is performed.',
-    'Very short start/close cycles may create and retire ConPTY hosts between bounded CIM observations; observed host retirement is not a census of every native host.'
+    'Very short start/close cycles may create and retire shells/ConPTY hosts between bounded CIM observations; unobserved shell PIDs are recorded as null, with utility messages/actual exit observed separately.',
+    'The main fixture cannot observe utility-internal node-pty/native module loading, conout Workers or process-list helpers. Empty legacy arrays are not acceptance evidence.'
   ],
   conptyHosts: {
     provider: 'read-only Win32_Process CIM',
     ownershipRule:
-      'conhost.exe absent from pre-launch/pre-PTY baselines with ParentProcessId equal to this app PID and CreationDate no earlier than this app instance',
+      'conhost.exe absent from pre-launch/pre-PTY baselines with ParentProcessId equal to an attributed terminal utility PID and CreationDate no earlier than that utility instance',
     baseline: [],
     baselineAvailable: false,
     appIdentity: null,
@@ -69,7 +81,16 @@ const report = {
 }
 let main, renderer, evaluate, child, log, beforeArtifacts
 let windowDestroyed = false
+const shellBySession = new Map()
+const augmentAudit = (observed) => ({
+  ...observed,
+  terminals: observed.terminals.map((terminal) => ({
+    ...terminal,
+    pid: shellBySession.get(terminal.sessionId)?.pid ?? null
+  }))
+})
 const alive = (pid) => {
+  if (!Number.isSafeInteger(pid) || pid <= 0) return false
   try {
     process.kill(pid, 0)
     return true
@@ -79,7 +100,7 @@ const alive = (pid) => {
 }
 async function queryNativeProcesses(label) {
   const appPid = child?.pid ?? 0
-  const command = `Get-CimInstance Win32_Process -Filter "Name = 'conhost.exe' OR ProcessId = ${appPid}" | Select-Object @{Name='pid';Expression={[int]$_.ProcessId}}, @{Name='parentPid';Expression={[int]$_.ParentProcessId}}, @{Name='name';Expression={$_.Name}}, @{Name='createdAtUTC';Expression={$_.CreationDate.ToUniversalTime().ToString('o')}} | ConvertTo-Json -Compress`
+  const command = `Get-CimInstance Win32_Process -Filter "Name = 'conhost.exe' OR Name = 'powershell.exe' OR Name = 'cmd.exe' OR Name = 'electron.exe' OR Name = 'zonecodex.exe' OR ProcessId = ${appPid}" | Select-Object @{Name='pid';Expression={[int]$_.ProcessId}}, @{Name='parentPid';Expression={[int]$_.ParentProcessId}}, @{Name='name';Expression={$_.Name}}, @{Name='createdAtUTC';Expression={$_.CreationDate.ToUniversalTime().ToString('o')}} | ConvertTo-Json -Compress`
   try {
     const queried = spawn(
       path.join(
@@ -135,7 +156,7 @@ async function queryNativeProcesses(label) {
     return null
   }
 }
-async function observeNativeHosts(label) {
+async function observeNativeHosts(label, terminal) {
   const records = await queryNativeProcesses(label)
   if (!records) return []
   const hosts = report.conptyHosts
@@ -149,11 +170,44 @@ async function observeNativeHosts(label) {
     !Number.isFinite(Date.parse(hosts.appIdentity.createdAtUTC))
   )
     return []
+  if (terminal) {
+    const utility = records.find(
+      (record) =>
+        record.pid === terminal.hostPid &&
+        record.parentPid === child.pid &&
+        Date.parse(record.createdAtUTC) >= Date.parse(hosts.appIdentity.createdAtUTC) &&
+        !hosts.baseline.some(
+          (before) => before.pid === record.pid && before.createdAtUTC === record.createdAtUTC
+        )
+    )
+    if (utility && !report.utilityHosts.some((before) => before.pid === utility.pid))
+      report.utilityHosts.push({ ...utility, sessionId: terminal.sessionId })
+    if (utility) {
+      const shells = records.filter(
+        (record) =>
+          record.parentPid === utility.pid &&
+          record.name.toLowerCase() === path.win32.basename(terminal.program).toLowerCase() &&
+          Date.parse(record.createdAtUTC) >= Date.parse(utility.createdAtUTC) &&
+          !hosts.baseline.some(
+            (before) => before.pid === record.pid && before.createdAtUTC === record.createdAtUTC
+          )
+      )
+      assert.ok(shells.length <= 1, 'At most one externally attributed shell per utility')
+      if (shells[0] && !shellBySession.has(terminal.sessionId)) {
+        const shell = { ...shells[0], sessionId: terminal.sessionId, hostPid: utility.pid }
+        shellBySession.set(terminal.sessionId, shell)
+        report.nativeShells.push(shell)
+      }
+    }
+  }
   const candidates = records.filter(
     (record) =>
       record.name === 'conhost.exe' &&
-      record.parentPid === child.pid &&
-      Date.parse(record.createdAtUTC) >= Date.parse(hosts.appIdentity.createdAtUTC) &&
+      report.utilityHosts.some(
+        (utility) =>
+          record.parentPid === utility.pid &&
+          Date.parse(record.createdAtUTC) >= Date.parse(utility.createdAtUTC)
+      ) &&
       !hosts.baseline.some(
         (before) => before.pid === record.pid && before.createdAtUTC === record.createdAtUTC
       )
@@ -240,6 +294,19 @@ async function identify() {
         identities[name],
         'Packaged cleanup JS matches inspected dependency: ' + name
       )
+      identities['app.asar:' + name] = internal
+    }
+    for (const name of ['out/main/index.js', 'out/main/terminal-host.js']) {
+      const current = hash(await fs.readFile(path.join(root, name)))
+      const internal = hash(
+        extractFile(path.join(root, 'dist/win-unpacked/resources/app.asar'), path.normalize(name))
+      )
+      assert.equal(
+        internal,
+        current,
+        'Packaged main/terminal utility entries match current development artifacts'
+      )
+      identities[name] = current
       identities['app.asar:' + name] = internal
     }
   }
@@ -506,7 +573,48 @@ try {
       throw Error(result.exceptionDetails.exception?.description ?? 'Renderer observation failed')
     return result.result.value
   }
-  const audit = () => evaluate('window.electron.ipcRenderer.invoke("lesson59:observation")')
+  const audit = async () =>
+    augmentAudit(await evaluate('window.electron.ipcRenderer.invoke("lesson59:observation")'))
+  const terminalFor = (observed, sessionId) => {
+    const terminal = observed.terminals.find((item) => item.sessionId === sessionId)
+    assert.ok(terminal, 'Observed utility init belongs to the actual terminal session')
+    return terminal
+  }
+  const lastSession = (observed) =>
+    observed.ipc.findLast((item) => item.channel === 'terminal:start')?.args[0]
+  const observeTerminal = async (sessionId, requireShell = true) => {
+    const terminal = await until(async () => {
+      const observed = await audit()
+      const terminal = observed.terminals.find((item) => item.sessionId === sessionId)
+      return terminal?.spawned && Number.isSafeInteger(terminal.hostPid) ? terminal : null
+    }, 'real terminal utility spawn/init')
+    assert.deepEqual(terminal.forkOptions.execArgv, [])
+    assert.deepEqual(terminal.forkOptions.debuggerEnvironmentKeys, [])
+    assert.equal(terminal.requests.filter((item) => item.message.type === 'init').length, 1)
+    await observeNativeHosts('live terminal utility ' + terminal.hostPid, terminal)
+    const observed = terminalFor(await audit(), sessionId)
+    if (requireShell) {
+      assert.ok(observed.ready && observed.nativeExit === null && observed.hostExit === null)
+      assert.ok(alive(observed.hostPid), 'Actual utility PID is alive')
+      assert.ok(
+        Number.isSafeInteger(observed.pid) && alive(observed.pid),
+        'CIM attributes the real shell to the current utility'
+      )
+    }
+    return observed
+  }
+  const allHostsRetired = (observed) =>
+    observed.terminals.length > 0 &&
+    observed.terminals.every(
+      (terminal) =>
+        Number.isSafeInteger(terminal.hostPid) &&
+        terminal.nativeExit !== null &&
+        terminal.hostExit?.exitCode === 0 &&
+        terminal.errors.length === 0 &&
+        terminal.hostKillCalls === 0 &&
+        !alive(terminal.hostPid) &&
+        (terminal.pid === null || !alive(terminal.pid))
+    )
   const click = async (selector) => {
     await evaluate('document.querySelector(' + JSON.stringify(selector) + ').click()')
     await delay(100)
@@ -540,9 +648,8 @@ try {
         ),
       'real shell start'
     )
-    const terminal = (await audit()).terminals.at(-1)
-    await observeNativeHosts('live shell ' + terminal.pid)
-    return terminal
+    const observed = await audit()
+    return observeTerminal(lastSession(observed))
   }
   const input = async (command) => {
     await evaluate('document.querySelector("#terminal-panel .xterm-helper-textarea").focus()')
@@ -564,19 +671,17 @@ try {
   const echoMarker = (suffix = '') => "echo ('zonecodex-terminal-' + '59-" + uuid + suffix + "')"
   const echoFor = (shell, suffix = '') =>
     shell === 'powershell' ? echoMarker(suffix) : 'echo zonecodex-terminal-^59-' + uuid + suffix
-  const retireShell = async (pid, label) => {
+  const retireShell = async (current, label) => {
     const retired = await until(async () => {
       const observed = await audit()
-      const terminal = observed.terminals.find((item) => item.pid === pid)
+      const terminal = observed.terminals.find((item) => item.sessionId === current.sessionId)
       return terminal &&
-        terminal.exit !== null &&
-        !alive(pid) &&
-        observed.workers.every(
-          (worker) => worker.online && worker.exitCode !== null && worker.errors.length === 0
-        ) &&
-        observed.helpers.every(
-          (helper) => helper.exitCode === 0 && !alive(helper.pid) && helper.errors.length === 0
-        )
+        terminal.nativeExit !== null &&
+        terminal.hostExit?.exitCode === 0 &&
+        terminal.errors.length === 0 &&
+        terminal.hostKillCalls === 0 &&
+        !alive(terminal.hostPid) &&
+        (terminal.pid === null || !alive(terminal.pid))
         ? observed
         : null
     }, label)
@@ -623,7 +728,12 @@ try {
     assert.ok(
       cancelled.ipc.some((item) => item.channel === 'window:finish-close' && item.args[1] === false)
     )
-    assert.equal(cancelled.terminals[0].killCalls, 0)
+    assert.equal(cancelled.terminals[0].closeMessages, 0)
+    assert.equal(cancelled.terminals[0].hostPid, guarded.hostPid)
+    assert.equal(cancelled.terminals[0].sessionId, guarded.sessionId)
+    assert.equal(cancelled.terminals[0].nativeExit, null)
+    assert.equal(cancelled.terminals[0].hostExit, null)
+    assert.ok(alive(guarded.hostPid))
     assert.ok(alive(guarded.pid))
     await input(echoMarker('-guard-after-cancel'))
     await until(
@@ -655,27 +765,16 @@ try {
     )
     assert.equal(child.exitCode, 0)
     await observeHostRetirement('confirmed Save and close normal application exit')
-    const normalAudit = JSON.parse(await fs.readFile(auditFile, 'utf8'))
-    assert.equal(normalAudit.workers.length, normalAudit.terminals.length)
-    assert.ok(normalAudit.nativeModules.length > 0 && normalAudit.ptyModulePaths.length > 0)
+    const normalAudit = augmentAudit(JSON.parse(await fs.readFile(auditFile, 'utf8')))
+    assert.equal(normalAudit.observerMovedToUtility, true)
+    assert.equal(normalAudit.testOverridesUtilityForkArguments, false)
+    assert.ok(normalAudit.unobservedInternalPTY.length > 0)
     assert.ok(
       normalAudit.ipc.some(
         (item) => item.channel === 'window:finish-close' && item.args[1] === true
       )
     )
-    assert.ok(
-      normalAudit.terminals.every((terminal) => terminal.exit !== null && !alive(terminal.pid))
-    )
-    assert.ok(
-      normalAudit.workers.every(
-        (worker) => worker.online && worker.exitCode !== null && worker.errors.length === 0
-      )
-    )
-    assert.ok(
-      normalAudit.helpers.every(
-        (helper) => helper.exitCode === 0 && !alive(helper.pid) && helper.errors.length === 0
-      )
-    )
+    assert.ok(allHostsRetired(normalAudit))
     assert.ok(normalAudit.quitEvents.some((event) => event.type === 'quit' && event.exitCode === 0))
     assert.deepEqual(
       Object.fromEntries(
@@ -687,23 +786,18 @@ try {
       { main: 2, summary: 0, title: 0, approval: 0 }
     )
     assert.equal(JSON.stringify(normalAudit.requests).includes(marker), false)
-    assert.ok(
-      normalAudit.quitEvents
-        .filter((event) => event.type === 'will-quit')
-        .every((event) => event.unsettledWorkers === 0)
-    )
+    const willQuit = normalAudit.quitEvents.filter((event) => event.type === 'will-quit')
+    assert.ok(willQuit.length > 0 && willQuit.every((event) => event.unsettledTerminalHosts === 0))
     await noTerminalStorage(
       'confirmed-close stage PTY data absent from actual raw/checkpoint storage'
     )
     report.checks.push({
-      name: 'confirmed Save and close reaches normal application quit with actual shell/helper/worker retirement',
+      name: 'confirmed Save and close reaches normal application quit with native exit messages, actual utility exit and attributed shell retirement',
       pass: true,
       appPid: child.pid,
       shellPid: guarded.pid,
-      helpers: normalAudit.helpers,
-      workers: normalAudit.workers,
-      nativeModules: normalAudit.nativeModules,
-      ptyModulePaths: normalAudit.ptyModulePaths,
+      terminalHosts: normalAudit.terminals,
+      internalPTYNotObserved: normalAudit.unobservedInternalPTY,
       quitEvents: normalAudit.quitEvents
     })
   } else {
@@ -811,7 +905,10 @@ try {
     counts.start = terminalOnly.ipc.filter((item) => item.channel === 'agent:start').length
     counts.resume = terminalOnly.ipc.filter((item) => item.channel === 'agent:resume').length
     assert.deepEqual(counts, { main: 0, summary: 0, title: 0, approval: 0, start: 0, resume: 0 })
-    assert.equal(terminalOnly.terminals[0].killCalls, 0)
+    assert.equal(terminalOnly.terminals[0].closeMessages, 0)
+    assert.equal(terminalOnly.terminals[0].hostPid, first.hostPid)
+    assert.equal(terminalOnly.terminals[0].nativeExit, null)
+    assert.equal(terminalOnly.terminals[0].hostExit, null)
     const passiveSnapshot = (await evaluate('window.api.loadConversation()')).snapshot
     assert.deepEqual(passiveSnapshot.conversations, fixture.conversations)
     assert.equal(await evaluate('window.api.getPendingExecutionApproval()'), null)
@@ -857,7 +954,11 @@ try {
     await idle()
     const stopped = await audit()
     assert.ok(stopped.requests[2].cancelled)
-    assert.equal(stopped.terminals[0].killCalls, 0)
+    assert.equal(stopped.terminals[0].closeMessages, 0)
+    assert.equal(stopped.terminals[0].hostPid, first.hostPid)
+    assert.equal(stopped.terminals[0].nativeExit, null)
+    assert.equal(stopped.terminals[0].hostExit, null)
+    assert.ok(alive(first.hostPid))
     assert.ok(alive(first.pid), 'Stopping Agent preserves real user shell')
     assert.ok(
       stopped.requests.every((request) =>
@@ -878,7 +979,7 @@ try {
       shellPid: first.pid
     })
     await click('#terminal-panel-close')
-    await retireShell(first.pid, 'panel close real shell/helper/worker completion')
+    await retireShell(first, 'panel close native message/utility exit and shell retirement')
     assert.equal(await evaluate('!!document.querySelector("#terminal-panel")'), false)
     const quickShells = []
     for (let round = 0; round < 4; round++) {
@@ -887,9 +988,13 @@ try {
         '[...document.querySelectorAll("#terminal-panel button")].find(n=>n.textContent==="启动终端").click();document.querySelector("#terminal-panel-close").click()'
       )
       await until(async () => (await audit()).terminals.length >= round + 2, 'rapid start observed')
-      const quick = (await audit()).terminals.at(-1)
-      const retired = await retireShell(quick.pid, 'rapid toggle shell/helper/worker completion')
-      quickShells.push(retired.terminals.find((item) => item.pid === quick.pid))
+      const quickAudit = await audit()
+      const quick = await observeTerminal(lastSession(quickAudit), false)
+      const retired = await retireShell(
+        quick,
+        'rapid toggle native message/utility actual completion'
+      )
+      quickShells.push(terminalFor(retired, quick.sessionId))
       await until(
         () => evaluate('!document.querySelector("#terminal-panel")'),
         'rapid close panel completion'
@@ -898,11 +1003,11 @@ try {
     assert.ok(
       quickShells.some(
         (terminal) =>
-          !terminal.outputBeforeKill.includes('PS ') && !terminal.outputBeforeKill.includes('>')
+          !terminal.outputBeforeClose.includes('PS ') && !terminal.outputBeforeClose.includes('>')
       ),
       'At least one rapid close occurs before the first shell prompt'
     )
-    assert.ok(quickShells.every((terminal) => terminal.killCalls === 1))
+    assert.ok(quickShells.every((terminal) => terminal.closeMessages === 1))
     await open()
     const repeated = await start()
     const repeatedResults = await evaluate(
@@ -913,22 +1018,27 @@ try {
         ')])'
     )
     assert.deepEqual(repeatedResults, [{ ok: true }, { ok: true }])
-    const afterRepeated = await retireShell(repeated.pid, 'same-ID concurrent close completion')
-    assert.equal(afterRepeated.terminals.find((item) => item.pid === repeated.pid).killCalls, 1)
+    const afterRepeated = await retireShell(repeated, 'same-ID concurrent close completion')
+    assert.equal(terminalFor(afterRepeated, repeated.sessionId).closeMessages, 1)
     await click('#terminal-panel-close')
     await until(
       () => evaluate('!document.querySelector("#terminal-panel")'),
       'closed same-ID panel removed'
     )
     report.checks.push({
-      name: 'four rapid closes include before-prompt close; concurrent repeated same-ID close confirms actual completion with only one kill',
+      name: 'four rapid closes include before-prompt close; concurrent same-ID close confirms native message and actual utility completion with one host close request',
       pass: true,
-      rapid: quickShells.map(({ pid, killCalls, outputBeforeKill, exit }) => ({
-        pid,
-        killCalls,
-        outputBeforeKill,
-        exit
-      })),
+      rapid: quickShells.map(
+        ({ pid, hostPid, closeMessages, outputBeforeClose, nativeExit, hostExit }) => ({
+          pid,
+          shellPidObserved: pid !== null,
+          hostPid,
+          closeMessages,
+          outputBeforeClose,
+          nativeExit,
+          hostExit
+        })
+      ),
       repeated: { pid: repeated.pid, sessionId: repeated.sessionId, results: repeatedResults }
     })
     const naturalShells = []
@@ -942,7 +1052,7 @@ try {
       const suffix = '-natural-' + shell
       await input(echoFor(shell, suffix))
       await until(
-        async () => (await audit()).terminals.at(-1).output.includes(marker + suffix),
+        async () => terminalFor(await audit(), natural.sessionId).output.includes(marker + suffix),
         shell + ' actual echo before natural exit'
       )
       await until(
@@ -956,12 +1066,12 @@ try {
       )
       await input('exit')
       const retired = await retireShell(
-        natural.pid,
-        shell + ' natural shell/helper/worker completion'
+        natural,
+        shell + ' natural native message/utility completion and attributed shell retirement'
       )
-      const terminal = retired.terminals.find((item) => item.pid === natural.pid)
-      assert.equal(terminal.killCalls, 0)
-      assert.equal(terminal.exit.exitCode, 0)
+      const terminal = terminalFor(retired, natural.sessionId)
+      assert.equal(terminal.closeMessages, 0)
+      assert.equal(terminal.nativeExit.exitCode, 0)
       await until(
         () =>
           evaluate(
@@ -982,14 +1092,18 @@ try {
       'powershell'
     )
     report.checks.push({
-      name: 'real PowerShell and cmd echo and natural exit retire their worker without kill; renderer shows exit code zero',
+      name: 'real PowerShell and cmd echo and natural exit retire shell and utility without a close request; renderer shows exit code zero',
       pass: true,
-      shells: naturalShells.map(({ pid, program, killCalls, exit }) => ({
-        pid,
-        program,
-        killCalls,
-        exit
-      }))
+      shells: naturalShells.map(
+        ({ pid, hostPid, program, closeMessages, nativeExit, hostExit }) => ({
+          pid,
+          hostPid,
+          program,
+          closeMessages,
+          nativeExit,
+          hostExit
+        })
+      )
     })
     const familyScript = path.join(evidence, 'owned-family.cjs')
     await fs.writeFile(
@@ -1030,15 +1144,15 @@ setInterval(() => process.stdout.write(${JSON.stringify(marker + '-family-')} + 
     assert.equal(family[0].ppid, familyShell.pid)
     assert.equal(family[1].ppid, family[0].pid)
     await until(
-      async () => (await audit()).terminals.at(-1).output.includes(marker + '-family-grandchild-'),
+      async () =>
+        terminalFor(await audit(), familyShell.sessionId).output.includes(
+          marker + '-family-grandchild-'
+        ),
       'continuous attached grandchild output'
     )
     await screenshot('attached-child-grandchild-output')
     await click('#terminal-panel-close')
-    await retireShell(
-      familyShell.pid,
-      'shell and helper/worker completion with attached descendants'
-    )
+    await retireShell(familyShell, 'shell and utility completion with attached descendants')
     await until(
       () => family.every((record) => !alive(record.pid)),
       'actual attached child and grandchild retired'
@@ -1073,12 +1187,13 @@ setInterval(() => process.stdout.write(${JSON.stringify(marker + '-family-')} + 
     )
     assert.ok(faultError.length > 0 && faultError.length <= 300)
     assert.ok(await evaluate('!!document.querySelector("#terminal-panel")'))
-    const uncertain = (await audit()).terminals.at(-1)
+    const uncertainAudit = await audit()
+    const uncertain = await observeTerminal(lastSession(uncertainAudit))
     assert.ok(
       alive(uncertain.pid),
       'Real PTY remains alive after failed startup reply and first close'
     )
-    assert.equal(uncertain.killCalls, 0)
+    assert.equal(uncertain.closeMessages, 0)
     await screenshot('synthetic-startup-cleanup-failure')
     await click('#terminal-panel-close')
     await until(
@@ -1095,8 +1210,8 @@ setInterval(() => process.stdout.write(${JSON.stringify(marker + '-family-')} + 
     assert.ok(faultCloses.length >= 2)
     assert.ok(faultCloses.every((item) => item.args[0] === faultStart.args[0]))
     assert.equal(afterFault.terminals.length, beforeFault.terminals.length + 1)
-    await until(() => !alive(uncertain.pid), 'same-ID retry kills real uncertain shell')
-    assert.equal(afterFault.terminals.at(-1).killCalls, 1)
+    await retireShell(uncertain, 'same-ID retry retires real uncertain utility and shell')
+    assert.equal(terminalFor(afterFault, uncertain.sessionId).closeMessages, 1)
     assert.equal(afterFault.requests.length, beforeFault.requests.length)
     report.checks.push({
       name: 'synthetic startup response rejection and first close failure retain same session ID, disable restart, bound error and allow successful close retry',
@@ -1113,7 +1228,7 @@ setInterval(() => process.stdout.write(${JSON.stringify(marker + '-family-')} + 
     assert.ok(alive(last.pid))
     await input(echoMarker('-window'))
     await until(
-      async () => (await audit()).terminals.at(-1).output.includes(marker + '-window'),
+      async () => terminalFor(await audit(), last.sessionId).output.includes(marker + '-window'),
       'window-close shell marker'
     )
     await noTerminalStorage(
@@ -1131,32 +1246,24 @@ setInterval(() => process.stdout.write(${JSON.stringify(marker + '-family-')} + 
     windowDestroyed = true
     const finalAudit = await until(
       async () => {
-        const observed = JSON.parse(await fs.readFile(auditFile, 'utf8'))
-        return observed.terminals.every(
-          (terminal) => terminal.exit !== null && !alive(terminal.pid)
-        ) &&
-          observed.workers.every(
-            (worker) => worker.online && worker.exitCode !== null && worker.errors.length === 0
-          ) &&
-          observed.helpers.every(
-            (helper) => helper.exitCode === 0 && !alive(helper.pid) && helper.errors.length === 0
-          )
-          ? observed
-          : null
+        const observed = augmentAudit(JSON.parse(await fs.readFile(auditFile, 'utf8')))
+        return allHostsRetired(observed) ? observed : null
       },
-      'window destruction actual shell/helper/worker completion',
+      'window destruction actual utility/native exit message and shell retirement',
       30000,
       true
     )
     assert.ok(
       finalAudit.terminals.every(
         (terminal) =>
-          terminal.killCalls === (naturalShells.some((item) => item.pid === terminal.pid) ? 0 : 1)
+          terminal.closeMessages ===
+          (naturalShells.some((item) => item.pid === terminal.pid) ? 0 : 1)
       )
     )
-    assert.equal(finalAudit.workers.length, finalAudit.terminals.length)
+    assert.equal(finalAudit.observerMovedToUtility, true)
+    assert.equal(finalAudit.testOverridesUtilityForkArguments, false)
+    assert.ok(finalAudit.unobservedInternalPTY.length > 0)
     await observeHostRetirement('real BrowserWindow.destroy completion')
-    assert.ok(finalAudit.nativeModules.length > 0 && finalAudit.ptyModulePaths.length > 0)
     assert.deepEqual(
       Object.fromEntries(
         ['main', 'summary', 'title', 'approval'].map((category) => [
@@ -1171,17 +1278,24 @@ setInterval(() => process.stdout.write(${JSON.stringify(marker + '-family-')} + 
     assert.equal(finalAudit.ipc.filter((item) => item.channel === 'agent:resume').length, 0)
     assert.equal(JSON.stringify(finalAudit.requests).includes(marker), false)
     report.checks.push({
-      name: 'panel close, natural exit, repeated close, descendants and real BrowserWindow.destroy retire all actual shell PIDs',
+      name: 'panel close, natural exit, repeated close, descendants and real BrowserWindow.destroy retire all utility hosts and externally attributed shell PIDs',
       pass: true,
-      shells: finalAudit.terminals.map(({ pid, killCalls, exit }) => ({ pid, killCalls, exit }))
+      shells: finalAudit.terminals.map(
+        ({ pid, hostPid, sessionId, closeMessages, nativeExit, hostExit }) => ({
+          pid,
+          hostPid,
+          sessionId,
+          closeMessages,
+          nativeExit,
+          hostExit
+        })
+      )
     })
     report.checks.push({
-      name: 'actual node-pty process-list helpers and conout workers retired before application quit',
+      name: 'every real terminal utility reports native exit and actual process exit; utility-internal Worker/helper/module observation remains uncovered',
       pass: true,
-      helpers: finalAudit.helpers,
-      workers: finalAudit.workers,
-      nativeModules: finalAudit.nativeModules,
-      ptyModulePaths: finalAudit.ptyModulePaths
+      terminalHosts: finalAudit.terminals,
+      internalPTYNotObserved: finalAudit.unobservedInternalPTY
     })
   }
   assert.deepEqual(await identify(), beforeArtifacts)
@@ -1228,7 +1342,7 @@ setInterval(() => process.stdout.write(${JSON.stringify(marker + '-family-')} + 
     report.nativeDiagnostics = {
       attachConsoleFailures: (logged.match(/AttachConsole failed/g) ?? []).length,
       explanation:
-        'Full application stdout and stderr retained. The patched lifecycle must retire shell, process-list helper and conout worker; no AttachConsole failure is accepted.'
+        'Full application/forwarded utility stderr retained. Shell PID attribution, native exit messages and utility actual exits are observed; utility-internal Worker/helper/module loading is not directly observed. No AttachConsole failure is accepted.'
     }
   }
   if (report.pass) {
@@ -1311,7 +1425,7 @@ setInterval(() => process.stdout.write(${JSON.stringify(marker + '-family-')} + 
   await fs.mkdir(evidence, { recursive: true })
   if (report.conptyHosts.owned.length === 0)
     report.notCovered.push(
-      'No ConPTY conhost.exe instance could be attributed by the strict app PID and CreationDate rule; no arbitrary system conhost is treated as owned.'
+      'No ConPTY conhost.exe instance could be attributed by the strict terminal utility PID and CreationDate rule; no arbitrary system conhost is treated as owned.'
     )
   if (report.conptyHosts.unavailable.length > 0)
     report.notCovered.push(

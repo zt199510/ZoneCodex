@@ -2,93 +2,7 @@
 function install(config) {
   const require = process.getBuiltinModule('module').createRequire(config.root + '/package.json')
   const fs = require('node:fs')
-  const crypto = require('node:crypto')
-  const Module = require('node:module')
-  const workerThreads = require('node:worker_threads')
-  const childProcess = require('node:child_process')
-  const { app, BrowserWindow, ipcMain } = require('electron')
-  // The inspector is a test bootstrap only. A paused ConPTY pipe worker deadlocks spawn.
-  const withoutInspector = (options = {}) => ({
-    ...options,
-    execArgv: (options.execArgv ?? process.execArgv).filter(
-      (argument) => !argument.startsWith('--inspect')
-    )
-  })
-  const Worker = workerThreads.Worker
-  workerThreads.Worker = class extends Worker {
-    constructor(filename, options = {}) {
-      super(
-        filename,
-        String(filename)
-          .replaceAll('\\', '/')
-          .includes('/node-pty/lib/worker/conoutSocketWorker.js')
-          ? withoutInspector(options)
-          : options
-      )
-      const owned = String(filename)
-        .replaceAll('\\', '/')
-        .includes('/node-pty/lib/worker/conoutSocketWorker.js')
-      if (owned) {
-        const record = {
-          filename: String(filename),
-          threadId: this.threadId,
-          online: false,
-          exitCode: null,
-          errors: []
-        }
-        audit.workers.push(record)
-        save()
-        this.once('online', () => {
-          record.online = true
-          record.onlineAtUTC = new Date().toISOString()
-          save()
-        })
-        this.once('exit', (exitCode) => {
-          record.exitCode = exitCode
-          record.exitAtUTC = new Date().toISOString()
-          save()
-        })
-        this.on('error', (error) => {
-          record.errors.push(error.message)
-          save()
-        })
-      }
-    }
-  }
-  const fork = childProcess.fork
-  childProcess.fork = (filename, args = [], options = {}) => {
-    const owned = String(filename)
-      .replaceAll('\\', '/')
-      .includes('/node-pty/lib/conpty_console_list_agent')
-    const child = fork(filename, args, owned ? withoutInspector(options) : options)
-    if (owned) {
-      const record = {
-        pid: child.pid,
-        args,
-        exitCode: null,
-        signal: null,
-        messages: [],
-        errors: []
-      }
-      audit.helpers.push(record)
-      save()
-      child.once('exit', (exitCode, signal) => {
-        record.exitCode = exitCode
-        record.signal = signal
-        record.exitAtUTC = new Date().toISOString()
-        save()
-      })
-      child.on('message', (message) => {
-        record.messages.push(message)
-        save()
-      })
-      child.on('error', (error) => {
-        record.errors.push(error.message)
-        save()
-      })
-    }
-    return child
-  }
+  const { app, BrowserWindow, ipcMain, utilityProcess } = require('electron')
   app.setPath('userData', config.userData)
   process.env.MODEL_ENDPOINT = 'https://lesson59-fixture.invalid/responses'
   process.env.MODEL_NAME = 'lesson59-synthetic'
@@ -97,7 +11,11 @@ function install(config) {
     pid: process.pid,
     realTransport: false,
     actualPTY: true,
-    debuggerInheritanceRemoved: true,
+    debuggerInheritanceRemoved: false,
+    testOverridesPTYWorkerForkArguments: false,
+    testOverridesUtilityForkArguments: false,
+    observerMovedToUtility: true,
+    unobservedInternalPTY: ['node-pty spawn/native module', 'conout Worker', 'process-list helper'],
     requests: [],
     ipc: [],
     events: [],
@@ -111,73 +29,109 @@ function install(config) {
   }
   let syntheticStartFailure = false
   let syntheticCloseFailures = 0
-  const save = () => fs.writeFileSync(config.auditFile, JSON.stringify(audit, null, 2))
-  const load = Module._load
-  // Observe the actual packaged or development node-pty module, never replace its child.
-  Module._load = function (name, parent, isMain) {
-    const exported = load.call(this, name, parent, isMain)
-    if (/[/\\]conpty\.node$/.test(String(name))) {
-      const resolved = Module._resolveFilename(name, parent)
-      if (!audit.nativeModules.some((item) => item.resolved === resolved)) {
-        audit.nativeModules.push({
-          resolved,
-          sha256: crypto.createHash('sha256').update(fs.readFileSync(resolved)).digest('hex')
-        })
-        save()
-      }
+  const save = () => {
+    const temporary = config.auditFile + '.tmp'
+    fs.writeFileSync(temporary, JSON.stringify(audit, null, 2))
+    fs.renameSync(temporary, config.auditFile)
+  }
+  const fork = utilityProcess.fork
+  // Observe the real utility host; delegate its original filename/args/options unchanged.
+  utilityProcess.fork = function (...values) {
+    const child = fork.apply(utilityProcess, values)
+    if (!/[/\\]terminal-host\.js$/.test(String(values[0]))) return child
+    const options = values[2] ?? {}
+    const record = {
+      filename: String(values[0]),
+      hostPid: child.pid ?? null,
+      forkArgs: values[1],
+      forkOptions: {
+        cwd: options.cwd,
+        execArgv: options.execArgv,
+        serviceName: options.serviceName,
+        debuggerEnvironmentKeys: Object.keys(options.env ?? {}).filter((name) =>
+          /^(NODE_OPTIONS|VSCODE_INSPECTOR_OPTIONS|ELECTRON_RUN_AS_NODE|V8_INSPECTOR_(?:BRK_)?PORT)$/i.test(
+            name
+          )
+        )
+      },
+      sessionId: null,
+      program: null,
+      args: null,
+      cwd: null,
+      initialSize: null,
+      spawned: false,
+      ready: false,
+      requests: [],
+      messages: [],
+      writes: [],
+      sizes: [],
+      closeMessages: 0,
+      hostKillCalls: 0,
+      outputBeforeClose: '',
+      output: '',
+      nativeExit: null,
+      hostExit: null,
+      errors: [],
+      stderr: ''
     }
-    if (name !== 'node-pty') return exported
-    const resolved = Module._resolveFilename(name, parent)
-    if (!audit.ptyModulePaths.includes(resolved)) audit.ptyModulePaths.push(resolved)
-    return {
-      ...exported,
-      spawn(program, args, options) {
-        const child = exported.spawn(program, args, options)
-        const record = {
-          pid: child.pid,
-          program,
-          args,
-          cwd: options.cwd,
-          initialSize: { cols: options.cols, rows: options.rows },
-          writes: [],
-          sizes: [],
-          killCalls: 0,
-          outputBeforeKill: '',
-          output: '',
-          exit: null
-        }
-        audit.terminals.push(record)
-        const kill = child.kill.bind(child)
-        child.kill = (...args) => {
-          record.killCalls += 1
-          record.outputBeforeKill = record.output
-          save()
-          return kill(...args)
-        }
-        const write = child.write.bind(child)
-        child.write = (data) => {
-          record.writes.push(data)
-          save()
-          return write(data)
-        }
-        const resize = child.resize.bind(child)
-        child.resize = (cols, rows) => {
-          record.sizes.push({ cols, rows })
-          save()
-          return resize(cols, rows)
-        }
-        child.onData((data) => {
-          record.output = (record.output + data).slice(-64000)
-          save()
-        })
-        child.onExit((value) => {
-          record.exit = { ...value, atUTC: new Date().toISOString() }
-          save()
-        })
-        save()
-        return child
+    audit.terminals.push(record)
+    const postMessage = child.postMessage.bind(child)
+    child.postMessage = function (...messages) {
+      const message = messages[0]
+      record.requests.push({ message, atUTC: new Date().toISOString() })
+      if (message?.type === 'init') {
+        record.sessionId = message.sessionId
+        record.program = message.program
+        record.args = message.args
+        record.cwd = message.cwd
+        record.initialSize = message.size
+      } else if (message?.type === 'write') record.writes.push(message.data)
+      else if (message?.type === 'resize') record.sizes.push(message.size)
+      else if (message?.type === 'close') {
+        record.closeMessages += 1
+        record.outputBeforeClose = record.output
       }
+      save()
+      return postMessage(...messages)
     }
+    const kill = child.kill.bind(child)
+    child.kill = function (...args) {
+      record.hostKillCalls += 1
+      save()
+      return kill(...args)
+    }
+    child.once('spawn', () => {
+      record.hostPid = child.pid
+      record.spawned = true
+      record.spawnedAtUTC = new Date().toISOString()
+      save()
+    })
+    child.on('message', (message) => {
+      record.messages.push({ message, atUTC: new Date().toISOString() })
+      if (message?.sessionId === record.sessionId) {
+        if (message.type === 'ready') record.ready = true
+        else if (message.type === 'data')
+          record.output = (record.output + message.data).slice(-64000)
+        else if (message.type === 'exit')
+          record.nativeExit = { exitCode: message.exitCode, atUTC: new Date().toISOString() }
+        else if (message.type === 'error') record.errors.push(message.error)
+      }
+      save()
+    })
+    child.once('exit', (exitCode) => {
+      record.hostExit = { exitCode, atUTC: new Date().toISOString() }
+      save()
+    })
+    child.on('error', (...details) => {
+      record.errors.push(details.map(String).join(': '))
+      save()
+    })
+    child.stderr?.on('data', (bytes) => {
+      record.stderr = (record.stderr + bytes.toString()).slice(-4096)
+      save()
+    })
+    save()
+    return child
   }
   const message = (text) => ({
     type: 'message',
@@ -256,7 +210,6 @@ function install(config) {
       if (channel === 'terminal:start' && syntheticStartFailure) {
         syntheticStartFailure = false
         const created = await handler(event, ...args)
-        if (created.ok) audit.terminals.at(-1).sessionId = args[0]
         if (!created.ok) throw new Error('Real PTY did not start before synthetic response fault')
         throw new Error('LESSON59_SYNTHETIC_START_REPLY_FAILURE_' + 'x'.repeat(1000))
       }
@@ -265,7 +218,6 @@ function install(config) {
         return { ok: false, error: 'LESSON59_SYNTHETIC_CLOSE_FAILURE_' + 'x'.repeat(1000) }
       }
       const result = await handler(event, ...args)
-      if (channel === 'terminal:start' && result.ok) audit.terminals.at(-1).sessionId = args[0]
       save()
       return result
     })
@@ -319,7 +271,8 @@ function install(config) {
     audit.quitEvents.push({
       type: 'will-quit',
       atUTC: new Date().toISOString(),
-      unsettledWorkers: audit.workers.filter((worker) => worker.exitCode === null).length
+      unsettledTerminalHosts: audit.terminals.filter((terminal) => terminal.hostExit === null)
+        .length
     })
     save()
   })

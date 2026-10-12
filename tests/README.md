@@ -1,3 +1,38 @@
+<!-- terminal-independent-host-ef6bdf50-602d-4fa2-8be3-4c9bca84c3b9 -->
+
+## 终端启动卡死补修：独立 PTY 进程（2026-10-12）
+
+上一轮仅测普通/inspect-brk，漏掉 VS Code 的 NodeWorker 自动暂停条件；execArgv 空数组不能关闭该调试器门控。当前主进程异步监督固定的 terminal-host utility 进程，原五 API/IPC 保持；打开/使用终端零 Agent 请求、无权限提升、无 raw/checkpoint 注入。helper 原生退出后等待主进程收讫回执，再真实退出；ACK、kill 返回和退出消息均不单独等价于进程退休。
+
+| 维护命令 | 当前覆盖 |
+| ---- | ---- |
+| npm run test:lesson59:offline | IPC31、隔离10、独立宿主39、维护补丁25，共105项；Electron/utility/PTY/时钟合成分记 |
+| npm run test:lesson59:startup | 两版各22项，普通/inspect-brk/VS Code NodeWorker 条件；真点击、PTY无害输出、颜色/选区、窗口响应、关闭；无模型传输 |
+| npm run test:lesson59:desktop | 两版真实shell/utility/CIM、快速关闭、自然退出、附着子孙、Agent并列、活PTY窗口销毁与独立关闭保护；模型/故障合成 |
+| npm run test:lesson60:desktop | 两版各38项；现有权限/任务/停止/续接合同与终端并列，真实桌面/磁盘/PTY，模型/审核合成 |
+
+本轮[证据导览](../.ui-check/terminal-fixes/implementation-ef6bdf50-602d-4fa2-8be3-4c9bca84c3b9/README.md)保留原卡死、退役尾消息丢失、先红反例、首次包检查超时及对应旧产物。main fixture 观察迁到 utility 的真实消息和实际退出；其内部 Worker/helper/native 加载不再直接观察，不从空数组宣称通过。目录包普通启动的 main 计数仍未观察。主入口、helper、共享chunk、全部 out 与 ASAR 及两个 native 文件核对身份。旧内容按对应版本阅读；用户新版本重启复验、八题及第56–60全部原open保持。
+
+## 第61课创建导航（2026-10-12）
+
+[第61课：Git改动列表与Diff查看](../ZoneCodex学习计划/76-第六十一课-Git改动列表与Diff查看.md)已创建，产品和运行验收待实施；第5节区分合成协议/隔离、真实临时Git与磁盘、开发桌面、Windows目录包及构建身份。本轮未新增61测试源或npm命令，现有终端修复与第58–60维护入口保持；八题与旧open不关闭。
+
+## 终端主题与启动修复维护入口（2026-10-12）
+
+本轮修复终端固定深色与桌面浅色框架不一致，以及 `inspect-brk` 被 node-pty 输出线程继承后，点击“启动终端”阻塞主窗口的问题。xterm 使用框架背景、正文、光标与选区色值；输出 Worker 和 console-list helper 显式 `execArgv: []`。原五 API、IPC、每窗口一终端及 Agent 隔离不变。
+
+| 命令 | 当前职责与边界 |
+| ---- | -------------- |
+| `npm run test:lesson59:startup` | 已有开发产物与 Windows 目录包各测普通/`inspect-brk`启动；真实点击、PowerShell 无害 echo、ANSI/选区颜色、窗口响应与关闭。纯终端、不使用模型传输；夹具不包装 PTY/Worker/fork，不改启动参数 |
+| `npm run test:lesson59:offline` | IPC 29、隔离 10、cleanup 25；保留原 22 项清理保护，追加隐式调试继承与精确旧补丁迁移。Electron/PTY/helper/worker 合成分记 |
+| `npm run prepare:node-pty-cleanup` | 原始、两份精确已知旧补丁、当前补丁完整哈希预检后迁移；未知字节/版本拒绝。`--check` 不写入，合法旧补丁不等于已应用当前补丁 |
+
+startup 可用 `-- --suite=startup-development` 或 `-- --suite=startup-packaged`；默认 `npm test` 保持第58课11套。第59/60桌面夹具已移除测试专用的调试参数替换，仅被动观察实际参数。每轮新 UUID，不从旧报告继承通过；维护源见 [tests/lesson59](lesson59/)，本轮结果与制品身份见[修复证据](../.ui-check/terminal-fixes/implementation-e1e7cb63-f45a-4b7c-bb37-1deb5421342e/README.md)。
+
+目录包普通启动直接使用独立 `--user-data-dir`，验证实际 UI/PTY/命令/关闭及存储；没有主进程夹具，main 同步启动耗时、完整 Agent IPC 与 main fetch 计数标为未观察。目录包 `inspect-brk` 在入口暂停时安装被动夹具，另验这些计数；renderer 网络观察不冒称 main 网络观察。首轮包入口夹具失败和被拒绝的 `NODE_OPTIONS --require` 探针均保留。
+
+第56/58有条件通过、第57/59用户完成确认，以及第60用户实测/八题和全部既有 open 状态保持。有限进程/线程退休仍不证明全部 HPCON/native pipe handles 回收；非 Windows、联网模型和资源符号链接 EPERM 全组不由本轮关闭。下方旧计数、二态 preparation 与测试夹具去 inspect 描述按相应修复前时间阅读。
+
 <!-- lesson60-implemented-2026-10-12:start -->
 
 ## 第60课当前维护入口（2026-10-12）

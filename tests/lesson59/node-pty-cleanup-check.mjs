@@ -132,6 +132,7 @@ function harness(options = {}) {
     },
     fork: (_, __, forkOptions) => {
       assert.equal(forkOptions.windowsHide, true)
+      options.onForkOptions?.(forkOptions)
       const child = new EventEmitter()
       child.pid = 333
       child.stderr = new EventEmitter()
@@ -142,7 +143,10 @@ function harness(options = {}) {
       children.push(child)
       log.push('helperFork')
       child.on('close', () => log.push('helperClose'))
-      if (!options.manualHelper)
+      const startupArgv = Object.hasOwn(forkOptions, 'execArgv')
+        ? forkOptions.execArgv
+        : options.hiddenInheritedExecArgv || []
+      if (!options.manualHelper && startupArgv.length === 0)
         queueMicrotask(() => {
           child.emit('message', {
             consoleProcessList: [111, 444, 333, process.pid, 444],
@@ -156,7 +160,10 @@ function harness(options = {}) {
   const { WindowsCleanup } = load(
     sources['zonecodexWindowsCleanup.cjs'],
     { './eventEmitter2': { EventEmitter2 } },
-    { console: { error: (value) => diagnostics.push(String(value)) } }
+    {
+      console: { error: (value) => diagnostics.push(String(value)) },
+      ...(options.runtimeProcess ? { process: options.runtimeProcess } : {})
+    }
   )
   cleanup = new WindowsCleanup(agent, dependencies)
   const exits = []
@@ -572,6 +579,167 @@ await test('preparer original, patched, check, mixed, unknown bytes and version 
       prepareNodePtyCleanup({ projectRoot: project }),
       /Unsupported node-pty identity/
     )
+  } finally {
+    await rm(project, { recursive: true, force: true })
+  }
+})
+
+await test('Conout worker starts and retires without hidden inherited inspector pause', async () => {
+  const runtimeProcess = { execArgv: [] }
+  const hiddenInheritedExecArgv = ['--inspect-brk=19359']
+  const instances = []
+  class Worker extends EventEmitter {
+    constructor(filename, options) {
+      super()
+      this.filename = filename
+      this.options = options
+      this.startupArgv = Object.hasOwn(options, 'execArgv')
+        ? Array.from(options.execArgv)
+        : hiddenInheritedExecArgv
+      instances.push(this)
+      // Electron's inspector inheritance can exist independently of process.execArgv.
+      if (this.startupArgv.length === 0) queueMicrotask(() => this.emit('message', 1))
+    }
+    terminate() {
+      queueMicrotask(() => this.emit('exit', 1))
+      return Promise.resolve(1)
+    }
+  }
+  const { ConoutConnection } = load(
+    sources['windowsConoutConnection.cjs'],
+    {
+      worker_threads: { Worker },
+      path: { join },
+      './shared/conout': { getWorkerPipeName: (name) => name + '-worker' },
+      './eventEmitter2': { EventEmitter2 }
+    },
+    { process: runtimeProcess }
+  )
+  const connection = new ConoutConnection('inspector-isolated', false)
+  let ready = false
+  connection.ready.then(() => {
+    ready = true
+  })
+  await turn()
+  const instance = instances[0]
+  assert.deepEqual(runtimeProcess.execArgv, [])
+  assert.deepEqual(instance.startupArgv, [])
+  assert.equal(ready, true)
+  assert.equal(Object.hasOwn(instance.options, 'execArgv'), true)
+  assert.equal(instance.options.workerData.conoutPipeName, 'inspector-isolated')
+  assert.equal(instance.filename, join(resources, 'worker/conoutSocketWorker.js'))
+  await connection.dispose()
+  assert.equal(connection._workerExited, true)
+})
+
+await test('console helper starts and closes without hidden inherited inspector pause', async () => {
+  const runtimeProcess = { pid: process.pid, execArgv: [] }
+  let forkOptions
+  const h = harness({
+    runtimeProcess,
+    hiddenInheritedExecArgv: ['--inspect-brk=19360'],
+    onForkOptions: (value) => {
+      forkOptions = value
+    }
+  })
+  await h.cleanup.kill()
+  assert.deepEqual(runtimeProcess.execArgv, [])
+  assert.equal(Object.hasOwn(forkOptions, 'execArgv'), true)
+  assert.equal(Array.isArray(forkOptions.execArgv), true)
+  assert.equal(forkOptions.execArgv.length, 0)
+  assert.equal(h.log.includes('helperKill'), false)
+  assert.deepEqual(h.diagnostics, [])
+  assert.ok(h.log.indexOf('helperClose') < h.log.indexOf('kill:444'))
+  assert.ok(h.log.indexOf('kill:444') < h.log.indexOf('nativeClose'))
+  assert.deepEqual(h.exits, [0])
+})
+
+await test('preparer migrates exact previous patches and rejects unknown bytes before any write', async () => {
+  const project = await mkdtemp(join(tmpdir(), 'zonecodex-pty-migration-'))
+  const lib = join(project, 'node_modules/node-pty/lib')
+  await mkdir(lib, { recursive: true })
+  const previousEntries = Object.entries(manifest.files).filter(
+    ([, entry]) => entry.previousPatchedSha256 !== undefined
+  )
+  const snapshots = async () =>
+    Object.fromEntries(
+      await Promise.all(
+        Object.keys(manifest.files).map(async (name) => [
+          name,
+          hash(await readFile(join(lib, name)))
+        ])
+      )
+    )
+  const writePrevious = async () => {
+    for (const [name, entry] of previousEntries) {
+      const bytes = await readFile(join(resources, 'previous', name + '.txt'))
+      assert.equal(hash(bytes), entry.previousPatchedSha256)
+      assert.notEqual(entry.previousPatchedSha256, entry.patchedSha256)
+      await writeFile(join(lib, name), bytes)
+    }
+  }
+  try {
+    assert.deepEqual(
+      previousEntries.map(([name]) => name),
+      ['windowsConoutConnection.js', 'zonecodexWindowsCleanup.js']
+    )
+    await writeFile(
+      join(project, 'node_modules/node-pty/package.json'),
+      JSON.stringify({ name: 'node-pty', version: '1.1.0' })
+    )
+    for (const [name, entry] of Object.entries(manifest.files)) {
+      if (entry.originalSha256 === null) continue
+      await writeFile(join(lib, name), await readFile(join(resources, 'upstream', name + '.txt')))
+    }
+    await prepareNodePtyCleanup({ projectRoot: project })
+    await writePrevious()
+    const beforeCheck = await snapshots()
+    const checked = await prepareNodePtyCleanup({ projectRoot: project, checkOnly: true })
+    assert.equal(checked.changed, 0)
+    for (const [name] of previousEntries) assert.equal(checked.files[name], 'previous')
+    assert.deepEqual(await snapshots(), beforeCheck)
+    assert.equal((await prepareNodePtyCleanup({ projectRoot: project })).changed, 2)
+    assert.equal((await prepareNodePtyCleanup({ projectRoot: project })).changed, 0)
+    for (const [name, entry] of Object.entries(manifest.files))
+      assert.equal(hash(await readFile(join(lib, name))), entry.patchedSha256)
+
+    // A recoverable mix contains one original, one known previous, and three current files.
+    await writeFile(
+      join(lib, 'windowsTerminal.js'),
+      await readFile(join(resources, 'upstream/windowsTerminal.js.txt'))
+    )
+    await writeFile(
+      join(lib, 'windowsConoutConnection.js'),
+      await readFile(join(resources, 'previous/windowsConoutConnection.js.txt'))
+    )
+    const mixed = await prepareNodePtyCleanup({ projectRoot: project })
+    assert.equal(mixed.changed, 2)
+    assert.equal(mixed.files['windowsTerminal.js'], 'original')
+    assert.equal(mixed.files['windowsConoutConnection.js'], 'previous')
+    assert.equal(mixed.files['zonecodexWindowsCleanup.js'], 'patched')
+
+    // Unknown final bytes must reject a plan with an earlier migratable previous file.
+    await writePrevious()
+    await writeFile(join(lib, 'zonecodexWindowsCleanup.js'), 'unknown final file')
+    const beforeReject = await snapshots()
+    await assert.rejects(
+      prepareNodePtyCleanup({ projectRoot: project }),
+      /Unknown node-pty bytes; refusing to patch zonecodexWindowsCleanup.js/
+    )
+    assert.deepEqual(await snapshots(), beforeReject)
+
+    // One-byte drift of a known previous patch is unknown in both modes.
+    await writePrevious()
+    const drifted = await readFile(join(lib, 'windowsConoutConnection.js'))
+    drifted[0] ^= 1
+    await writeFile(join(lib, 'windowsConoutConnection.js'), drifted)
+    const beforeDrift = await snapshots()
+    for (const checkOnly of [true, false])
+      await assert.rejects(
+        prepareNodePtyCleanup({ projectRoot: project, checkOnly }),
+        /Unknown node-pty bytes; refusing to patch windowsConoutConnection.js/
+      )
+    assert.deepEqual(await snapshots(), beforeDrift)
   } finally {
     await rm(project, { recursive: true, force: true })
   }

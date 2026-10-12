@@ -127,6 +127,8 @@ class WindowsCleanup {
       this.dependencies.helperPath,
       [String(this.agent.innerPid)],
       {
+        // Never inherit the desktop host's inspector pause into this helper.
+        execArgv: [],
         windowsHide: true,
         stdio: ['ignore', 'ignore', 'pipe', 'ipc']
       }

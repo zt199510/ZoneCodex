@@ -14,6 +14,7 @@
     "test:lesson60:list": "node scripts/checks/lesson60.mjs list",
     "test:lesson59:offline": "node scripts/checks/lesson59.mjs offline",
     "test:lesson59:desktop": "node scripts/checks/lesson59.mjs desktop",
+    "test:lesson59:startup": "node scripts/checks/lesson59.mjs startup",
     "test:lesson59:list": "node scripts/checks/lesson59.mjs list",
     "test:lesson58:resume:cli": "node scripts/checks/lesson58.mjs resume-cli",
     "test:lesson58:resume:desktop": "node scripts/checks/lesson58.mjs resume-desktop",

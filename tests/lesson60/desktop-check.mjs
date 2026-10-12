@@ -42,6 +42,7 @@ const report = {
   syntheticTransport: true,
   actualElectron: true,
   actualPTY: true,
+  observerMovedToUtility: true,
   actualDiskStorage: true,
   uiInput:
     'Trusted CDP mouse/key input; observation/faults and modal whole-task cancellation use separately labelled existing APIs.',
@@ -51,7 +52,7 @@ const report = {
   notCovered: [
     'No real model or reviewer networking. SSE responses, held replies, reply failures and stale event replay are synthetic.',
     'The approval dialog is modal and contains no whole-task stop control. Whole-task cancellation during that wait uses the legal existing cancelAgentRequest API and is not claimed as an outside UI click.',
-    'Observed shell/helper/worker retirement and exit callbacks do not prove every native HPCON/pipe handle or arbitrary command descendant is reclaimed.',
+    'PTY command output, the helper-reported public native exit and actual utility-process retirement are observed. Shell PIDs, Conout Workers, process-list helpers and native module loads inside the utility process are not directly observed; native HPCON/pipe handles and arbitrary command descendants remain outside this evidence.',
     'The initial orphan TaskRecord is an explicitly synthetic historical fixture. New-PID checkpoint/history reopening uses records actually saved after real owner cancellation.'
   ]
 }
@@ -71,9 +72,10 @@ async function identify() {
   assert.equal(manifest.package, 'node-pty')
   assert.equal(manifest.version, '1.1.0')
   assert.equal(Object.keys(manifest.files).length, 5)
+  const mainBuildNames = ['out/main/index.js', 'out/main/terminal-host.js']
   const artifactNames = packaged
-    ? ['dist/win-unpacked/zonecodex.exe', 'dist/win-unpacked/resources/app.asar']
-    : ['out/main/index.js', 'out/preload/index.js', 'out/renderer/index.html']
+    ? ['dist/win-unpacked/zonecodex.exe', 'dist/win-unpacked/resources/app.asar', ...mainBuildNames]
+    : [...mainBuildNames, 'out/preload/index.js', 'out/renderer/index.html']
   const cleanupNames = Object.keys(manifest.files).map(
     (name) => 'node_modules/node-pty/lib/' + name.replaceAll('\\', '/')
   )
@@ -92,14 +94,14 @@ async function identify() {
     assert.equal(identities[cleanupNames[index]], identity.patchedSha256)
   if (packaged) {
     const { extractFile } = moduleRequire('@electron/asar')
-    for (const name of cleanupNames) {
+    for (const name of [...cleanupNames, ...mainBuildNames]) {
       const internal = hash(
         extractFile(path.join(root, 'dist/win-unpacked/resources/app.asar'), path.normalize(name))
       )
       assert.equal(
         internal,
         identities[name],
-        'Directory-package node-pty cleanup identity: ' + name
+        'Directory-package built entry/helper and node-pty cleanup identity: ' + name
       )
       identities['app.asar:' + name] = internal
     }
@@ -436,7 +438,7 @@ async function launch(stage, action) {
       assert.deepEqual(await api('listTasks'), tasks)
       check(label, { actualMainIPC: true, permissions: before, taskCount: tasks.length })
     }
-    let shell
+    let terminalHost
     const openTerminal = async () => {
       await click('#terminal-panel-toggle')
       await until(
@@ -454,9 +456,16 @@ async function launch(stage, action) {
           ),
         'actual PowerShell PTY'
       )
-      shell = (await audit()).terminals.at(-1)
-      assert.ok(alive(shell.pid))
-      return shell
+      const opened = await audit()
+      assert.equal(opened.observerMovedToUtility, true)
+      assert.equal(opened.testOverridesUtilityHostForkArguments, false)
+      terminalHost = opened.utilityHosts.at(-1)
+      assert.ok(terminalHost.spawned && terminalHost.ready && terminalHost.sessionId)
+      assert.equal(terminalHost.serviceName, 'ZoneCodex Terminal')
+      assert.ok(alive(terminalHost.pid))
+      assert.equal(terminalHost.nativeExit, null)
+      assert.equal(terminalHost.exitedAtUTC, null)
+      return terminalHost
     }
     const echo = async (suffix) => {
       const before = await audit()
@@ -487,14 +496,27 @@ async function launch(stage, action) {
       })
       const observed = await until(async () => {
         const value = await audit()
-        return value.terminals
-          .find((terminal) => terminal.pid === shell.pid)
+        return value.utilityHosts
+          .find(
+            (host) => host.pid === terminalHost.pid && host.sessionId === terminalHost.sessionId
+          )
           ?.output.includes(marker + '-' + suffix)
           ? value
           : null
       }, 'executed PTY echo ' + suffix)
-      assert.ok(alive(shell.pid))
-      assert.equal(observed.terminals.find((terminal) => terminal.pid === shell.pid).killCalls, 0)
+      const currentHost = observed.utilityHosts.find(
+        (host) => host.pid === terminalHost.pid && host.sessionId === terminalHost.sessionId
+      )
+      assert.ok(alive(currentHost.pid))
+      assert.equal(currentHost.nativeExit, null)
+      assert.equal(currentHost.exitedAtUTC, null)
+      assert.ok(currentHost.dataMessages > 0)
+      assert.equal(
+        observed.ipc.filter(
+          (item) => item.channel === 'terminal:close' && item.args[0] === terminalHost.sessionId
+        ).length,
+        0
+      )
       assert.equal(observed.requests.length, requests)
       assert.equal(
         observed.ipc.filter((item) => ['agent:start', 'agent:resume'].includes(item.channel))
@@ -507,7 +529,10 @@ async function launch(stage, action) {
       )
       check('same real PowerShell PTY survives ' + suffix + ' with zero new Agent calls', {
         stage,
-        shellPid: shell.pid
+        utilityHostPid: terminalHost.pid,
+        sessionId: terminalHost.sessionId,
+        actualNativePTYOutput: true,
+        shellPidDirectlyObserved: false
       })
     }
     const blockedSend = async (label) => {
@@ -632,40 +657,46 @@ async function launch(stage, action) {
   )
   const finalAudit = JSON.parse(await fs.readFile(auditFile, 'utf8'))
   await until(
-    () =>
-      finalAudit.terminals.every((terminal) => !alive(terminal.pid)) &&
-      finalAudit.helpers.every((helper) => !alive(helper.pid)),
-    'actual shell/helper process retirement',
+    () => finalAudit.utilityHosts.every((host) => host.exitedAtUTC !== null && !alive(host.pid)),
+    'actual utility-host process retirement',
     10000,
     true
   )
-  assert.ok(finalAudit.terminals.length >= 1)
-  assert.ok(finalAudit.workers.length >= 1)
-  assert.ok(finalAudit.helpers.length >= 1)
+  assert.equal(finalAudit.observerMovedToUtility, true)
+  assert.ok(finalAudit.utilityHosts.length >= 1)
   assert.ok(
-    finalAudit.terminals.every((terminal) => terminal.exit !== null && terminal.killCalls > 0)
-  )
-  assert.ok(
-    finalAudit.workers.every(
-      (worker) => worker.online && worker.exitCode !== null && worker.errors.length === 0
+    finalAudit.utilityHosts.every(
+      (host) =>
+        host.spawned &&
+        host.ready &&
+        host.dataMessages > 0 &&
+        Number.isInteger(host.nativeExit?.exitCode) &&
+        host.exitedAtUTC !== null &&
+        host.exitCode === 0 &&
+        host.errors.length === 0
     )
   )
   assert.ok(
-    finalAudit.helpers.every((helper) => helper.exitCode === 0 && helper.errors.length === 0)
-  )
-  assert.ok(
     finalAudit.quitEvents.some(
-      (event) => event.type === 'will-quit' && event.unsettledWorkers === 0
+      (event) => event.type === 'will-quit' && event.unsettledUtilityHosts === 0
     )
   )
   check(
     stage +
-      ': normal application quit retires actual PTY shells, workers and process-list helpers with zero AttachConsole failure',
+      ': normal application quit observes native PTY exit and actual utility-host retirement with zero AttachConsole failure',
     {
       appPid: child.pid,
-      shells: finalAudit.terminals.map(({ pid, exit }) => ({ pid, exit })),
-      helpers: finalAudit.helpers,
-      workers: finalAudit.workers
+      utilityHosts: finalAudit.utilityHosts.map(
+        ({ pid, sessionId, nativeExit, exitCode, exitedAtUTC }) => ({
+          pid,
+          sessionId,
+          nativeExit,
+          exitCode,
+          exitedAtUTC
+        })
+      ),
+      observerMovedToUtility: finalAudit.observerMovedToUtility,
+      unobservedInternalPTY: finalAudit.unobservedInternalPTY
     }
   )
   return finalAudit

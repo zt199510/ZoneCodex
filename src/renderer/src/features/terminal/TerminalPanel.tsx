@@ -3,6 +3,7 @@ import type { Ref } from 'react'
 import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import type { TerminalResult, TerminalSize } from '../../../../shared/terminal'
+import { terminalThemeFor } from './terminal-theme'
 import '@xterm/xterm/css/xterm.css'
 
 export type TerminalPanelHandle = { close: () => void }
@@ -67,7 +68,7 @@ export function TerminalPanel({
       fontSize: 13,
       fontFamily: "Consolas, 'Cascadia Mono', monospace",
       scrollback: 1000,
-      theme: { background: '#18201c', foreground: '#e2e9e4' }
+      theme: terminalThemeFor(host)
     })
     const fit = new FitAddon()
 

@@ -2,11 +2,7 @@
 function install(config) {
   const require = process.getBuiltinModule('module').createRequire(config.root + '/package.json')
   const fs = require('node:fs')
-  const crypto = require('node:crypto')
-  const Module = require('node:module')
-  const workerThreads = require('node:worker_threads')
-  const childProcess = require('node:child_process')
-  const { app, BrowserWindow, ipcMain } = require('electron')
+  const { app, BrowserWindow, ipcMain, utilityProcess } = require('electron')
   app.setPath('userData', config.userData)
   process.env.MODEL_ENDPOINT = 'https://lesson60-fixture.invalid/responses'
   process.env.MODEL_NAME = 'lesson60-synthetic'
@@ -16,15 +12,15 @@ function install(config) {
     stage: config.stage,
     realTransport: false,
     actualPTY: true,
+    testOverridesPTYWorkerForkArguments: false,
+    testOverridesUtilityHostForkArguments: false,
+    observerMovedToUtility: true,
+    unobservedInternalPTY: ['shell PID', 'Conout Worker', 'process-list helper', 'native handles'],
     requests: [],
     ipc: [],
     events: [],
     synthetic: [],
-    terminals: [],
-    helpers: [],
-    workers: [],
-    nativeModules: [],
-    ptyModulePaths: [],
+    utilityHosts: [],
     quitEvents: []
   }
   const save = () => fs.writeFileSync(config.auditFile, JSON.stringify(audit, null, 2))
@@ -44,121 +40,58 @@ function install(config) {
       })
       injected('held-reply', { name })
     })
-  // Only the two node-pty descendants must lose the paused test inspector flag.
-  const withoutInspector = (options = {}) => ({
-    ...options,
-    execArgv: (options.execArgv ?? process.execArgv).filter(
-      (argument) => !argument.startsWith('--inspect')
-    )
-  })
-  const Worker = workerThreads.Worker
-  workerThreads.Worker = class extends Worker {
-    constructor(filename, options = {}) {
-      const owned = String(filename)
-        .replaceAll('\\', '/')
-        .includes('/node-pty/lib/worker/conoutSocketWorker.js')
-      super(filename, owned ? withoutInspector(options) : options)
-      if (!owned) return
-      const record = {
-        filename: String(filename),
-        threadId: this.threadId,
-        online: false,
-        exitCode: null,
-        errors: []
-      }
-      audit.workers.push(record)
-      this.once('online', () => {
-        record.online = true
-        save()
-      })
-      this.once('exit', (exitCode) => {
-        record.exitCode = exitCode
-        save()
-      })
-      this.on('error', (error) => {
-        record.errors.push(error.message)
-        save()
-      })
-      save()
+  // Observe the production helper boundary; forward fork arguments untouched.
+  // node-pty, Conout Worker and native modules now live inside that helper.
+  const fork = utilityProcess.fork
+  utilityProcess.fork = function (...values) {
+    const child = fork.apply(utilityProcess, values)
+    const [filename, , options] = values
+    if (!String(filename).replaceAll('\\', '/').endsWith('/terminal-host.js')) return child
+    const record = {
+      filename: String(filename),
+      serviceName: options?.serviceName,
+      cwd: options?.cwd,
+      pid: child.pid ?? null,
+      spawned: false,
+      sessionId: null,
+      ready: false,
+      output: '',
+      dataMessages: 0,
+      nativeExit: null,
+      exitCode: null,
+      exitedAtUTC: null,
+      errors: []
     }
-  }
-  const fork = childProcess.fork
-  childProcess.fork = (filename, args = [], options = {}) => {
-    const owned = String(filename)
-      .replaceAll('\\', '/')
-      .includes('/node-pty/lib/conpty_console_list_agent')
-    const child = fork(filename, args, owned ? withoutInspector(options) : options)
-    if (owned) {
-      const record = { pid: child.pid, args, exitCode: null, signal: null, errors: [] }
-      audit.helpers.push(record)
-      child.once('exit', (exitCode, signal) => {
-        record.exitCode = exitCode
-        record.signal = signal
-        save()
-      })
-      child.on('error', (error) => {
-        record.errors.push(error.message)
-        save()
-      })
+    audit.utilityHosts.push(record)
+    child.once('spawn', () => {
+      record.pid = child.pid
+      record.spawned = true
       save()
-    }
+    })
+    child.on('message', (value) => {
+      if (!value || typeof value !== 'object' || typeof value.sessionId !== 'string') return
+      record.sessionId ??= value.sessionId
+      if (record.sessionId !== value.sessionId) return
+      if (value.type === 'ready') record.ready = true
+      else if (value.type === 'data' && typeof value.data === 'string') {
+        record.output = (record.output + value.data).slice(-64000)
+        record.dataMessages += 1
+      } else if (value.type === 'exit' && Number.isInteger(value.exitCode)) {
+        record.nativeExit = { exitCode: value.exitCode, atUTC: new Date().toISOString() }
+      } else if (value.type === 'error') record.errors.push(String(value.error).slice(0, 300))
+      save()
+    })
+    child.once('exit', (exitCode) => {
+      record.exitCode = exitCode
+      record.exitedAtUTC = new Date().toISOString()
+      save()
+    })
+    child.on('error', (type, location, detail) => {
+      record.errors.push({ type, location, detail: String(detail).slice(0, 300) })
+      save()
+    })
+    save()
     return child
-  }
-  const load = Module._load
-  Module._load = function (name, parent, isMain) {
-    const exported = load.call(this, name, parent, isMain)
-    if (/[/\\]conpty\.node$/.test(String(name))) {
-      const resolved = Module._resolveFilename(name, parent)
-      if (!audit.nativeModules.some((item) => item.resolved === resolved)) {
-        audit.nativeModules.push({
-          resolved,
-          sha256: crypto.createHash('sha256').update(fs.readFileSync(resolved)).digest('hex')
-        })
-        save()
-      }
-    }
-    if (name !== 'node-pty') return exported
-    const resolved = Module._resolveFilename(name, parent)
-    if (!audit.ptyModulePaths.includes(resolved)) audit.ptyModulePaths.push(resolved)
-    return {
-      ...exported,
-      spawn(program, args, options) {
-        const child = exported.spawn(program, args, options)
-        const record = {
-          pid: child.pid,
-          program,
-          args,
-          cwd: options.cwd,
-          writes: [],
-          killCalls: 0,
-          output: '',
-          exit: null
-        }
-        audit.terminals.push(record)
-        const kill = child.kill.bind(child)
-        child.kill = (...values) => {
-          record.killCalls += 1
-          save()
-          return kill(...values)
-        }
-        const write = child.write.bind(child)
-        child.write = (data) => {
-          record.writes.push(data)
-          save()
-          return write(data)
-        }
-        child.onData((data) => {
-          record.output = (record.output + data).slice(-64000)
-          save()
-        })
-        child.onExit((value) => {
-          record.exit = value
-          save()
-        })
-        save()
-        return child
-      }
-    }
   }
   const message = (text) => ({
     type: 'message',
@@ -313,7 +246,10 @@ function install(config) {
           record.ownerResult = result
           save()
         }
-        if (channel === 'terminal:start' && result.ok) audit.terminals.at(-1).sessionId = args[0]
+        if (channel === 'terminal:start' && result.ok && record)
+          record.utilityHostPid = audit.utilityHosts.findLast(
+            (host) => host.sessionId === args[0]
+          )?.pid
         if (channel === 'agent:resolve-execution' && faults.holdResolve)
           result = await hold('resolve', result)
         if (channel === 'execution:permissions-get' && faults.readback === 'hold')
@@ -382,7 +318,11 @@ function install(config) {
   app.on('web-contents-created', (_event, contents) => {
     const send = contents.send.bind(contents)
     contents.send = (channel, ...args) => {
-      if (/^(agent:|execution:approval-change|task:state|model-stream:delta)/.test(channel)) {
+      if (
+        /^(agent:|execution:approval-change|task:state|model-stream:delta|terminal:event)/.test(
+          channel
+        )
+      ) {
         audit.events.push({ channel, value: args[0], atUTC: new Date().toISOString() })
         save()
       }
@@ -396,7 +336,8 @@ function install(config) {
   app.on('will-quit', () => {
     audit.quitEvents.push({
       type: 'will-quit',
-      unsettledWorkers: audit.workers.filter((worker) => worker.exitCode === null).length
+      unsettledUtilityHosts: audit.utilityHosts.filter((host) => host.exitedAtUTC === null).length,
+      observerMovedToUtility: true
     })
     save()
   })

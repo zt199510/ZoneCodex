@@ -109,7 +109,10 @@ await suite.check(
 await suite.check(
   'terminal backend closure cannot invoke Agent, model transport, raw/checkpoint store or approval brokers',
   async () => {
-    const result = await graph(['src/main/terminal/local-terminal.ts'])
+    const result = await graph([
+      'src/main/terminal/local-terminal.ts',
+      'src/main/terminal/terminal-host.ts'
+    ])
     assert(
       !result.files.some((file) =>
         /src\/main\/(?:agent\/|model\/|execution\/|project\/(?:workspace-access|attachment-access|image-access)|storage\/(?:conversation|task-checkpoint))/.test(
