@@ -74,6 +74,7 @@ export type ConversationController = ConversationReviewController & {
   send: (content: string) => boolean | Promise<boolean>
   editAndSend: (messageId: string, content: string, mode: AgentMode) => boolean | Promise<boolean>
   stop: () => Promise<void>
+  stopping: boolean
   setClosePending: (value: boolean) => void
   getOperation: () => Operation
   toolActivity: ToolActivity
@@ -657,6 +658,7 @@ export function useConversation(): ConversationController {
       if (active) invalidateTitle(active.id)
       await request.stop()
     },
+    stopping: request.stopping,
     selectProjectFiles: async () => {
       if (!canChange()) return false
       request.clearError()
@@ -748,7 +750,8 @@ export function useConversation(): ConversationController {
     pendingPlanQuestion: request.pendingPlanQuestion,
     respondToPlanQuestion: (response) =>
       closePendingRef.current ? Promise.resolve(false) : request.respondToPlanQuestion(response),
-    canRespondToPlanQuestion: !closePending && operations.operation === 'generating',
+    canRespondToPlanQuestion:
+      !closePending && operations.operation === 'generating' && !request.stopping,
     toolRuns: active?.toolRuns ?? [],
     removeFile,
     preparation,

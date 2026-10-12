@@ -43,6 +43,7 @@ export function ChatComposer({
         }}
         disabled={!conversation.canSend || Boolean(images?.busy)}
         isSending={operation === 'generating'}
+        stopping={conversation.stopping}
         maxLength={
           2000 -
           (images?.pending.length ? appendImageTurnNotice('', images.pending.length).length : 0)

@@ -8,6 +8,10 @@
   "scripts": {
     "test": "node scripts/checks/lesson58.mjs offline",
     "test:list": "node scripts/checks/lesson58.mjs list",
+    "test:lesson60:offline": "node scripts/checks/lesson60.mjs offline",
+    "test:lesson60:cli": "node scripts/checks/lesson60.mjs cli",
+    "test:lesson60:desktop": "node scripts/checks/lesson60.mjs desktop",
+    "test:lesson60:list": "node scripts/checks/lesson60.mjs list",
     "test:lesson59:offline": "node scripts/checks/lesson59.mjs offline",
     "test:lesson59:desktop": "node scripts/checks/lesson59.mjs desktop",
     "test:lesson59:list": "node scripts/checks/lesson59.mjs list",

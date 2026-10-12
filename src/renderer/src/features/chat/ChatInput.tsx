@@ -9,6 +9,7 @@ type ChatInputProps = {
   onStop: () => void
   disabled: boolean
   isSending: boolean
+  stopping: boolean
   maxLength: number
   tools: ReactNode
   attachments?: ReactNode
@@ -25,6 +26,7 @@ export function ChatInput({
   onStop,
   disabled,
   isSending,
+  stopping,
   maxLength,
   tools,
   attachments,
@@ -198,7 +200,13 @@ export function ChatInput({
         rows={2}
         maxLength={maxLength}
         disabled={disabled}
-        placeholder={isSending ? '正在回复，你可以随时停止…' : '有什么想一起探索的？'}
+        placeholder={
+          isSending
+            ? stopping
+              ? '正在请求停止，请等待任务结束…'
+              : '正在回复，你可以随时停止…'
+            : '有什么想一起探索的？'
+        }
         onChange={(event) => {
           latestDraft.current = {
             value: event.currentTarget.value,
@@ -225,8 +233,9 @@ export function ChatInput({
               className="send-button"
               type="button"
               onClick={onStop}
-              aria-label="停止生成"
-              title="停止生成"
+              disabled={stopping}
+              aria-label={stopping ? '正在停止' : '停止生成'}
+              title={stopping ? '正在停止' : '停止生成'}
             >
               <Icon name="stop" size={17} />
             </button>

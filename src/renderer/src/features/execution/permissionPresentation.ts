@@ -7,7 +7,7 @@ export const permissionModeTitles: Record<PermissionMode, string> = {
 }
 
 export const permissionModeOptions: Array<{ mode: PermissionMode; description: string }> = [
-  { mode: 'default', description: '编辑外部文件和使用互联网时始终询问' },
-  { mode: 'auto-approve', description: '仅对检测到的风险操作请求批准' },
-  { mode: 'full-access', description: '可不受限制地访问互联网和你电脑上的任何文件' }
+  { mode: 'default', description: '允许读取和当前可写范围内写入；范围外写入及需批准的命令先询问' },
+  { mode: 'auto-approve', description: '需批准的操作先审核，必要时由你确认；审核失败仍需确认' },
+  { mode: 'full-access', description: '跳过权限审批；文件、命令和运行环境的校验仍然生效' }
 ]

@@ -1,3 +1,22 @@
+<!-- lesson60-implemented-2026-10-12:start -->
+
+## 第60课当前维护入口（2026-10-12）
+
+[课程第9节](../ZoneCodex学习计划/75-第六十课-权限与任务状态一致性.md#9-本轮实施与分层验收记录2026-10-12)记录权限/任务/等待/停止及双宿主当前证据。实现与必要自动验收完成，用户实测/八题待补，第56–59原open保持。
+
+| 命令 | 内容与边界 |
+| ---- | ---- |
+| `npm run test:lesson60:list` | 列出三组和suite，零业务请求 |
+| `npm run test:lesson60:offline` | authorization32、renderer23、cli-source13，共68项；拒绝网络/清模型配置，合成Electron/React/传输/approve/answer/backend，真实当前源与隔离磁盘分别记 |
+| `npm run test:lesson60:cli` | 开发/分发CLI各12项；共28个实际Node进程、10个真实TTY阶段，模型/审核合成；非TTY3及真实yes/no/EOF/Ctrl+C和当前权限续接；不含cmd launcher或真实command后端 |
+| `npm run test:lesson60:desktop` | 开发/目录包各38项；真实Electron/CDP/IPC/隔离磁盘/PTY、新PID被动重开和显式继续；SSE/审核/故障合成，审批等待整任务停止用现有API，非modal外点击 |
+
+维护源：[tests/lesson60](lesson60/)，调度：[lesson60.mjs](../scripts/checks/lesson60.mjs)。三组可选`-- --suite=<list中的名称>`；默认`npm test`仍是第58十一suite。每次新`.ui-check/test-runs/lesson60/<类型>-UUID`，不自动构建/联网，不读取旧通过报告。保留所有失败及改前快照；CLI夹具采用真实写入后Ctrl+C产生interrupted，不削弱completed不可resume保护。模型/真实磁盘/Node/TTY/桌面分别记，停止不保证回滚已执行操作；全部native handles、任意后代及资源EPERM仍open。
+
+本轮[最终报告](../.ui-check/lesson60/implementation-e87bf7f4-1cf9-4702-9e84-8b0bf6625353/final-report.json)与[证据导览](../.ui-check/lesson60/implementation-e87bf7f4-1cf9-4702-9e84-8b0bf6625353/README.md)索引当前UUID、逐报告输入及ASAR/native身份；下方历史入口/计数保留原时间语义。
+
+<!-- lesson60-implemented-2026-10-12:end -->
+
 ## 第59课当前维护入口（2026-10-11）
 
 终端回挂的合同、分层结果与失败记录见[第59课第9节](../ZoneCodex学习计划/74-第五十九课-终端面板回挂与独立交互宿主.md#9-本轮实施与分层验收记录2026-10-11)，当前清理优化见[9.6节](../ZoneCodex学习计划/74-第五十九课-终端面板回挂与独立交互宿主.md#96-终端清理优化2026-10-11)。维护源位于 [tests/lesson59](lesson59/)，调度为 [lesson59.mjs](../scripts/checks/lesson59.mjs)；每轮另建 `.ui-check/test-runs/lesson59/<类型>-UUID/`，不读取旧报告当本轮通过。

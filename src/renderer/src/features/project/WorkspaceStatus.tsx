@@ -4,8 +4,17 @@ import type { WorkspaceController } from './useWorkspace'
 import type { PermissionsState } from '../../../../shared/execution'
 import { permissionModeTitles } from '../execution/permissionPresentation'
 
-function currentTaskLabel(waitingApproval: boolean, operation: Operation): string {
+function currentTaskLabel(
+  operation: Operation,
+  stopping: boolean,
+  waitingApproval: boolean,
+  waitingInput: boolean,
+  commandProposalOpen: boolean
+): string {
+  if (operation === 'generating' && stopping) return '正在停止'
   if (waitingApproval) return '等待批准'
+  if (waitingInput) return '等待回答'
+  if (commandProposalOpen) return '查看命令提案'
   switch (operation) {
     case 'loading':
       return '加载中'
@@ -14,7 +23,7 @@ function currentTaskLabel(waitingApproval: boolean, operation: Operation): strin
     case 'saving':
       return '保存中'
     case 'selecting':
-      return '选择文件中'
+      return '更新选择中'
     case 'committing':
       return '提交中'
     case 'idle':
@@ -26,17 +35,29 @@ function currentTaskLabel(waitingApproval: boolean, operation: Operation): strin
 export function WorkspaceStatus({
   selection,
   operation,
+  stopping,
   waitingApproval,
+  waitingInput,
+  commandProposalOpen,
   workspace,
   permissions
 }: {
   selection: ProjectSelection | null
   operation: Operation
+  stopping: boolean
   waitingApproval: boolean
+  waitingInput: boolean
+  commandProposalOpen: boolean
   workspace: WorkspaceController
   permissions: PermissionsState | null
 }): React.JSX.Element {
-  const task = currentTaskLabel(waitingApproval, operation)
+  const task = currentTaskLabel(
+    operation,
+    stopping,
+    waitingApproval,
+    waitingInput,
+    commandProposalOpen
+  )
   const saved = workspace.saved
   const label = workspace.runtime?.label ?? '默认目录'
   const instructionLabel =
@@ -60,7 +81,7 @@ export function WorkspaceStatus({
         状态：<strong>{task}</strong>
       </span>
       <span>
-        权限：{permissions ? permissionModeTitles[permissions.mode] : '加载中'}
+        权限：{permissions ? permissionModeTitles[permissions.mode] : '权限未就绪'}
         {selection && '，已附加文件'}
       </span>
       <span>{instructionLabel}</span>

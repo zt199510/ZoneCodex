@@ -51,6 +51,7 @@ type ActiveRequest = {
   expectedExecution?: ExecutionInfo
   phase: 'resolving' | 'running'
   stopping: boolean
+  retiredInputIds: Set<string>
   sideEffectStarted: boolean
   history: ProtocolItem[]
   trace: string[]
@@ -104,6 +105,7 @@ type ChatRequestOptions = {
 }
 type ChatRequest = {
   error: string | null
+  stopping: boolean
   toolActivity: ToolActivity
   pendingPlanQuestion: PendingPlanQuestion | null
   resumableTask: ResumableAgentTask | null
@@ -156,6 +158,7 @@ export function useChatRequest({
 }: ChatRequestOptions): ChatRequest {
   const { begin, finish } = operations
   const [error, setError] = useState<string | null>(null)
+  const [stopping, setStopping] = useState(false)
   const [toolActivity, setToolActivity] = useState<ToolActivity>({})
   const [pendingPlanQuestion, setPendingPlanQuestion] = useState<PendingPlanQuestion | null>(null)
   const pendingInput = useRef<AgentUserInputRequest | null>(null)
@@ -201,6 +204,9 @@ export function useChatRequest({
   useEffect(() => {
     const receiveInput = (request: AgentUserInputRequest | null): void => {
       if (!request) {
+        const previous = pendingInput.current
+        if (previous && activeRequest.current?.requestId === previous.requestId)
+          activeRequest.current.retiredInputIds.add(previous.inputId)
         pendingInput.current = null
         setPendingPlanQuestion(null)
         return
@@ -208,6 +214,8 @@ export function useChatRequest({
       const active = activeRequest.current
       if (
         !active ||
+        active.stopping ||
+        active.retiredInputIds.has(request.inputId) ||
         active.phase !== 'running' ||
         active.context.mode !== 'plan' ||
         request.requestId !== active.requestId ||
@@ -220,6 +228,9 @@ export function useChatRequest({
         )
       )
         return
+      const previous = pendingInput.current
+      if (previous && previous.inputId !== request.inputId)
+        active.retiredInputIds.add(previous.inputId)
       pendingInput.current = request
       setPendingPlanQuestion({ assistantId: active.assistantId, request })
     }
@@ -671,6 +682,7 @@ export function useChatRequest({
         pendingInput.current = null
         setPendingPlanQuestion(null)
         activeRequest.current = null
+        setStopping(false)
         finish('generating')
         void refreshResumable(active.conversationId)
       }
@@ -773,6 +785,7 @@ export function useChatRequest({
       ...(expectedExecution ? { expectedExecution } : {}),
       phase: 'resolving',
       stopping: false,
+      retiredInputIds: new Set(),
       sideEffectStarted: false,
       history: [],
       trace: [],
@@ -794,6 +807,7 @@ export function useChatRequest({
         messageId: active.userId
       }))
     activeRequest.current = active
+    setStopping(false)
     pendingInput.current = null
     setPendingPlanQuestion(null)
     setError(null)
@@ -904,22 +918,30 @@ export function useChatRequest({
 
   async function stop(): Promise<void> {
     const active = activeRequest.current
-    if (!active) return
+    if (!active || active.stopping) return
     // The user stop action retires capacity updates immediately, including
     // late summary events received while cancellation IPC is in flight.
     active.stopping = true
+    setStopping(true)
     if (active.phase === 'resolving') {
       activeRequest.current = null
+      setStopping(false)
       finishToolTurn(active, 'cancelled', active.trace, [])
       finish('generating')
       return
     }
     try {
-      await window.api.cancelAgentRequest(active.requestId)
+      const accepted = await window.api.cancelAgentRequest(active.requestId)
+      if (!accepted && activeRequest.current === active) {
+        active.stopping = false
+        setStopping(false)
+        setError('停止请求未获接受，可重试停止或等待当前操作结束。')
+      }
     } catch {
       if (activeRequest.current?.requestId === active.requestId) {
         active.stopping = false
-        setError('停止请求失败，请等待回复结束或超时。')
+        setStopping(false)
+        setError('停止请求失败，可重试停止或等待当前操作结束。')
       }
     }
   }
@@ -929,6 +951,7 @@ export function useChatRequest({
     const pending = pendingInput.current
     if (
       !active ||
+      active.stopping ||
       active.phase !== 'running' ||
       active.context.mode !== 'plan' ||
       !pending ||
@@ -942,6 +965,7 @@ export function useChatRequest({
 
   return {
     error,
+    stopping,
     toolActivity,
     pendingPlanQuestion,
     resumableTask: resumable?.conversationId === conversationId ? resumable.task : null,

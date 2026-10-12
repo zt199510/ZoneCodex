@@ -82,7 +82,10 @@ export function ChatWorkspace({
       <WorkspaceStatus
         selection={conversation.contextSelection}
         operation={operation}
-        waitingApproval={executionApprovalPending || conversation.commandReview.proposal !== null}
+        stopping={conversation.stopping}
+        waitingApproval={executionApprovalPending}
+        waitingInput={conversation.pendingPlanQuestion !== null}
+        commandProposalOpen={conversation.commandReview.proposal !== null}
         workspace={conversation.workspace}
         permissions={conversation.executionPermissions.state}
       />

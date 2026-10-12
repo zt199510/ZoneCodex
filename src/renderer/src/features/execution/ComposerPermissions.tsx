@@ -65,6 +65,11 @@ export function ComposerPermissions({
   const initialFocus = useRef<'selected' | 'first' | 'last'>('selected')
   const [open, setOpen] = useState(false)
   const mode = permissions.state?.mode ?? 'default'
+  const title = permissions.state
+    ? permissionModeTitles[permissions.state.mode]
+    : permissions.loading
+      ? '读取权限中'
+      : '权限未知'
 
   useLayoutEffect(() => {
     disabledRef.current = disabled
@@ -166,14 +171,14 @@ export function ComposerPermissions({
         ref={trigger}
         type="button"
         className="permissions-trigger"
-        data-mode={mode}
+        data-mode={permissions.state?.mode ?? 'unknown'}
         popoverTarget={id}
-        aria-label={`权限：${permissionModeTitles[mode]}`}
+        aria-label={`权限：${title}`}
         aria-haspopup="menu"
         aria-expanded={open}
         aria-controls={id}
         disabled={disabled}
-        title={permissionModeTitles[mode]}
+        title={title}
         onKeyDown={(event) => {
           if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') return
           event.preventDefault()
@@ -182,7 +187,7 @@ export function ComposerPermissions({
         }}
       >
         <PermissionIcon mode={mode} />
-        <span>{permissionModeTitles[mode]}</span>
+        <span>{title}</span>
         <svg aria-hidden="true" width="12" height="12" viewBox="0 0 24 24" fill="none">
           <path d="m7 10 5 5 5-5" />
         </svg>
@@ -214,8 +219,8 @@ export function ComposerPermissions({
             role="menuitemradio"
             className="permissions-option"
             data-mode={option.mode}
-            aria-checked={mode === option.mode}
-            tabIndex={mode === option.mode ? 0 : -1}
+            aria-checked={permissions.state?.mode === option.mode}
+            tabIndex={permissions.state?.mode === option.mode ? 0 : -1}
             disabled={disabled}
             onClick={() => void select(option.mode)}
           >
@@ -225,7 +230,7 @@ export function ComposerPermissions({
               <small>{option.description}</small>
             </span>
             <span className="permissions-check" aria-hidden="true">
-              {mode === option.mode ? '✓' : ''}
+              {permissions.state?.mode === option.mode ? '✓' : ''}
             </span>
           </button>
         ))}

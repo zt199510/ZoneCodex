@@ -240,12 +240,13 @@ export function ExecutionApproval({
                   ref={cancelRef}
                   type="button"
                   className="execution-approval-cancel"
+                  title="仅拒绝这次操作，任务可以继续回复"
                   disabled={submitting}
                   onClick={(event) => {
                     if (event.detail <= 1) void respond(pending.approvalId, false)
                   }}
                 >
-                  取消
+                  拒绝本次操作
                 </button>
                 <button
                   type="button"
