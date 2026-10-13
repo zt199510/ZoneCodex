@@ -51,6 +51,7 @@ import type { ProtocolItem } from './agent-history'
 import type {
   AgentRequestContext,
   ProjectSelectionResult,
+  WorkspaceFileSearchResult,
   WorkspaceInstructionResult,
   WorkspaceSelectionResult
 } from './project'
@@ -186,6 +187,17 @@ export interface AppAPI extends GitPullRequestAPI {
     conversationId: string,
     snapshotId: string,
     path: string
+  ) => Promise<ProjectSelectionResult>
+  searchWorkspaceFiles: (
+    conversationId: string,
+    workspaceId: string,
+    query: string
+  ) => Promise<WorkspaceFileSearchResult>
+  addWorkspaceFileReference: (
+    conversationId: string,
+    workspaceId: string,
+    path: string,
+    replaceExisting?: boolean
   ) => Promise<ProjectSelectionResult>
   // 选择、清除和读取当前会话的工作区；运行时目录授权只存在于主进程。
   selectWorkspace: (

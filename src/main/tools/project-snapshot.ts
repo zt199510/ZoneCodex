@@ -45,7 +45,7 @@ function inside(root: string, target: string): string {
   return value
 }
 
-function allowedPath(value: string): boolean {
+export function isProjectSnapshotPathAllowed(value: string, directory = false): boolean {
   if (
     value.length === 0 ||
     value.length > 240 ||
@@ -75,7 +75,7 @@ function allowedPath(value: string): boolean {
   ) {
     return false
   }
-  return extensions.has(extname(value).toLowerCase())
+  return directory || extensions.has(extname(value).toLowerCase())
 }
 
 function normalizeText(text: string): string[] {
@@ -233,7 +233,8 @@ export async function createProjectSnapshot(
       throw new AgentError('文件选择结果无效')
     }
     const relativePath = inside(lexicalRoot, resolve(selectedPath)).split(sep).join('/')
-    if (!allowedPath(relativePath)) throw new AgentError('文件路径或类型不在本课允许范围内')
+    if (!isProjectSnapshotPathAllowed(relativePath))
+      throw new AgentError('文件路径或类型不在本课允许范围内')
 
     const identity = process.platform === 'win32' ? relativePath.toLowerCase() : relativePath
     if (identities.has(identity)) throw new AgentError('文件选择结果包含重复路径')
@@ -284,14 +285,14 @@ export async function createAttachmentSnapshot(
     const root = parse(absolute).root
     const relativePath = inside(root, absolute)
     // Validate every component and inspect links starting at the filesystem root.
-    if (!allowedPath(relativePath.split(sep).join('/'))) {
+    if (!isProjectSnapshotPathAllowed(relativePath.split(sep).join('/'))) {
       throw new AgentError('文件路径或类型不在允许范围内')
     }
     const file = await readSelectedFile(root, relativePath, signal)
     const identity = process.platform === 'win32' ? absolute.toLowerCase() : absolute
     const existing = [...sources].find(([, source]) => source === identity)?.[0]
     const path = existing ?? `file-${randomUUID()}/${basename(absolute)}`
-    if (!allowedPath(path)) throw new AgentError('文件名过长或类型不受支持')
+    if (!isProjectSnapshotPathAllowed(path)) throw new AgentError('文件名过长或类型不受支持')
     const entry = { path, bytes: file.bytes, lines: file.lines.length }
     const index = metadata.findIndex((item) => item.path === path)
     if (index >= 0) metadata[index] = entry

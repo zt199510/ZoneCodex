@@ -66,6 +66,16 @@ export type ProjectSelectionResult =
   | { status: 'cleared' }
   | { status: 'error'; error: string }
 
+export type WorkspaceFileSearchResult =
+  | {
+      status: 'ready'
+      workspaceId: string
+      files: Array<{ path: string }>
+      truncated: boolean
+    }
+  | { status: 'cancelled' }
+  | { status: 'error'; error: string }
+
 export type AgentRequestContext = {
   conversationId: string
   mode: AgentMode
@@ -157,7 +167,7 @@ function isIntegerInRange(value: unknown, minimum: number, maximum: number): val
   )
 }
 
-function isRelativeProjectPath(value: unknown): value is string {
+export function isRelativeProjectPath(value: unknown): value is string {
   if (typeof value !== 'string' || value.length === 0 || value.length > 240) return false
   if (
     value.includes('\\') ||
@@ -187,6 +197,17 @@ function isRelativeProjectPath(value: unknown): value is string {
   const filename = parts[parts.length - 1].toLowerCase()
   const extensionIndex = filename.lastIndexOf('.')
   return extensionIndex > 0 && allowedExtensions.has(filename.slice(extensionIndex))
+}
+
+export function isWorkspaceFileSearchQuery(value: unknown): value is string {
+  return (
+    typeof value === 'string' &&
+    value.length <= 240 &&
+    !Array.from(value).some((character) => {
+      const code = character.charCodeAt(0)
+      return code < 32 || code === 127
+    })
+  )
 }
 
 function cloneSelection(selection: ProjectSelection): ProjectSelection {
@@ -377,6 +398,43 @@ export function parseProjectSelectionResult(value: unknown): ProjectSelectionRes
         createdAt: raw.createdAt,
         files
       })
+    }
+  } catch {
+    return null
+  }
+}
+
+export function parseWorkspaceFileSearchResult(value: unknown): WorkspaceFileSearchResult | null {
+  try {
+    if (!isPlainRecord(value) || typeof value.status !== 'string') return null
+    if (value.status === 'cancelled') return { status: 'cancelled' }
+    if (value.status === 'error') {
+      if (typeof value.error !== 'string' || !value.error.trim() || value.error.length > 500)
+        return null
+      return { status: 'error', error: value.error }
+    }
+    if (
+      value.status !== 'ready' ||
+      !isAgentId(value.workspaceId) ||
+      !Array.isArray(value.files) ||
+      value.files.length > 20 ||
+      typeof value.truncated !== 'boolean'
+    )
+      return null
+    const files: Array<{ path: string }> = []
+    const seen = new Set<string>()
+    for (const file of value.files) {
+      if (!isPlainRecord(file) || !isRelativeProjectPath(file.path)) return null
+      const key = file.path.toLowerCase()
+      if (seen.has(key)) return null
+      seen.add(key)
+      files.push({ path: file.path })
+    }
+    return {
+      status: 'ready',
+      workspaceId: value.workspaceId,
+      files,
+      truncated: value.truncated
     }
   } catch {
     return null

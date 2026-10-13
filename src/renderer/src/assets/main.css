@@ -2,6 +2,7 @@
 @import './workspace.css';
 @import './chat.css';
 @import './composer.css';
+@import './file-mentions.css';
 @import './markdown.css';
 @import './project.css';
 @import './execution.css';

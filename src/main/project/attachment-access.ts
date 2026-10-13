@@ -6,6 +6,8 @@ import type { ProjectSelection, ProjectSelectionResult } from '../../shared/proj
 import { AgentError } from '../errors'
 import { createAttachmentSnapshot, removeAttachment } from '../tools/project-snapshot'
 import type { ProjectSnapshot } from '../tools/project-snapshot'
+import { captureWorkspaceAccess } from './workspace-access'
+import { resolveWorkspaceReferencePath } from './workspace-file-references'
 
 type AttachmentAccessCallbacks = {
   isAgentJobActive: (windowId: number) => boolean
@@ -114,6 +116,65 @@ export async function selectProjectFiles(
     if (!isCurrent(windowId, state, window)) return { status: 'cancelled' }
     if (error instanceof AgentError) return resultError(error.message)
     return resultError('项目文件选择失败，请重新选择')
+  } finally {
+    if (selections.get(windowId) === state) selections.delete(windowId)
+  }
+}
+
+export async function addWorkspaceFileReference(
+  window: BrowserWindow,
+  conversationId: string,
+  workspaceId: string,
+  path: string,
+  replaceExisting = false
+): Promise<ProjectSelectionResult> {
+  const windowId = window.id
+  if (!isAgentId(conversationId) || !isAgentId(workspaceId)) return resultError('文件引用参数无效')
+  if (window.isDestroyed() || window.webContents.isDestroyed()) return resultError('窗口已经关闭')
+  if (
+    callbacks.isAgentJobActive(windowId) ||
+    selections.has(windowId) ||
+    callbacks.hasWorkspaceSelection(windowId)
+  )
+    return resultError('请等待当前操作结束')
+  const workspace = captureWorkspaceAccess(windowId, conversationId)
+  if (!workspace || workspace.workspaceId !== workspaceId)
+    return resultError('项目文件夹授权已失效，请重新选择')
+  const previous = grants.get(windowId)
+  if (previous && previous.conversationId !== conversationId)
+    return resultError('请先清除其他会话的附件')
+
+  const state: SelectionState = { token: randomUUID(), controller: new AbortController() }
+  selections.set(windowId, state)
+  const referenceIsCurrent = (): boolean => {
+    if (!isCurrent(windowId, state, window)) return false
+    const current = captureWorkspaceAccess(windowId, conversationId)
+    return current?.workspaceId === workspaceId && current.root === workspace.root
+  }
+  try {
+    const target = await resolveWorkspaceReferencePath(
+      workspace.root,
+      path,
+      state.controller.signal
+    )
+    if (!referenceIsCurrent()) return { status: 'cancelled' }
+    const snapshot = await createAttachmentSnapshot(
+      [target],
+      state.controller.signal,
+      replaceExisting ? undefined : previous?.snapshot
+    )
+    if (!referenceIsCurrent()) return { status: 'cancelled' }
+    callbacks.onAccessChanged?.(windowId, previous?.snapshotId)
+    grants.set(windowId, {
+      windowId,
+      conversationId,
+      snapshotId: snapshot.selection.snapshotId,
+      snapshot
+    })
+    return { status: 'selected', selection: cloneSelection(snapshot.selection) }
+  } catch (error) {
+    if (!referenceIsCurrent()) return { status: 'cancelled' }
+    return resultError(error instanceof Error ? error.message : '无法引用项目文件')
   } finally {
     if (selections.get(windowId) === state) selections.delete(windowId)
   }

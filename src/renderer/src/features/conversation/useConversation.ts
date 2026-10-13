@@ -21,7 +21,11 @@ import {
   stripImageTurnNotice
 } from '../../../../shared/image-input'
 import { getCapacityError } from './capacity'
-import type { ProjectSelection, SavedWorkspace } from '../../../../shared/project'
+import type {
+  ProjectSelection,
+  SavedWorkspace,
+  WorkspaceFileSearchResult
+} from '../../../../shared/project'
 import { useConversationStorage, type ConversationStorage } from './useConversationStorage'
 import { useOperation, type Operation } from './useOperation'
 import { useWorkspace, type WorkspaceController } from '../project/useWorkspace'
@@ -63,6 +67,9 @@ export type ConversationController = ConversationReviewController & {
   setSearch: (value: string) => void
   clear: () => Promise<boolean>
   selectProjectFiles: () => Promise<boolean>
+  addFileReference: (path: string) => Promise<boolean>
+  searchReferenceFiles: (query: string) => Promise<WorkspaceFileSearchResult>
+  selectReferenceWorkspace: () => Promise<boolean>
   revokeProjectFiles: () => Promise<boolean>
   projectSelection: ProjectSelection | null
   contextSelection: ProjectSelection | null
@@ -169,11 +176,20 @@ export function useConversation(): ConversationController {
     saved: active?.workspace ?? null,
     operations,
     canChange,
-    onSavedChange: (next: SavedWorkspace | null): void => {
-      if (!activeConversationId) return
-      updateConversation(activeConversationId, (previous) => ({ ...previous, workspace: next }))
+    onSavedChange: (next: SavedWorkspace | null, conversationId: string): void => {
+      updateConversation(conversationId, (previous) => ({ ...previous, workspace: next }))
     }
   })
+  const referenceScopeRef = useRef({
+    conversationId: activeConversationId,
+    workspaceId: workspace.runtime?.workspaceId ?? null
+  })
+  useLayoutEffect(() => {
+    referenceScopeRef.current = {
+      conversationId: activeConversationId,
+      workspaceId: workspace.runtime?.workspaceId ?? null
+    }
+  }, [activeConversationId, workspace.runtime?.workspaceId])
   // Saved project metadata does not restore a grant. Without a live project,
   // main resolves this request against the conversation's default directory.
   const canSubmit =
@@ -186,6 +202,7 @@ export function useConversation(): ConversationController {
     projectError,
     clearError: clearProjectError,
     selectProjectFiles: selectFiles,
+    addWorkspaceFileReference,
     revokeProjectFiles,
     revokeSelectionForChange,
     removeFile
@@ -453,6 +470,58 @@ export function useConversation(): ConversationController {
     return (await createId()) !== null
   }
 
+  async function selectReferenceWorkspace(): Promise<boolean> {
+    if (!canChange()) return false
+    const conversationId = snapshotRef.current.activeConversationId ?? (await createId(true))
+    if (!conversationId || snapshotRef.current.activeConversationId !== conversationId) return false
+    request.clearError()
+    return workspace.select(conversationId)
+  }
+
+  async function searchReferenceFiles(query: string): Promise<WorkspaceFileSearchResult> {
+    const conversationId = activeConversationId
+    const workspaceId = workspace.runtime?.workspaceId
+    if (!conversationId || !workspaceId || !canChange()) return { status: 'cancelled' }
+    const isCurrent = (): boolean =>
+      snapshotRef.current.activeConversationId === conversationId &&
+      referenceScopeRef.current.conversationId === conversationId &&
+      referenceScopeRef.current.workspaceId === workspaceId
+    if (!isCurrent()) return { status: 'cancelled' }
+    try {
+      const result = await window.api.searchWorkspaceFiles(conversationId, workspaceId, query)
+      if (!isCurrent() || (result.status === 'ready' && result.workspaceId !== workspaceId)) {
+        return { status: 'cancelled' }
+      }
+      return result
+    } catch {
+      return isCurrent()
+        ? { status: 'error', error: '查找项目文件失败，请重试。' }
+        : { status: 'cancelled' }
+    }
+  }
+
+  async function addFileReference(path: string): Promise<boolean> {
+    const conversationId = activeConversationId
+    const workspaceId = workspace.runtime?.workspaceId
+    if (
+      !conversationId ||
+      !workspaceId ||
+      snapshotRef.current.activeConversationId !== conversationId ||
+      referenceScopeRef.current.conversationId !== conversationId ||
+      referenceScopeRef.current.workspaceId !== workspaceId ||
+      !canChange()
+    )
+      return false
+    request.clearError()
+    const added = await addWorkspaceFileReference(workspaceId, path)
+    return (
+      added &&
+      snapshotRef.current.activeConversationId === conversationId &&
+      referenceScopeRef.current.conversationId === conversationId &&
+      referenceScopeRef.current.workspaceId === workspaceId
+    )
+  }
+
   async function select(id: string): Promise<boolean> {
     if (!canChange() || !snapshot.conversations.some((item) => item.id === id && !item.archived)) {
       setConversationError('当前会话正在忙碌，或目标会话已归档。')
@@ -664,6 +733,9 @@ export function useConversation(): ConversationController {
       request.clearError()
       return selectFiles()
     },
+    addFileReference,
+    searchReferenceFiles,
+    selectReferenceWorkspace,
     revokeProjectFiles,
     projectSelection: pendingSelection,
     contextSelection: projectSelection,

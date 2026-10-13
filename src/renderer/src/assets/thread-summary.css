@@ -62,7 +62,6 @@
 
 .chat-workspace[data-summary-mode='shift'] > .chat-transcript > .chat-scroll-area > .message-list,
 .chat-workspace[data-summary-mode='shift'] > .composer-region {
-  width: min(calc(100% - 308px), var(--content-width));
   transform: translateX(-154px);
 }
 

@@ -38,6 +38,16 @@ export function ChatComposer({
         draftKey={conversation.activeConversationId}
         onChange={onChange}
         onSend={onSend}
+        fileReferences={{
+          contextKey: JSON.stringify([
+            conversation.activeConversationId,
+            conversation.workspace.runtime?.workspaceId
+          ]),
+          hasWorkspace: Boolean(conversation.workspace.runtime),
+          search: conversation.searchReferenceFiles,
+          add: conversation.addFileReference,
+          selectWorkspace: conversation.selectReferenceWorkspace
+        }}
         onStop={() => {
           void conversation.stop()
         }}

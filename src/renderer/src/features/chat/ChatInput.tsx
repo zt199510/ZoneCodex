@@ -1,6 +1,8 @@
-import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { useEffect, useId, useLayoutEffect, useRef, useState } from 'react'
 import type { ClipboardEvent, DragEvent, FormEvent, KeyboardEvent, ReactNode } from 'react'
 import { ComposerIcon } from './ComposerIcon'
+import { useFileMentions, type FileReferenceController } from './useFileMentions'
+import { FileMentionMenu } from './FileMentionMenu'
 
 type ChatInputProps = {
   value: string
@@ -18,6 +20,7 @@ type ChatInputProps = {
   onPasteImages?: (files: readonly File[]) => void
   onDropImages?: (files: readonly File[]) => void
   onImageError?: (error: string) => void
+  fileReferences?: FileReferenceController
 }
 
 export function ChatInput({
@@ -35,7 +38,8 @@ export function ChatInput({
   draftKey,
   onPasteImages,
   onDropImages,
-  onImageError
+  onImageError,
+  fileReferences
 }: ChatInputProps): React.JSX.Element {
   const textarea = useRef<HTMLTextAreaElement>(null)
   const composing = useRef(false)
@@ -43,6 +47,15 @@ export function ChatInput({
   const mounted = useRef(true)
   const submitting = useRef(false)
   const [preparing, setPreparing] = useState(false)
+  const mentionId = useId()
+  const mentions = useFileMentions({
+    value,
+    onChange,
+    textarea,
+    references: fileReferences,
+    disabled: disabled || isSending || preparing,
+    maxLength
+  })
   const dragContext = JSON.stringify([draftKey, disabled, isSending, preparing])
   const [dragState, setDragState] = useState({ context: dragContext, active: false })
   if (dragState.context !== dragContext) setDragState({ context: dragContext, active: false })
@@ -99,7 +112,14 @@ export function ChatInput({
   }
   function submit(event: FormEvent): void {
     event.preventDefault()
-    if (disabled || submitting.current || !value.trim() || value.length > maxLength) return
+    if (
+      disabled ||
+      mentions.adding ||
+      submitting.current ||
+      !value.trim() ||
+      value.length > maxLength
+    )
+      return
     const submitted = { ...latestDraft.current }
     const settle = (accepted: boolean): void => {
       submitting.current = false
@@ -180,6 +200,7 @@ export function ChatInput({
     onDropImages(files)
   }
   function onKeyDown(event: KeyboardEvent<HTMLTextAreaElement>): void {
+    if (!composing.current && mentions.onKeyDown(event)) return
     // 中文输入法正在确认候选词时，Enter 不能触发发送。
     if (
       event.key === 'Enter' &&
@@ -206,11 +227,14 @@ export function ChatInput({
         if (
           !disabled &&
           target instanceof Element &&
-          !target.closest('button, textarea, a, [role="menu"], .attachment-card, .image-attachment')
+          !target.closest(
+            'button, textarea, a, [role="menu"], [role="listbox"], .attachment-card, .image-attachment'
+          )
         )
           textarea.current?.focus({ preventScroll: true })
       }}
     >
+      <FileMentionMenu mentions={mentions} textarea={textarea} id={mentionId} />
       {attachments}
       {draggingImages && (
         <div className="composer-drop-hint" aria-live="polite">
@@ -224,11 +248,19 @@ export function ChatInput({
         <textarea
           id="chat-input"
           aria-describedby="composer-keyboard-hint"
+          aria-autocomplete={fileReferences ? 'list' : undefined}
+          aria-controls={mentions.open ? mentionId : undefined}
+          aria-expanded={fileReferences ? mentions.open : undefined}
+          aria-activedescendant={
+            mentions.open && mentions.paths.length
+              ? `${mentionId}-${mentions.activeIndex}`
+              : undefined
+          }
           ref={textarea}
           value={value}
           rows={1}
           maxLength={maxLength}
-          disabled={disabled}
+          disabled={disabled || mentions.adding}
           placeholder={
             isSending
               ? stopping
@@ -243,14 +275,18 @@ export function ChatInput({
               version: latestDraft.current.version + 1
             }
             onChange(event.currentTarget.value)
+            mentions.update(event.currentTarget, composing.current)
           }}
+          onSelect={(event) => mentions.update(event.currentTarget, composing.current)}
           onKeyDown={onKeyDown}
           onPaste={onPaste}
-          onCompositionStart={() => {
+          onCompositionStart={(event) => {
             composing.current = true
+            mentions.update(event.currentTarget, true)
           }}
-          onCompositionEnd={() => {
+          onCompositionEnd={(event) => {
             composing.current = false
+            mentions.update(event.currentTarget)
           }}
         />
       </div>
@@ -275,7 +311,13 @@ export function ChatInput({
             <button
               className="send-button"
               type="submit"
-              disabled={disabled || preparing || !value.trim() || value.length > maxLength}
+              disabled={
+                disabled ||
+                mentions.adding ||
+                preparing ||
+                !value.trim() ||
+                value.length > maxLength
+              }
               aria-label="发送消息"
               title="发送消息"
             >

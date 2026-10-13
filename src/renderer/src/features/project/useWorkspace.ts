@@ -1,9 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import type {
-  ProjectInstruction,
-  SavedWorkspace,
-  Workspace
-} from '../../../../shared/project'
+import type { ProjectInstruction, SavedWorkspace, Workspace } from '../../../../shared/project'
 import type { OperationControl } from '../conversation/useOperation'
 
 export type WorkspaceInstructionState = 'none' | 'absent' | 'read' | 'error'
@@ -17,7 +13,7 @@ export type WorkspaceController = {
   error: string | null
   selecting: boolean
   canSelect: boolean
-  select: () => Promise<boolean>
+  select: (targetConversationId?: string) => Promise<boolean>
   clear: () => Promise<boolean>
   readInstruction: () => Promise<boolean>
   release: () => Promise<boolean>
@@ -28,7 +24,7 @@ type WorkspaceOptions = {
   saved: SavedWorkspace | null
   operations: OperationControl
   canChange: () => boolean
-  onSavedChange: (workspace: SavedWorkspace | null) => void
+  onSavedChange: (workspace: SavedWorkspace | null, conversationId: string) => void
 }
 
 function savedFromRuntime(workspace: Workspace): SavedWorkspace {
@@ -58,7 +54,10 @@ export function useWorkspace({
   canChange,
   onSavedChange
 }: WorkspaceOptions): WorkspaceController {
-  const [runtime, setRuntime] = useState<Workspace | null>(null)
+  const [runtimeState, setRuntime] = useState<{
+    conversationId: string | null
+    workspace: Workspace | null
+  }>({ conversationId, workspace: null })
   const [error, setError] = useState<string | null>(null)
   const [instructionState, setInstructionState] = useState<WorkspaceInstructionState>(() =>
     initialInstructionState()
@@ -69,7 +68,7 @@ export function useWorkspace({
 
   const setRuntimeState = useCallback((next: Workspace | null): void => {
     runtimeRef.current = next
-    setRuntime(next)
+    setRuntime({ conversationId: conversationRef.current, workspace: next })
   }, [])
 
   const release = useCallback(async (): Promise<boolean> => {
@@ -81,7 +80,9 @@ export function useWorkspace({
     }
     try {
       const released = await window.api.clearWorkspace(id)
-      if (released) setRuntimeState(null)
+      if (released && conversationRef.current === id && runtimeRef.current === current) {
+        setRuntimeState(null)
+      }
       return released
     } catch {
       return false
@@ -118,39 +119,66 @@ export function useWorkspace({
     []
   )
 
-  const select = useCallback(async (): Promise<boolean> => {
-    if (!conversationId || !canChange() || !operations.begin('selecting')) return false
-    setError(null)
-    try {
-      const result = await window.api.selectWorkspace(conversationId, crypto.randomUUID())
-      if (result.status === 'selected') {
-        setRuntimeState(result.workspace)
-        const nextSaved = savedFromRuntime(result.workspace)
-        onSavedChange(nextSaved)
-        setInstructionState(result.workspace.instruction ? 'read' : 'absent')
-        return true
+  const select = useCallback(
+    async (targetConversationId = conversationId): Promise<boolean> => {
+      if (!targetConversationId || !canChange() || !operations.begin('selecting')) return false
+      // A newly created conversation can open this dialog before its render commits.
+      // Bind the grant to that explicit target so the next effect preserves it.
+      if (conversationRef.current !== targetConversationId) {
+        transitionRef.current += 1
+        conversationRef.current = targetConversationId
+        setRuntimeState(null)
+        setInstructionState(initialInstructionState())
       }
-      if (result.status === 'error') setError(result.error)
-      return false
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : '工作区选择失败，请重试。')
-      return false
-    } finally {
-      operations.finish('selecting')
-    }
-  }, [canChange, conversationId, onSavedChange, operations, setRuntimeState])
+      const transition = transitionRef.current
+      setError(null)
+      try {
+        const result = await window.api.selectWorkspace(targetConversationId, crypto.randomUUID())
+        if (
+          conversationRef.current !== targetConversationId ||
+          transitionRef.current !== transition
+        ) {
+          if (result.status === 'selected') {
+            void window.api.clearWorkspace(targetConversationId).catch(() => undefined)
+          }
+          return false
+        }
+        if (result.status === 'selected') {
+          setRuntimeState(result.workspace)
+          const nextSaved = savedFromRuntime(result.workspace)
+          onSavedChange(nextSaved, targetConversationId)
+          setInstructionState(result.workspace.instruction ? 'read' : 'absent')
+          return true
+        }
+        if (result.status === 'error') setError(result.error)
+        return false
+      } catch (cause) {
+        if (
+          conversationRef.current === targetConversationId &&
+          transitionRef.current === transition
+        ) {
+          setError(cause instanceof Error ? cause.message : '工作区选择失败，请重试。')
+        }
+        return false
+      } finally {
+        operations.finish('selecting')
+      }
+    },
+    [canChange, conversationId, onSavedChange, operations, setRuntimeState]
+  )
 
   const clear = useCallback(async (): Promise<boolean> => {
     if (!conversationId || !canChange() || !operations.begin('selecting')) return false
     setError(null)
     try {
       const cleared = await window.api.clearWorkspace(conversationId)
+      if (conversationRef.current !== conversationId) return false
       if (!cleared) {
         setError('清除工作区失败，请重试。')
         return false
       }
       setRuntimeState(null)
-      onSavedChange(null)
+      onSavedChange(null, conversationId)
       setInstructionState('none')
       return true
     } catch (cause) {
@@ -164,20 +192,22 @@ export function useWorkspace({
   const readInstruction = useCallback(async (): Promise<boolean> => {
     if (!conversationId || !runtimeRef.current || !canChange() || !operations.begin('selecting'))
       return false
+    const current = runtimeRef.current
     setError(null)
     try {
       const result = await window.api.readWorkspaceInstruction(conversationId)
+      if (conversationRef.current !== conversationId || runtimeRef.current !== current) return false
       if (result.status === 'read') {
-        const next = { ...runtimeRef.current, instruction: result.instruction }
+        const next = { ...current, instruction: result.instruction }
         setRuntimeState(next)
-        onSavedChange(savedFromRuntime(next))
+        onSavedChange(savedFromRuntime(next), conversationId)
         setInstructionState('read')
         return true
       }
       if (result.status === 'absent') {
-        const next = { ...runtimeRef.current, instruction: null }
+        const next = { ...current, instruction: null }
         setRuntimeState(next)
-        onSavedChange(savedFromRuntime(next))
+        onSavedChange(savedFromRuntime(next), conversationId)
         setInstructionState('absent')
         return true
       }
@@ -193,10 +223,12 @@ export function useWorkspace({
     }
   }, [canChange, conversationId, onSavedChange, operations, setRuntimeState])
 
+  const activeRuntime =
+    runtimeState.conversationId === conversationId ? runtimeState.workspace : null
   return {
-    runtime,
+    runtime: activeRuntime,
     saved,
-    instruction: runtime?.instruction ?? null,
+    instruction: activeRuntime?.instruction ?? null,
     instructionState,
     error,
     selecting: operations.operation === 'selecting',

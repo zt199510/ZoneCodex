@@ -5,6 +5,9 @@ import { parseCommitRequest, parseCommitResult } from '../shared/change-commit'
 import { parsePreparationRequest, parsePreparationResult } from '../shared/change-preparation'
 import {
   parseProjectSelectionResult,
+  isRelativeProjectPath,
+  isWorkspaceFileSearchQuery,
+  parseWorkspaceFileSearchResult,
   parseWorkspaceInstructionResult,
   parseWorkspaceSelectionResult
 } from '../shared/project'
@@ -22,6 +25,8 @@ export const projectAPI: Pick<
   AppAPI,
   | 'selectProjectFiles'
   | 'removeProjectFile'
+  | 'searchWorkspaceFiles'
+  | 'addWorkspaceFileReference'
   | 'selectWorkspace'
   | 'clearWorkspace'
   | 'readWorkspaceInstruction'
@@ -103,6 +108,36 @@ export const projectAPI: Pick<
     )
     if (!parsed) throw new Error('项目选择结果格式不正确')
     return parsed
+  },
+  searchWorkspaceFiles: async (conversationId, workspaceId, query) => {
+    if (!isAgentId(conversationId) || !isAgentId(workspaceId) || !isWorkspaceFileSearchQuery(query))
+      throw new Error('文件搜索参数无效')
+    const result = parseWorkspaceFileSearchResult(
+      await ipcRenderer.invoke('workspace:search-files', conversationId, workspaceId, query)
+    )
+    if (!result || (result.status === 'ready' && result.workspaceId !== workspaceId))
+      throw new Error('文件搜索结果无效')
+    return result
+  },
+  addWorkspaceFileReference: async (conversationId, workspaceId, path, replaceExisting = false) => {
+    if (
+      !isAgentId(conversationId) ||
+      !isAgentId(workspaceId) ||
+      !isRelativeProjectPath(path) ||
+      typeof replaceExisting !== 'boolean'
+    )
+      throw new Error('文件引用参数无效')
+    const result = parseProjectSelectionResult(
+      await ipcRenderer.invoke(
+        'project:add-workspace-reference',
+        conversationId,
+        workspaceId,
+        path,
+        replaceExisting
+      )
+    )
+    if (!result) throw new Error('文件引用结果无效')
+    return result
   },
   removeProjectFile: async (conversationId, snapshotId, path) => {
     if (

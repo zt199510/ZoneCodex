@@ -1,0 +1,63 @@
+.file-mention-menu {
+  position: fixed;
+  inset: auto;
+  box-sizing: border-box;
+  margin: 0;
+  padding: 4px;
+  overflow-y: auto;
+  border: 1px solid #00000014;
+  border-radius: 12px;
+  background: #fafafa;
+  color: #1a1c1f;
+  box-shadow: 0 8px 24px #00000012;
+  font-size: 14px;
+  overscroll-behavior: contain;
+}
+
+.file-mention-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 36px;
+  padding: 7px 8px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+}
+
+.file-mention-option[aria-selected='true'],
+.file-mention-option:hover {
+  background: #1a1c1f0d;
+}
+
+.file-mention-option svg {
+  flex-shrink: 0;
+  color: #6a6c6d;
+}
+
+.file-mention-option span,
+.file-mention-option small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.file-mention-option span {
+  flex-shrink: 0;
+  max-width: 60%;
+}
+
+.file-mention-option small {
+  color: #6a6c6d;
+  font-size: 12px;
+}
+
+.file-mention-status {
+  margin: 0;
+  padding: 10px 8px;
+  color: #6a6c6d;
+  font-size: 13px;
+}

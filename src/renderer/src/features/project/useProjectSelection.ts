@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import type { ProjectSelection } from '../../../../shared/project'
 
 import type { OperationControl } from '../conversation/useOperation'
@@ -17,6 +17,7 @@ type ProjectSelectionController = {
   projectError: string | null
   clearError: () => void
   selectProjectFiles: () => Promise<boolean>
+  addWorkspaceFileReference: (workspaceId: string, path: string) => Promise<boolean>
   revokeProjectFiles: () => Promise<boolean>
   removeFile: (path: string) => Promise<boolean>
   revokeSelectionForChange: () => Promise<boolean>
@@ -33,6 +34,10 @@ export function useProjectSelection({
   // 已发送文件仍供当前会话使用，但不再显示为下一条消息的待发送附件。
   const [sentSnapshotId, setSentSnapshotId] = useState<string | null>(null)
   const projectSelectionRef = useRef<ProjectSelection | null>(null)
+  const conversationRef = useRef(conversationId)
+  useLayoutEffect(() => {
+    conversationRef.current = conversationId
+  }, [conversationId])
   const setProjectSelection = useCallback((selection: ProjectSelection | null): void => {
     projectSelectionRef.current = selection
     setProjectSelectionState(selection)
@@ -107,6 +112,38 @@ export function useProjectSelection({
     }
   }
 
+  async function addWorkspaceFileReference(workspaceId: string, path: string): Promise<boolean> {
+    if (!conversationId || !canChange() || !operations.begin('selecting')) return false
+    setProjectError(null)
+    try {
+      const result = await window.api.addWorkspaceFileReference(
+        conversationId,
+        workspaceId,
+        path,
+        projectSelectionRef.current?.snapshotId === sentSnapshotId
+      )
+      if (conversationRef.current !== conversationId) {
+        if (result.status === 'selected') {
+          void window.api.revokeProjectFiles(result.selection.snapshotId).catch(() => undefined)
+        }
+        return false
+      }
+      if (result.status === 'selected') {
+        setProjectSelection(result.selection)
+        return true
+      }
+      if (result.status === 'error') setProjectError(result.error)
+      return false
+    } catch {
+      if (conversationRef.current === conversationId) {
+        setProjectError('引用文件失败，请重试。')
+      }
+      return false
+    } finally {
+      operations.finish('selecting')
+    }
+  }
+
   async function removeFile(path: string): Promise<boolean> {
     const selection = projectSelectionRef.current
     if (!conversationId || !selection || !canChange() || !operations.begin('selecting'))
@@ -141,6 +178,7 @@ export function useProjectSelection({
     projectError,
     clearError: () => setProjectError(null),
     selectProjectFiles,
+    addWorkspaceFileReference,
     revokeProjectFiles,
     revokeSelectionForChange,
     removeFile

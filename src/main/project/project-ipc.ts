@@ -1,13 +1,19 @@
 import { ipcMain } from 'electron'
 import type { BrowserWindow } from 'electron'
 import { isAgentId } from '../../shared/agent'
-import type { WorkspaceInstructionResult, WorkspaceSelectionResult } from '../../shared/project'
+import {
+  isRelativeProjectPath,
+  isWorkspaceFileSearchQuery,
+  type WorkspaceInstructionResult,
+  type WorkspaceSelectionResult
+} from '../../shared/project'
 import { getIpcWindow } from '../ipc-source'
 import { hasImageSelection } from './image-access'
 import {
   configureAttachmentAccess,
   hasProjectSelection,
   selectProjectFiles,
+  addWorkspaceFileReference,
   removeProjectFile,
   revokeProjectFiles,
   cleanupAttachmentAccess
@@ -20,6 +26,7 @@ import {
   readWorkspaceInstruction,
   cleanupWorkspaceAccess
 } from './workspace-access'
+import { cleanupWorkspaceFileSearch, searchWorkspaceFiles } from './workspace-file-references'
 
 export type ProjectAccessCallbacks = {
   isAgentJobActive: (windowId: number) => boolean
@@ -67,6 +74,39 @@ export function registerProjectAccess(nextCallbacks: ProjectAccessCallbacks): vo
       return removeProjectFile(owner.id, conversationId, snapshotId, path)
     }
   )
+  ipcMain.handle(
+    'project:add-workspace-reference',
+    (
+      event,
+      conversationId: unknown,
+      workspaceId: unknown,
+      path: unknown,
+      replaceExisting: unknown = false
+    ) => {
+      const owner = ownerOf(event)
+      if (
+        !isAgentId(conversationId) ||
+        !isAgentId(workspaceId) ||
+        !isRelativeProjectPath(path) ||
+        typeof replaceExisting !== 'boolean'
+      )
+        return resultError('文件引用参数无效')
+      return addWorkspaceFileReference(owner, conversationId, workspaceId, path, replaceExisting)
+    }
+  )
+  ipcMain.handle(
+    'workspace:search-files',
+    (event, conversationId: unknown, workspaceId: unknown, query: unknown) => {
+      const owner = ownerOf(event)
+      if (
+        !isAgentId(conversationId) ||
+        !isAgentId(workspaceId) ||
+        !isWorkspaceFileSearchQuery(query)
+      )
+        return resultError('文件搜索参数无效')
+      return searchWorkspaceFiles(owner, conversationId, workspaceId, query)
+    }
+  )
   ipcMain.handle('project:revoke', (event, snapshotId: unknown): boolean => {
     const owner = ownerOf(event)
     if (
@@ -104,6 +144,7 @@ export function registerProjectAccess(nextCallbacks: ProjectAccessCallbacks): vo
 }
 
 export function cleanupProjectAccess(windowId: number): void {
+  cleanupWorkspaceFileSearch(windowId)
   cleanupAttachmentAccess(windowId)
   cleanupWorkspaceAccess(windowId)
 }
