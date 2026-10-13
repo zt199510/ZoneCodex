@@ -7,7 +7,7 @@ import { AttachmentCards } from '../project/AttachmentCards'
 import { ImageAttachment } from '../project/ImageAttachment'
 import { appendImageTurnNotice, type ImageDescriptor } from '../../../../shared/image-input'
 import { ChatInput } from './ChatInput'
-import { ComposerMode } from './ComposerMode'
+import { ComposerPlanIndicator } from './ComposerMode'
 
 export function ChatComposer({
   conversation,
@@ -28,7 +28,7 @@ export function ChatComposer({
   anchorRef: RefObject<HTMLDivElement | null>
   onPreviewImage?: (image: ImageDescriptor, trigger: HTMLButtonElement) => void
 }): React.JSX.Element {
-  const { storage, operation } = conversation
+  const { operation } = conversation
   const images = conversation.images
   return (
     <div className="composer-region" ref={anchorRef}>
@@ -47,6 +47,13 @@ export function ChatComposer({
         maxLength={
           2000 -
           (images?.pending.length ? appendImageTurnNotice('', images.pending.length).length : 0)
+        }
+        placeholder={
+          conversation.agentMode === 'plan'
+            ? '描述任务，生成一份计划…'
+            : conversation.messages.length
+              ? '与 ZoneCodex 一起工作'
+              : '描述你想完成的任务'
         }
         onPasteImages={
           images
@@ -75,12 +82,7 @@ export function ChatComposer({
                   : undefined
               }
               imageBusy={images?.busy}
-            />
-            <ComposerMode
-              mode={conversation.agentMode}
-              onSelect={conversation.setAgentMode}
-              conversationId={conversation.activeConversationId}
-              disabled={
+              modeDisabled={
                 operation !== 'idle' ||
                 !conversation.canNavigate ||
                 executionApprovalPending ||
@@ -98,10 +100,20 @@ export function ChatComposer({
                 !conversation.executionPermissions.state
               }
             />
+            <ComposerPlanIndicator
+              mode={conversation.agentMode}
+              onSelect={conversation.setAgentMode}
+              disabled={
+                operation !== 'idle' ||
+                !conversation.canNavigate ||
+                executionApprovalPending ||
+                Boolean(images?.busy)
+              }
+            />
           </div>
         }
         attachments={
-          <>
+          <div className="composer-attachment-strip">
             <AttachmentCards
               selection={conversation.projectSelection}
               disabled={!conversation.canEdit}
@@ -123,16 +135,9 @@ export function ChatComposer({
                 ))}
               </div>
             )}
-          </>
+          </div>
         }
       />
-      <p className="composer-footnote">
-        {storage.paused
-          ? '自动保存已暂停，请重试保存后再关闭。'
-          : storage.dirty
-            ? '修改尚未保存，关闭前请等待保存完成。'
-            : '回复可能存在疏漏，请核实重要信息。'}
-      </p>
     </div>
   )
 }

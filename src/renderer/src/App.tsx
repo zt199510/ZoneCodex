@@ -1,20 +1,51 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import type { CSSProperties } from 'react'
 import { Sidebar } from './components/layout/Sidebar'
+import { SidebarSearch } from './components/layout/SidebarSearch'
 import { TitleBar } from './components/layout/TitleBar'
+import { SidebarRail } from './components/layout/SidebarRail'
+import { useSidebarLayout } from './components/layout/useSidebarLayout'
+import {
+  clampSidebarWidth,
+  sidebarBreakpoint,
+  sidebarDefaultWidth,
+  sidebarMinWidth,
+  sidebarMaxWidth
+} from './components/layout/sidebar-layout'
 import { ChatWorkspace } from './features/chat/ChatWorkspace'
 import { useConversation } from './features/conversation/useConversation'
 import { useFileView } from './features/files/useFileView'
 import { FileViewPanel } from './features/files/FileViewPanel'
 import { SettingsPage } from './features/settings/SettingsPage'
-import { TerminalPanel } from './features/terminal/TerminalPanel'
-import type { TerminalPanelHandle } from './features/terminal/TerminalPanel'
 
 function App(): React.JSX.Element {
   const conversation = useConversation()
-  const [sidebarOpen, setSidebarOpen] = useState(() => window.innerWidth > 760)
+  const setConversationSearch = conversation.setSearch
+  const {
+    open: sidebarOpen,
+    peeking: sidebarPeeking,
+    present: sidebarPresent,
+    expanded: sidebarExpanded,
+    transitioning: sidebarTransitioning,
+    setOpen: setSidebarOpen,
+    enterPreview: enterSidebarPreview,
+    leavePreview: leaveSidebarPreview,
+    finishTransition: finishSidebarTransition
+  } = useSidebarLayout()
+  const [sidebarResizing, setSidebarResizing] = useState(false)
+  const [sidebarWidthPreference, setSidebarWidthPreference] = useState(() => {
+    try {
+      const saved = Number(localStorage.getItem('zonecodex.sidebar.width'))
+      return saved >= sidebarMinWidth && saved <= sidebarMaxWidth ? saved : sidebarDefaultWidth
+    } catch {
+      return sidebarDefaultWidth
+    }
+  })
+  const [viewportWidth, setViewportWidth] = useState(window.innerWidth)
+  const sidebarWidth = clampSidebarWidth(sidebarWidthPreference, viewportWidth)
+  const [searchOpen, setSearchOpen] = useState(false)
+  const [sidebarView, setSidebarView] = useState<'active' | 'archived'>('active')
   const [settingsOpen, setSettingsOpen] = useState(false)
-  const [terminalOpen, setTerminalOpen] = useState(false)
-  const terminalPanel = useRef<TerminalPanelHandle>(null)
   const [settingsSaving, setSettingsSaving] = useState(false)
   const settingsSavingRef = useRef(false)
   const onSettingsSavingChange = useCallback((saving: boolean): void => {
@@ -22,16 +53,23 @@ function App(): React.JSX.Element {
     setSettingsSaving(saving)
   }, [])
   const [settingsReturnFocus, setSettingsReturnFocus] = useState<HTMLElement>()
-  const closeTerminalPanel = useCallback((): void => {
-    setTerminalOpen(false)
-    requestAnimationFrame(() => {
-      if (document.querySelector('dialog[open], [popover]:popover-open')) return
-      if (document.querySelector('.workspace-shell[hidden], .workspace-shell[inert]')) return
-      if (document.activeElement && document.activeElement !== document.body) return
-      document.getElementById('terminal-panel-toggle')?.focus({ preventScroll: true })
-    })
-  }, [])
   const fileView = useFileView(conversation, !settingsOpen)
+  const changeSidebarWidth = (width: number): void => {
+    setSidebarWidthPreference(clampSidebarWidth(width))
+  }
+  useEffect(() => {
+    const resize = (): void => setViewportWidth(window.innerWidth)
+    window.addEventListener('resize', resize)
+    return () => window.removeEventListener('resize', resize)
+  }, [])
+  useEffect(() => {
+    if (sidebarResizing) return
+    try {
+      localStorage.setItem('zonecodex.sidebar.width', String(sidebarWidthPreference))
+    } catch {
+      // The sidebar can still resize when local storage is unavailable.
+    }
+  }, [sidebarWidthPreference, sidebarResizing])
   const openSettings = useCallback(
     (returnFocus?: HTMLElement): void => {
       if (settingsOpen) return
@@ -40,32 +78,44 @@ function App(): React.JSX.Element {
         returnFocus ??
           (document.activeElement instanceof HTMLElement ? document.activeElement : undefined)
       )
-      if (window.innerWidth <= 760) setSidebarOpen(false)
+      if (window.innerWidth < sidebarBreakpoint) setSidebarOpen(false)
       setSettingsOpen(true)
     },
-    [settingsOpen]
+    [setSidebarOpen, settingsOpen]
   )
 
   async function showChatAfter(navigate: () => Promise<boolean>): Promise<boolean> {
     if (settingsSavingRef.current) return false
     const accepted = await navigate()
-    if (accepted) setSettingsOpen(false)
+    if (accepted) {
+      setSettingsOpen(false)
+      setSidebarView('active')
+      if (window.innerWidth < sidebarBreakpoint) setSidebarOpen(false)
+    }
     return accepted
   }
 
   useEffect(() => {
     return window.api.onAgentUserInputChange((request) => {
-      if (request) setSettingsOpen(false)
+      if (request) {
+        setSettingsOpen(false)
+        setSearchOpen(false)
+        setConversationSearch('')
+      }
     })
-  }, [])
+  }, [setConversationSearch])
 
   useEffect(() => {
-    if (!settingsOpen) return
+    if (!settingsOpen && !searchOpen) return
     // An approval or window-close dialog needs the chat surface that owns it.
     const showPendingDialog = (): void => {
-      const dialog = document.querySelector<HTMLDialogElement>('dialog[open]')
+      const dialog = document.querySelector<HTMLDialogElement>(
+        'dialog[open]:not(.sidebar-search-dialog)'
+      )
       if (!dialog) return
       setSettingsOpen(false)
+      setSearchOpen(false)
+      setConversationSearch('')
       requestAnimationFrame(() => {
         if (!dialog.isConnected || !dialog.open || dialog.contains(document.activeElement)) return
         const target = dialog.querySelector<HTMLElement>(
@@ -78,10 +128,35 @@ function App(): React.JSX.Element {
     observer.observe(document.body, { subtree: true, attributes: true, attributeFilter: ['open'] })
     showPendingDialog()
     return () => observer.disconnect()
-  }, [settingsOpen])
+  }, [settingsOpen, searchOpen, setConversationSearch])
 
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent): void {
+      if (
+        (event.ctrlKey || event.metaKey) &&
+        !event.altKey &&
+        !event.shiftKey &&
+        !event.isComposing &&
+        !event.defaultPrevented &&
+        !document.querySelector('dialog[open], [popover]:popover-open')
+      ) {
+        const key = event.key.toLowerCase()
+        if (key === 'b') {
+          event.preventDefault()
+          setSidebarOpen((previous) => !previous)
+          return
+        }
+        if (key === 'k') {
+          event.preventDefault()
+          setSearchOpen(true)
+          return
+        }
+        if (key === 'n') {
+          event.preventDefault()
+          document.querySelector<HTMLButtonElement>('.conversation-create')?.click()
+          return
+        }
+      }
       if (
         event.ctrlKey &&
         !event.altKey &&
@@ -109,48 +184,98 @@ function App(): React.JSX.Element {
     }
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  }, [openSettings, settingsOpen])
+  }, [openSettings, setSidebarOpen, settingsOpen])
 
   return (
-    <div className={`app-shell ${sidebarOpen ? 'sidebar-open' : ''}`}>
-      <TitleBar
-        sidebarOpen={sidebarOpen}
-        onToggleSidebar={() => setSidebarOpen((previous) => !previous)}
-        terminalOpen={terminalOpen}
-        terminalDisabled={settingsOpen}
-        onToggleTerminal={() => {
-          if (settingsOpen || document.querySelector('dialog[open], [popover]:popover-open')) return
-          if (terminalOpen) terminalPanel.current?.close()
-          else setTerminalOpen(true)
+    <div
+      className={`app-shell${sidebarOpen ? ' sidebar-open' : ''}${sidebarExpanded ? ' sidebar-visible' : ''}${sidebarPeeking ? ' sidebar-peeking' : ''}${sidebarResizing ? ' sidebar-resizing' : ''}`}
+      style={{ '--sidebar-width': `${sidebarWidth}px` } as CSSProperties}
+      onPointerDownCapture={(event) => {
+        if (
+          sidebarPeeking &&
+          !(event.target as Element).closest(
+            '#conversation-sidebar, .sidebar-collapsed-rail, .sidebar-popover'
+          )
+        ) {
+          setSidebarOpen(false)
+        }
+      }}
+    >
+      <TitleBar />
+      <SidebarRail
+        open={sidebarOpen}
+        peeking={sidebarPeeking}
+        disabled={
+          !conversation.canNavigate || settingsSaving || conversation.conversations.length >= 100
+        }
+        settingsOpen={settingsOpen}
+        onToggle={() => setSidebarOpen((previous) => !previous)}
+        onOpen={() => {
+          if (settingsSavingRef.current) return
+          setSettingsOpen(false)
+          setSidebarOpen(true)
         }}
+        onCreate={() => showChatAfter(conversation.create)}
+        onSearch={() => setSearchOpen(true)}
+        onOpenSettings={openSettings}
+        onPreviewEnter={enterSidebarPreview}
+        onPreviewLeave={leaveSidebarPreview}
       />
-      {sidebarOpen && (
-        <button
-          className="sidebar-backdrop"
-          aria-label="关闭侧栏"
-          onClick={() => setSidebarOpen(false)}
-        />
-      )}
-      {sidebarOpen && (
-        <Sidebar
-          conversations={conversation.conversations}
-          visibleConversations={conversation.visibleConversations}
-          activeConversationId={conversation.activeConversationId}
-          disabled={!conversation.canNavigate || settingsSaving}
-          search={conversation.search}
-          onSearch={conversation.setSearch}
-          onCreate={() => showChatAfter(conversation.create)}
-          onSelect={(id) => showChatAfter(() => conversation.select(id))}
-          onRename={(id, title) => !settingsSavingRef.current && conversation.rename(id, title)}
-          onTogglePinned={(id) => !settingsSavingRef.current && conversation.togglePinned(id)}
-          onArchive={async (id) => {
-            if (settingsSavingRef.current) return false
-            return conversation.archive(id)
-          }}
-          onRestore={(id) => showChatAfter(() => conversation.restore(id))}
-          onOpenSettings={openSettings}
-        />
-      )}
+      <button
+        className="sidebar-backdrop"
+        aria-label="关闭侧栏"
+        aria-hidden={!sidebarOpen}
+        hidden={!sidebarPresent}
+        disabled={!sidebarOpen}
+        tabIndex={sidebarOpen ? 0 : -1}
+        onClick={() => setSidebarOpen(false)}
+      />
+      <Sidebar
+        conversations={conversation.conversations}
+        visibleConversations={conversation.visibleConversations}
+        activeConversationId={conversation.activeConversationId}
+        disabled={!conversation.canNavigate || settingsSaving}
+        hidden={!sidebarOpen && !sidebarPeeking}
+        present={sidebarPresent}
+        transitioning={sidebarTransitioning}
+        onTransitionEnd={finishSidebarTransition}
+        view={sidebarView}
+        onViewChange={setSidebarView}
+        settingsOpen={settingsOpen}
+        width={sidebarWidth}
+        onWidthChange={changeSidebarWidth}
+        onResizingChange={setSidebarResizing}
+        onCollapse={() => setSidebarOpen(false)}
+        onExpand={() => setSidebarOpen(true)}
+        peeking={sidebarPeeking}
+        onPreviewEnter={enterSidebarPreview}
+        onPreviewLeave={leaveSidebarPreview}
+        onOpenSearch={() => setSearchOpen(true)}
+        onSelectWorkspace={() => showChatAfter(conversation.workspace.select)}
+        onCreate={() => showChatAfter(conversation.create)}
+        onSelect={(id) => showChatAfter(() => conversation.select(id))}
+        onRename={(id, title) => !settingsSavingRef.current && conversation.rename(id, title)}
+        onTogglePinned={(id) => !settingsSavingRef.current && conversation.togglePinned(id)}
+        onArchive={async (id) => {
+          if (settingsSavingRef.current) return false
+          return conversation.archive(id)
+        }}
+        onRestore={(id) => showChatAfter(() => conversation.restore(id))}
+        onOpenSettings={openSettings}
+      />
+      <SidebarSearch
+        open={searchOpen}
+        disabled={!conversation.canNavigate || settingsSaving}
+        conversations={conversation.visibleConversations}
+        search={conversation.search}
+        onSearch={conversation.setSearch}
+        onClose={() => {
+          setSearchOpen(false)
+          conversation.setSearch('')
+        }}
+        onSelect={(id) => showChatAfter(() => conversation.select(id))}
+        onRestore={(id) => showChatAfter(() => conversation.restore(id))}
+      />
       <div className="workspace-shell" hidden={settingsOpen} inert={settingsOpen}>
         <div
           className={`workspace-body${fileView.state.status !== 'idle' ? ' with-file-view' : ''}`}
@@ -158,9 +283,6 @@ function App(): React.JSX.Element {
           <ChatWorkspace conversation={conversation} onOpenFile={fileView.open} />
           <FileViewPanel state={fileView.state} onClose={fileView.close} />
         </div>
-        {terminalOpen && (
-          <TerminalPanel ref={terminalPanel} visible={!settingsOpen} onClose={closeTerminalPanel} />
-        )}
       </div>
       <SettingsPage
         open={settingsOpen}

@@ -6,6 +6,11 @@ import { agentAPI } from './agent-api'
 import { projectAPI } from './project-api'
 import { windowAPI } from './window-api'
 import { terminalAPI } from './terminal-api'
+import { gitAPI } from './git-api'
+import { gitWorkbenchAPI } from './git-workbench-api'
+import { gitRepositoriesAPI } from './git-repositories-api'
+import { gitPullRequestAPI } from './git-pr-api'
+import { gitObservationAPI } from './git-observation-api'
 import { settingsAPI } from './settings-api'
 
 // 分组实现同一个平铺业务接口，页面不直接使用 Node API。
@@ -15,6 +20,11 @@ const api: AppAPI = {
   ...projectAPI,
   ...windowAPI,
   ...terminalAPI,
+  ...gitAPI,
+  ...gitWorkbenchAPI,
+  ...gitRepositoriesAPI,
+  ...gitPullRequestAPI,
+  ...gitObservationAPI,
   ...settingsAPI
 }
 

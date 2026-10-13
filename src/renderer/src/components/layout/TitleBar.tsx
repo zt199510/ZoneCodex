@@ -1,55 +1,15 @@
-import { Icon } from '../ui/Icon'
 import { useWindowControls } from './useWindowControls'
 
-export function TitleBar({
-  sidebarOpen,
-  showSidebarToggle = true,
-  onToggleSidebar,
-  terminalOpen,
-  terminalDisabled,
-  onToggleTerminal
-}: {
-  sidebarOpen: boolean
-  showSidebarToggle?: boolean
-  onToggleSidebar: () => void
-  terminalOpen: boolean
-  terminalDisabled: boolean
-  onToggleTerminal: () => void
-}): React.JSX.Element {
-  const label = sidebarOpen ? '收起侧栏' : '展开侧栏'
+export function TitleBar(): React.JSX.Element {
   const controls = useWindowControls()
   return (
     <header className="title-bar" aria-label="窗口标题栏">
-      {showSidebarToggle && (
-        <button
-          className="icon-button"
-          onClick={onToggleSidebar}
-          aria-label={label}
-          title={label}
-          aria-expanded={sidebarOpen}
-        >
-          <Icon name="panel" />
-        </button>
-      )}
-      <button
-        id="terminal-panel-toggle"
-        type="button"
-        className="quiet-button title-terminal-toggle"
-        aria-label={terminalOpen ? '关闭终端' : '打开终端'}
-        title={terminalOpen ? '关闭终端' : '打开终端'}
-        aria-controls="terminal-panel"
-        aria-expanded={terminalOpen}
-        disabled={terminalDisabled}
-        onClick={onToggleTerminal}
-      >
-        <Icon name="terminal" size={15} />
-        终端
-      </button>
       {controls.error && (
         <span className="window-error" role="status">
           {controls.error}
         </span>
       )}
+      <div className="title-bar-drag" aria-hidden="true" />
       <div className="window-controls" aria-label="窗口操作">
         <button
           className="window-control"

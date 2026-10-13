@@ -1,4 +1,10 @@
-.composer-region {
+/* Codex 26.1007.2314: editor, attachments, and controls share one surface. */
+.chat-workspace .composer-region {
+  --composer-foreground: #1a1c1f;
+  --composer-secondary: #6a6c6d;
+  --composer-muted: #8d8e8f;
+  --composer-hover: #1a1c1f0d;
+  --composer-border: #1a1c1f14;
   width: min(100%, var(--content-width));
   padding: 16px 24px 20px;
   margin: 0 auto;
@@ -6,102 +12,484 @@
   max-height: 65%;
   overflow-y: auto;
   overscroll-behavior: contain;
+  color: var(--composer-foreground);
 }
 
-.composer {
-  padding: 16px 17px 12px;
-  border: 1px solid #dfe2d9;
-  background: #fff;
-  border-radius: 16px;
-  box-shadow: 0 3px 16px #232a2410;
-}
-
-.composer:focus-within {
-  border-color: #a6b69e;
-  box-shadow:
-    0 3px 16px #232a2410,
-    0 0 0 2px #a6b69e15;
-}
-
-.composer textarea {
-  display: block;
-  width: 100%;
+.composer-region .composer {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
   padding: 0;
   border: 0;
+  border-radius: 22px;
+  background: #fff;
+  box-shadow:
+    0 0 0 1px #0000000a,
+    0 2px 8px #0000000a,
+    0 4px 80px 8px #00000006;
+}
+
+.composer-region .composer-attachment-strip {
+  display: flex;
+  align-items: flex-end;
+  gap: 12px;
+  min-width: 0;
+  padding: 12px 12px 10px;
+  overflow-x: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: none;
+}
+
+.composer-region .composer-attachment-strip:not(:has(.attachment-card, .image-attachment)) {
+  padding: 8px 8px 6px;
+}
+
+.composer-region .composer-attachment-strip::-webkit-scrollbar {
+  display: none;
+}
+
+.composer-region .composer-editor {
+  min-width: 0;
+  padding: 0 12px;
+}
+
+.composer-region .composer textarea {
+  display: block;
+  width: 100%;
+  min-height: 44px;
+  max-height: 25dvh;
+  padding: 0;
+  margin: 0;
+  border: 0;
+  outline: 0;
   resize: none;
-  outline: none;
   background: transparent;
-  color: var(--text);
-  min-height: 62px;
-  max-height: 180px;
+  color: var(--composer-foreground);
   font-size: 14px;
-  line-height: 1.8;
+  line-height: 20px;
+  transition: height 220ms cubic-bezier(0.2, 0, 0, 1);
 }
 
-.composer textarea::placeholder {
-  color: #a2a69c;
+.composer-region .composer textarea::placeholder {
+  color: var(--composer-foreground);
+  opacity: 0.5;
 }
 
-.composer textarea:disabled {
+.composer-region .composer textarea:disabled {
   cursor: not-allowed;
 }
 
-.composer-toolbar {
+.composer-region .composer-toolbar {
+  container: composer-footer / inline-size;
   display: flex;
   align-items: center;
-  gap: 12px;
-  margin-top: 11px;
+  gap: 5px;
+  min-width: 0;
+  padding: 0 8px;
+  margin: 4px 0 8px;
+  user-select: none;
+}
+
+.composer-region .composer-tools,
+.composer-region .composer-submit {
+  display: flex;
+  align-items: center;
+  gap: 4px;
   min-width: 0;
 }
 
-.composer-submit {
+.composer-region .composer-submit {
   margin-left: auto;
-  display: flex;
-  align-items: center;
-  gap: 13px;
 }
 
-.keyboard-hint {
-  font-size: 10px;
-  color: #9a9d95;
+.composer-region .keyboard-hint {
+  display: inline;
+}
+
+.composer-region .send-button {
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  width: 28px;
+  height: 28px;
+  padding: 2px;
+  border: 0;
+  border-radius: 50%;
+  background: var(--composer-foreground);
+  color: #fff;
+}
+
+.composer-region .send-button:hover:not(:disabled) {
+  background: #393b3e;
+}
+
+.composer-region .send-button:disabled {
+  background: var(--composer-foreground);
+  color: #fff;
+  opacity: 0.5;
+}
+
+.composer-region .composer-attachments,
+.composer-region .composer-mode,
+.composer-region .composer-permissions {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+  min-width: 0;
+}
+
+.composer-region .attachment-add {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--composer-foreground);
+}
+
+.composer-region .permissions-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 28px;
+  padding: 0 6px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--composer-secondary);
+  font-size: 13px;
+  line-height: 18px;
+}
+
+.composer-region .composer-plan-indicator {
+  padding: 0 8px;
+  font-size: 13px;
+  line-height: 18px;
+}
+
+.composer-region .composer-footer-divider {
+  width: 1px;
+  height: 14px;
+  margin: 0 4px;
+  background: var(--composer-border);
+}
+
+.composer-region .agent-mode-trigger,
+.composer-region .agent-mode-trigger[data-mode='plan'] {
+  color: var(--composer-muted);
+}
+
+.composer-region .composer-icon {
+  display: block;
+  stroke: none;
+}
+
+.composer-region .composer-plan-icon {
+  display: flex;
+}
+
+.composer-region .composer-plan-close {
+  display: none;
+}
+
+.composer-region .composer-plan-indicator:hover:not(:disabled) .composer-plan-icon,
+.composer-region .composer-plan-indicator:focus-visible .composer-plan-icon {
+  display: none;
+}
+
+.composer-region .composer-plan-indicator:hover:not(:disabled) .composer-plan-close,
+.composer-region .composer-plan-indicator:focus-visible .composer-plan-close {
+  display: flex;
+}
+
+.composer-region .permissions-trigger[data-mode='full-access'] {
+  color: #e25507;
+}
+
+.composer-region .attachment-add:hover:not(:disabled),
+.composer-region .attachment-add[aria-expanded='true'],
+.composer-region .permissions-trigger:hover:not(:disabled),
+.composer-region .permissions-trigger[aria-expanded='true'] {
+  background: var(--composer-hover);
+}
+
+.composer-region .attachment-add:disabled,
+.composer-region .permissions-trigger:disabled {
+  opacity: 0.5;
+}
+
+.composer-region button:focus-visible {
+  outline: 2px solid #0285ff;
+  outline-offset: 2px;
+}
+
+.composer-region .attachment-popover,
+.composer-region .permissions-popover {
+  padding: 4px;
+  border: 1px solid var(--composer-border);
+  border-radius: 12px;
+  background: #fff;
+  color: var(--composer-foreground);
+  box-shadow:
+    0 4px 12px #0000000d,
+    0 12px 32px #0000000d;
+  font-size: 13px;
+}
+
+.composer-region .attachment-popover {
+  padding: 4px;
+  border-radius: 16px;
+}
+
+.composer-region .permissions-heading {
+  padding: 4px 8px 6px;
+  color: var(--composer-muted);
+  font-size: 11px;
+  font-weight: 400;
+}
+
+.composer-region .attachment-menu-separator {
+  height: 1px;
+  margin: 4px;
+  background: var(--composer-border);
+}
+
+.composer-region .composer-plan-option > span:not(.permissions-check) {
+  flex: 1;
+}
+
+.composer-region .composer-plan-option .permissions-check {
+  display: block;
+  flex: 0 0 16px;
+  color: var(--composer-foreground);
+  text-align: center;
+}
+
+.composer-region .attachment-picker,
+.composer-region .permissions-option {
+  gap: 8px;
+  min-height: 30px;
+  padding: 6px 8px;
+  border-radius: 8px;
+  color: var(--composer-foreground);
+}
+
+.composer-region .attachment-picker {
+  padding: 5px 8px;
+  border-radius: 12px;
+}
+
+.composer-region .attachment-picker strong,
+.composer-region .permissions-option strong {
+  font-size: 13px;
+  font-weight: 400;
+}
+
+.composer-region .attachment-picker > svg,
+.composer-region .permissions-option > svg,
+.composer-region .attachment-picker small,
+.composer-region .permissions-option small {
+  color: var(--composer-muted);
+}
+
+.composer-region .attachment-picker:hover:not(:disabled),
+.composer-region .attachment-picker:focus-visible,
+.composer-region .permissions-option:hover:not(:disabled),
+.composer-region .permissions-option:focus-visible {
+  background: var(--composer-hover);
+}
+
+.composer-region .permissions-option[data-mode='full-access'],
+.composer-region .permissions-option[data-mode='full-access'] > svg,
+.composer-region .permissions-option[data-mode='full-access'] small {
+  color: #e25507;
+}
+
+.composer-region .attachment-cards,
+.composer-region .composer-image {
+  display: contents;
+}
+
+.composer-region .attachment-card {
+  position: relative;
+  flex: 0 0 160px;
+  width: 160px;
+  height: 122px;
+  min-width: 0;
+  border: 0;
+  border-radius: 16px;
+  background: #f8f8f8;
+  list-style: none;
+}
+
+.composer-region .attachment-card::after,
+.composer-region .image-attachment::after {
+  position: absolute;
+  inset: 0;
+  border: 1px solid var(--composer-border);
+  border-radius: inherit;
+  content: '';
+  pointer-events: none;
+}
+
+.composer-region .attachment-card:hover::after,
+.composer-region .image-attachment:hover::after {
+  background: var(--composer-hover);
+}
+
+.composer-region .attachment-card-preview {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 90px;
+  border-radius: 16px 16px 0 0;
+  background: transparent;
+  color: var(--composer-secondary);
+}
+
+.composer-region .attachment-card-preview span {
+  display: none;
+}
+
+.composer-region .attachment-card-name {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  height: 32px;
+  min-width: 0;
+  padding: 0 8px;
+  border-radius: 0 0 16px 16px;
+  background: #fff;
+  font-size: 12px;
+  line-height: 16px;
+}
+
+.composer-region .attachment-card-name > svg {
+  flex-shrink: 0;
+}
+
+.composer-region .attachment-card-name > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.send-button {
-  display: grid;
-  place-items: center;
-  background: #303a30;
+.composer-region .attachment-card-name small {
+  color: var(--composer-muted);
+  font-size: 10px;
+}
+
+.composer-region .image-attachment {
+  position: relative;
+  flex: 0 0 122px;
+  width: 122px;
+  height: 122px;
+  max-width: none;
   border: 0;
-  color: #fff;
-  width: 33px;
-  height: 33px;
-  border-radius: 10px;
+  border-radius: 16px;
+  background: #f8f8f8;
 }
 
-.send-button:hover:not(:disabled) {
-  background: #4a5e46;
+.composer-region .image-attachment-preview {
+  width: 100%;
+  height: 100%;
+  border: 0;
+  border-radius: 16px;
+  background: #f8f8f8;
 }
 
-.send-button:disabled {
-  background: #eceee8;
-  color: #a6ad9e;
+.composer-region .image-attachment-preview img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.composer-region .image-attachment-preview:disabled {
   opacity: 1;
 }
 
-.composer-footnote {
-  font-size: 10px;
-  color: var(--soft-text);
+.composer-region .image-attachment-copy {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.composer-region .attachment-remove {
+  position: absolute;
+  z-index: 1;
+  top: -2px;
+  right: -2px;
+  display: grid;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: var(--composer-foreground);
+  color: #fff;
+  box-shadow:
+    0 0 0 2px #fff,
+    0 1px 2px #0000000d;
+  font-size: 13px;
+  line-height: 1;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.composer-region .attachment-card:hover .attachment-remove,
+.composer-region .attachment-card:focus-within .attachment-remove,
+.composer-region .image-attachment:hover .attachment-remove,
+.composer-region .image-attachment:focus-within .attachment-remove,
+.composer-region .attachment-remove:focus-visible {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.composer-region .attachment-remove:hover:not(:disabled) {
+  background: #393b3e;
+}
+
+.composer-region .attachment-remove:disabled {
+  opacity: 0;
+}
+
+.composer-region .attachment-card:hover .attachment-remove:disabled,
+.composer-region .image-attachment:hover .attachment-remove:disabled {
+  opacity: 0.5;
+}
+
+.composer-region .composer-image-drop {
+  outline: 2px solid #0285ff;
+  outline-offset: -2px;
+}
+
+.composer-region .composer-drop-hint {
+  border-radius: inherit;
+  background: #fffffff2;
+  color: var(--composer-foreground);
+}
+
+.composer-region .composer-footnote {
+  margin-top: 8px;
+  color: var(--composer-muted);
+  font-size: 11px;
+  line-height: 16px;
   text-align: center;
-  margin-top: 12px;
 }
 
-.composer-tools {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  min-width: 0;
-}
-
+/* These shared hooks also appear in the existing inline message editor. */
 .composer-mode {
   display: flex;
   align-items: center;
@@ -124,17 +512,44 @@
   color: var(--soft-text);
 }
 
-@media (max-width: 760px) {
-  .composer-tools {
-    flex-wrap: wrap;
-    gap: 5px;
-  }
-
-  .composer-toolbar {
-    gap: 5px;
-  }
-
-  .composer-toolbar .keyboard-hint {
+@container composer-footer (width <= 475px) {
+  .composer-region .permissions-trigger > span:not(.composer-plan-icon, .composer-plan-close) {
     display: none;
+  }
+}
+
+@media (max-width: 760px) {
+  .chat-workspace .composer-region {
+    padding: 12px 16px 15px;
+  }
+}
+
+@media (max-height: 640px) {
+  .chat-workspace .composer-region {
+    padding-top: 6px;
+    padding-bottom: 6px;
+    max-height: 78%;
+  }
+}
+
+@media (max-width: 639px) {
+  .composer-region .composer {
+    box-shadow:
+      0 0 0 1px #0000000a,
+      0 2px 8px #0000000a,
+      0 4px 40px 8px #00000006;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .composer-region .composer textarea {
+    transition: none;
+  }
+}
+
+@media (forced-colors: active) {
+  .composer-region .composer {
+    box-shadow: none;
+    outline: 1px solid CanvasText;
   }
 }

@@ -8,6 +8,7 @@ import type {
   AnchorPositionStyle
 } from '../../components/ui/useAnchoredPosition'
 import { permissionModeOptions, permissionModeTitles } from './permissionPresentation'
+import { ComposerIcon } from '../chat/ComposerIcon'
 
 function permissionMenuStyle({
   anchor,
@@ -27,21 +28,9 @@ function permissionMenuStyle({
 
 function PermissionIcon({ mode }: { mode: PermissionMode }): React.JSX.Element {
   return (
-    <svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none">
-      {mode === 'full-access' ? (
-        <>
-          <path d="m12 3 8 3v6c0 4-3 7-8 9-5-2-8-5-8-9V6l8-3Z" />
-          <path d="M12 8v5m0 3h.01" />
-        </>
-      ) : mode === 'auto-approve' ? (
-        <>
-          <path d="M5 4h10l4 4v9l-4 3H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2Z" />
-          <path d="m8 12 2 2 4-4" />
-        </>
-      ) : (
-        <path d="M8 12V6a1.5 1.5 0 0 1 3 0v5-7a1.5 1.5 0 0 1 3 0v7-5a1.5 1.5 0 0 1 3 0v7-3a1.5 1.5 0 0 1 3 0v5c0 4-2 7-6 7h-2c-2 0-3-1-4-3l-3-5a1.5 1.5 0 0 1 2-2l1 2Z" />
-      )}
-    </svg>
+    <ComposerIcon
+      name={mode === 'full-access' ? 'fullAccess' : mode === 'auto-approve' ? 'approved' : 'hand'}
+    />
   )
 }
 
@@ -188,9 +177,6 @@ export function ComposerPermissions({
       >
         <PermissionIcon mode={mode} />
         <span>{title}</span>
-        <svg aria-hidden="true" width="12" height="12" viewBox="0 0 24 24" fill="none">
-          <path d="m7 10 5 5 5-5" />
-        </svg>
       </button>
       <div
         ref={panel}

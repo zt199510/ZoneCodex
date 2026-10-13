@@ -1,4 +1,5 @@
 import type { ProjectSelection } from '../../../../shared/project'
+import { Icon } from '../../components/ui/Icon'
 
 export function AttachmentCards({
   selection,
@@ -34,6 +35,7 @@ export function AttachmentCards({
               <span>{name.split('.').at(-1)?.toUpperCase()}</span>
             </div>
             <div className="attachment-card-name">
+              <Icon name="file" size={16} />
               <span>{name}</span>
               {duplicate && <small>{file.path.split('/')[0].slice(-8)}</small>}
             </div>

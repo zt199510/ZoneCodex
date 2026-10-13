@@ -1,3 +1,47 @@
+<!-- git-completion-52fbcd9f-8614-4890-9386-9dc727281863:start -->
+
+## Git 功能补齐的维护入口（2026-10-13）
+
+本轮合同与证据见[Git 功能补齐与验收](../ZoneCodex学习计划/Git功能补齐与验收-2026-10-13.md)。原 Git 调度继续使用当前维护源，不自动构建、安装、读模型配置或发布 PR；默认 `npm test` 仍为第58课断网组。每次新 UUID，原失败保留。
+
+| 分组 | 新增职责 |
+| --- | --- |
+| `npm run test:git:offline` | 追加 PR 严格协议、窗口同一写入/关闭屏障、desktop回合观察边界；Hook/JSX合成检查自动刷新、草稿/选中文件保持及多仓库清理保护。 |
+| `npm run test:git:native` | 追加实际 Git/磁盘/fs.watch 的独立回合快照、有界监听、公共锁取消与关闭；多仓库/linked worktree与窗口来源。PR测试采用真实owned Git上下文与合成gh网络，不是实际GitHub。 |
+| `npm run test:git:desktop` | 已构建开发版/Windows目录包的实际点击、Git、PTY和磁盘；debug目录回包/模型明确合成，普通包真实系统chooser另记。 |
+
+`-- --suite=<list中的名称>`可选择单套。外部HTTPS业务、实际PR发布/合并按用户选择待补；本轮无真实模型请求。旧56–61课自测/确认/open与历史结果保持。
+
+<!-- git-completion-52fbcd9f-8614-4890-9386-9dc727281863:end -->
+
+<!-- git-workbench-49d0ef00-bfaf-4bb7-82aa-7e89cef59388:start -->
+
+## 独立 Git 工作台对照扩展（2026-10-13）
+
+维护源为[tests/git-workbench](git-workbench/)，调度为[git-workbench.mjs](../scripts/checks/git-workbench.mjs)。`npm run test:git:offline`验证当前协议、IPC、界面与隔离，模型/远程执行合成且拒网；`npm run test:git:native`使用实际Git及新UUID材料磁盘，fetch通过测试内部本地bare映射；`npm run test:git:desktop`分别运行开发、目录包调试及普通包，debug chooser/模型合成，ordinary原生chooser真实且不观察main请求计数。`npm run test:git:list`列组与suite；默认`npm test`保持第58课，不自动构建、安装Git或发布PR。
+
+`npm run test:git:live`是独立的显式联网入口，只用新UUID微小差异生成提交与PR候选各一次（60秒/次），不提交/推送/发布；不挂offline/native。真实/合成结果、差异及制品身份另见[对照实施记录](../ZoneCodex学习计划/Git功能对照实现-2026-10-13.md)。旧第61课只读五API保护保留；其旧桌面脚本对应旧DOM，不能用它未经适配的结果冒充新工作台验收。第56–61旧记录、用户确认、八题与open不改写。
+
+<!-- git-workbench-49d0ef00-bfaf-4bb7-82aa-7e89cef59388:end -->
+
+<!-- lesson61-implemented-1cd9d18c-2d7b-4e64-9ade-f9b558a8a9c7:start -->
+
+## 第61课独立Git查看维护入口（2026-10-12）
+
+[第61课第9节](../ZoneCodex学习计划/76-第六十一课-Git改动列表与Diff查看.md#9-本轮实施与分层验收记录2026-10-12)记录当前合同及分层证据：产品实施与必要自动验收完成，有条件通过，用户确认待补、八题待答。维护源在[tests/lesson61](lesson61/)，调度为[lesson61.mjs](../scripts/checks/lesson61.mjs)。
+
+| 命令 | 内容与边界 |
+| ---- | ---------- |
+| `npm run test:lesson61:list` | 列出offline/native/desktop与suite；零业务请求，不自动构建 |
+| `npm run test:lesson61:offline` | 5套76项：protocol20、IPC18、process10、isolation7、renderer21；实际当前函数/依赖图，Electron/reader/child/React/DOM/传输合成分记，拒网络 |
+| `npm run test:lesson61:native` | 已通过22项；可信安装Git与新UUID临时仓库、真实磁盘前后身份及配置哨兵；生命周期故障为真实受控Node child，非真实阻塞Git查询 |
+| `npm run test:lesson61:desktop` | 三套46项通过：开发17、目录包调试审计17、普通包12；debug真Electron/Git/PTY/磁盘与合成chooser/模型分记，普通包真原生chooser/Git/磁盘，无main审计或PTY业务 |
+| `npm test` / `npm run test:list` | 仍为第58课11套默认断网行为锁；第59离线105项、第60离线68项原维护命令保持 |
+
+分组可用`-- --suite=<list中的名称>`。每轮新`.ui-check/test-runs/lesson61/<类型>-UUID`，不读取旧结果继承通过，不自动构建/安装Git/联网。材料准备init/add/commit仅限新UUID隔离仓库，产品不执行写Git命令。目录范围不签发Agent grant/读取证据/批准/票据，不写raw/checkpoint；窗口导航退休/未确认退出需明确错误并留缓存。真实换行/双引号名称因Windows创建失败未覆盖，parser合成另记；TTY pager执行、OS级并发恶意写入隔离与全部native句柄未证明。第56–60原确认/八题/open与旧证据保持，下方旧测试导航按对应版本阅读。
+
+<!-- lesson61-implemented-1cd9d18c-2d7b-4e64-9ade-f9b558a8a9c7:end -->
+
 <!-- terminal-independent-host-ef6bdf50-602d-4fa2-8be3-4c9bca84c3b9 -->
 
 ## 终端启动卡死补修：独立 PTY 进程（2026-10-12）

@@ -12,6 +12,8 @@ import type { FileViewOrigin, OpenFileReference, OpenFileView } from '../files/f
 import { Icon } from '../../components/ui/Icon'
 import { MarkdownContent, UserMessageContent } from './MarkdownContent'
 import { MessageEditor } from './MessageEditor'
+import { MessageCopyButton } from './MessageCopyButton'
+import { MessageIcon } from './MessageIcon'
 import { MessageActivity } from './MessageActivity'
 import { MessageChangeProposalCard, MessageCommandProposalCard } from './MessageProposals'
 import { ImageAttachment } from '../project/ImageAttachment'
@@ -80,6 +82,7 @@ export function MessageList({
   const [editingId, setEditingId] = useState<string | null>(null)
   const [copiedId, setCopiedId] = useState<string | null>(null)
   const lastUserMessageId = [...messages].reverse().find((message) => message.role === 'user')?.id
+  const latestMessage = [...messages].reverse().find((message) => message.role !== 'system')
   return (
     <ol className="message-list" aria-label="聊天记录">
       {messages.map((message) => {
@@ -145,8 +148,10 @@ export function MessageList({
           message.role === 'assistant' ? changeProposalStatus[message.id] : undefined
         return (
           <li
-            className={`message message-${message.role}${editingId === message.id ? ' message-editing' : ''}`}
+            className={`message message-${message.role}${message.role === 'assistant' && message.id === latestMessage?.id ? ' message-assistant-last' : ''}${editingId === message.id ? ' message-editing' : ''}`}
             key={message.id}
+            data-message-id={message.id}
+            data-status={message.status}
             aria-label={
               message.role === 'user'
                 ? '你的消息'
@@ -267,12 +272,6 @@ export function MessageList({
                 )}
               </div>
             )}
-            {message.status === 'pending' && message.role === 'assistant' && message.content && (
-              <span className="message-note">
-                正在生成
-                <span className="typing-dot" />
-              </span>
-            )}
             {message.status === 'failed' && (
               <span className="message-note message-warning">本轮失败 · 不计入后续上下文</span>
             )}
@@ -315,24 +314,28 @@ export function MessageList({
                         <Icon name="edit" size={14} />
                       </button>
                     )}
-                  {message.content && onCopyMessage && (
-                    <button
-                      type="button"
-                      className="message-action"
-                      onClick={() => {
-                        void Promise.resolve(onCopyMessage(message)).then((copied) => {
-                          if (copied) {
-                            setCopiedId(message.id)
-                            window.setTimeout(() => setCopiedId(null), 1400)
-                          }
-                        })
-                      }}
-                      title={copiedId === message.id ? '已复制' : '复制消息'}
-                      aria-label={copiedId === message.id ? '已复制' : '复制消息'}
-                    >
-                      <Icon name={copiedId === message.id ? 'check' : 'copy'} size={14} />
-                    </button>
-                  )}
+                  {message.content &&
+                    onCopyMessage &&
+                    (message.role === 'assistant' ? (
+                      <MessageCopyButton message={message} onCopy={onCopyMessage} />
+                    ) : (
+                      <button
+                        type="button"
+                        className="message-action"
+                        onClick={() => {
+                          void Promise.resolve(onCopyMessage(message)).then((copied) => {
+                            if (copied) {
+                              setCopiedId(message.id)
+                              window.setTimeout(() => setCopiedId(null), 1400)
+                            }
+                          })
+                        }}
+                        title={copiedId === message.id ? '已复制' : '复制消息'}
+                        aria-label={copiedId === message.id ? '已复制' : '复制消息'}
+                      >
+                        <Icon name={copiedId === message.id ? 'check' : 'copy'} size={14} />
+                      </button>
+                    ))}
                   {message.role === 'assistant' &&
                     (message.status === 'cancelled' || message.status === 'failed') &&
                     onRetryAssistant &&
@@ -344,7 +347,7 @@ export function MessageList({
                         title="重新生成回复"
                         aria-label="重新生成回复"
                       >
-                        <Icon name="restore" size={14} />
+                        <MessageIcon name="retry" size={16} />
                       </button>
                     )}
                 </div>

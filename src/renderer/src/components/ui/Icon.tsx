@@ -22,7 +22,13 @@ const paths = {
   stop: 'M6 6h12v12H6Z',
   terminal:
     'M5 8l4 4-4 4m7 0h6M4 3h16a1 1 0 0 1 1 1v16a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1Z',
-  chevron: 'm9 5 7 7-7 7'
+  chevron: 'm9 5 7 7-7 7',
+  more: 'M5 12a1 1 0 1 0-2 0 1 1 0 0 0 2 0Zm8 0a1 1 0 1 0-2 0 1 1 0 0 0 2 0Zm8 0a1 1 0 1 0-2 0 1 1 0 0 0 2 0Z',
+  settings:
+    'M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8Zm-2-5h4l.6 3 2 .9 2.8-1 2 3.4-2.2 2v2.4l2.2 2-2 3.4-2.8-1-2 .9-.6 3h-4l-.6-3-2-.9-2.8 1-2-3.4 2.2-2v-2.4l-2.2-2 2-3.4 2.8 1 2-.9.6-3Z',
+  folderPlus:
+    'M12 10v6m-3-3h6M20 20H4a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h5l2 2h9a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2Z',
+  messageCircle: 'M7.9 20A9 9 0 1 0 4 16.1L2 22Z'
 } as const
 
 export type IconName = keyof typeof paths

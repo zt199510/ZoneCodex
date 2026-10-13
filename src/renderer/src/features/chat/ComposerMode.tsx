@@ -2,6 +2,7 @@ import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from
 import type { KeyboardEvent } from 'react'
 import type { AgentMode } from '../../../../shared/agent'
 import { Icon } from '../../components/ui/Icon'
+import { ComposerIcon } from './ComposerIcon'
 import { useAnchoredPosition } from '../../components/ui/useAnchoredPosition'
 import type {
   AnchorMeasurement,
@@ -12,6 +13,43 @@ const modeOptions: { mode: AgentMode; title: string; description: string }[] = [
   { mode: 'execute', title: '执行', description: '根据请求实施，沿用所选授权方式。' },
   { mode: 'plan', title: '计划', description: '只读研究并给出方案，明确切换执行后再实施。' }
 ]
+
+export function ComposerPlanIndicator({
+  mode,
+  onSelect,
+  disabled
+}: {
+  mode: AgentMode
+  onSelect: (mode: AgentMode) => boolean
+  disabled: boolean
+}): React.JSX.Element | null {
+  if (mode !== 'plan') return null
+  return (
+    <div className="composer-mode">
+      <span className="composer-footer-divider" aria-hidden="true" />
+      <button
+        type="button"
+        className="permissions-trigger agent-mode-trigger composer-plan-indicator"
+        data-mode="plan"
+        disabled={disabled}
+        aria-label="退出计划模式"
+        title="计划模式（点击退出）"
+        onClick={(event) => {
+          const input = event.currentTarget.closest('.composer')?.querySelector('textarea')
+          if (onSelect('execute')) input?.focus({ preventScroll: true })
+        }}
+      >
+        <span className="composer-plan-icon">
+          <ComposerIcon name="plan" />
+        </span>
+        <span className="composer-plan-close">
+          <Icon name="close" size={16} />
+        </span>
+        <span>计划</span>
+      </button>
+    </div>
+  )
+}
 
 function modeMenuStyle({
   anchor,

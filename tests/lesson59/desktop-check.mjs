@@ -887,9 +887,9 @@ try {
       'narrow layout'
     )
     if (await evaluate('!!document.querySelector(".app-shell.sidebar-open")'))
-      await click('.title-bar button[aria-label="收起侧栏"]')
+      await click('#sidebar-toggle')
     const narrow = await evaluate(
-      '(()=>{const p=document.querySelector("#terminal-panel");const t=document.querySelector("#terminal-panel-toggle");return {windowWidth:innerWidth,windowHeight:innerHeight,panelWidth:p.clientWidth,hostHeight:p.querySelector(".terminal-host").clientHeight,toggleWidth:t.clientWidth,size:p.querySelector(".terminal-toolbar span").textContent}})()'
+      '(()=>{const p=document.querySelector("#terminal-panel");const t=document.querySelector("#sidebar-toggle");return {windowWidth:innerWidth,windowHeight:innerHeight,panelWidth:p.clientWidth,hostHeight:p.querySelector(".terminal-host").clientHeight,toggleWidth:t.clientWidth,size:p.querySelector(".terminal-toolbar span").textContent}})()'
     )
     assert.ok(narrow.panelWidth > 0 && narrow.hostHeight > 0 && narrow.toggleWidth > 0)
     await screenshot('terminal-narrow-window')

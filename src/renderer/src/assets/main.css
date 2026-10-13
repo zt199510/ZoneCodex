@@ -7,7 +7,11 @@
 @import './execution.css';
 @import './dialogs.css';
 @import './terminal.css';
+@import './git.css';
+@import './git-workbench.css';
 @import './review.css';
 @import './responsive.css';
 @import './settings.css';
 @import './profile-menu.css';
+@import './sidebar.css';
+@import './assistant-message.css';

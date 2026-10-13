@@ -9,6 +9,7 @@ files:
   - '!out/cli/**'
   - package.json
   - resources/icon.png
+  - resources/jan-sidebar/**
 win:
   executableName: zonecodex
   # Keep official signatures and host build bytes; main app/installer signing stays enabled.

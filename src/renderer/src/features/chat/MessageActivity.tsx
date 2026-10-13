@@ -4,6 +4,7 @@ import type { ProtocolItem } from '../../../../shared/agent-history'
 import { Icon } from '../../components/ui/Icon'
 import type { FileViewOrigin, OpenFileReference, OpenFileView } from '../files/file-view-origin'
 import { MarkdownContent } from './MarkdownContent'
+import { MessageIcon } from './MessageIcon'
 import { ToolGroup } from './MessageToolGroup'
 import { restoreCollapsedDetailsFocus } from './message-activity-focus'
 import { isContextActivity } from './agent-request'
@@ -67,6 +68,7 @@ export function MessageActivity({
   const overview = useRef<HTMLDetailsElement>(null)
   const [runningElapsed, setRunningElapsed] = useState(0)
   const finalSeen = useRef(answerStarted || status === 'complete')
+  const userExpanded = useRef<boolean | null>(null)
   const [expanded, setExpanded] = useState(!answerStarted && status !== 'complete')
   useEffect(() => {
     if (status !== 'pending') return
@@ -79,8 +81,10 @@ export function MessageActivity({
   useLayoutEffect(() => {
     if (!finalSeen.current && (answerStarted || status === 'complete')) {
       finalSeen.current = true
-      restoreCollapsedDetailsFocus(overview.current)
-      setExpanded(false)
+      if (userExpanded.current !== true) {
+        restoreCollapsedDetailsFocus(overview.current)
+        setExpanded(false)
+      }
     }
   }, [answerStarted, status])
   const blocks = activityBlocks(items)
@@ -144,9 +148,14 @@ export function MessageActivity({
             setExpanded(event.currentTarget.open)
           }}
         >
-          <summary className="message-tool-overview-summary">
+          <summary
+            className="message-tool-overview-summary"
+            onClick={() => {
+              userExpanded.current = !overview.current?.open
+            }}
+          >
             <span>{timingLabel}</span>
-            <Icon name="chevron" size={12} />
+            <MessageIcon name="chevron" size={14} />
           </summary>
           <div className="message-tool-timeline">
             {blocks.map((block) =>

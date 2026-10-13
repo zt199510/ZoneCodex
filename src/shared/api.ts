@@ -12,6 +12,31 @@ import type {
 import type { WindowAction, WindowState } from './window'
 import type { ConversationLibrary, LoadLibraryResult } from './conversation-library'
 import type { TerminalSize, TerminalResult, TerminalEvent } from './terminal'
+import type { GitRepositoryCollectionResult } from './git-repositories'
+import type { GitInvalidatedEvent } from './git-observation'
+import type { GitPullRequestAPI } from './git-pr'
+import type {
+  GitWorkbenchRequest,
+  GitReviewRequest,
+  GitDiffRequest,
+  GitActionRequest,
+  GitMetadataResult,
+  GitReviewResult,
+  GitDiffResult,
+  GitActionResult,
+  GitGenerateRequest,
+  GitGenerateResult,
+  GitFullFileRequest,
+  GitFullFileResult
+} from './git-workbench'
+import type {
+  GitListRequest,
+  GitItemRequest,
+  GitSelectionResult,
+  GitListResult,
+  GitItemResult,
+  GitControlResult
+} from './git-view'
 import type {
   AgentDelta,
   AgentResult,
@@ -51,7 +76,7 @@ import type { ResumableAgentTask } from './agent-resume'
 export type StreamDelta = AgentDelta
 
 // 应用 API 接口类型
-export interface AppAPI {
+export interface AppAPI extends GitPullRequestAPI {
   getSettings: () => Promise<AppSettings>
   updateSettings: (change: SettingsChange) => Promise<AppSettings>
   selectTaskRoot: () => Promise<TaskRootSelection>
@@ -110,6 +135,22 @@ export interface AppAPI {
   closeTerminal: (sessionId: string) => Promise<TerminalResult>
   // 监听终端事件
   onTerminalEvent: (listener: (event: TerminalEvent) => void) => () => void
+  // 独立人工只读 Git 查看；不接受路径、命令或 Agent 上下文。
+  selectGitDirectory: (requestId: string) => Promise<GitSelectionResult>
+  getGitRepositories: (requestId: string) => Promise<GitRepositoryCollectionResult>
+  selectGitDirectories: (requestId: string) => Promise<GitRepositoryCollectionResult>
+  onGitInvalidated: (listener: (event: GitInvalidatedEvent) => void) => () => void
+  refreshGitView: (request: GitListRequest) => Promise<GitListResult>
+  readGitItem: (request: GitItemRequest) => Promise<GitItemResult>
+  getGitMetadata: (request: GitWorkbenchRequest) => Promise<GitMetadataResult>
+  reviewGitChanges: (request: GitReviewRequest) => Promise<GitReviewResult>
+  readGitDiff: (request: GitDiffRequest) => Promise<GitDiffResult>
+  executeGitAction: (request: GitActionRequest) => Promise<GitActionResult>
+  generateGitText: (request: GitGenerateRequest) => Promise<GitGenerateResult>
+  readGitFullFile: (request: GitFullFileRequest) => Promise<GitFullFileResult>
+  initializeGitRepository: (requestId: string) => Promise<GitSelectionResult>
+  cancelGitRead: (requestId: string) => Promise<GitControlResult>
+  releaseGitView: (viewId: string) => Promise<GitControlResult>
   // 真实 Agent 请求接口
   resolveAgentExecution: (context: AgentRequestContext) => Promise<ExecutionInfo>
   getExecutionPermissions: () => Promise<PermissionsState>

@@ -1,8 +1,5 @@
 import { useState } from 'react'
-import { ChatHeader } from '../../components/layout/ChatHeader'
 import type { ConversationController } from '../conversation/useConversation'
-import { ClearConversationDialog } from './ClearConversationDialog'
-import { EmptyState } from './EmptyState'
 import { MessageList } from './MessageList'
 import { ChatComposer } from './ChatComposer'
 import { useChatWorkspace } from './useChatWorkspace'
@@ -10,7 +7,6 @@ import { CloseGuard } from '../conversation/CloseGuard'
 import { ChangePreviewPanel } from '../review/ChangePreviewPanel'
 import { CommandReviewPanel } from '../review/CommandReviewPanel'
 import { CommitReceipt } from '../review/CommitReceipt'
-import { WorkspaceStatus } from '../project/WorkspaceStatus'
 import type { OpenFileView } from '../files/file-view-origin'
 import { ImagePreview } from '../project/ImagePreview'
 import type { ImageDescriptor } from '../../../../shared/image-input'
@@ -26,10 +22,6 @@ export function ChatWorkspace({
   const {
     draft,
     setDraft,
-    confirmClear,
-    requestClear,
-    cancelClear,
-    clear,
     executionApprovalPending,
     setExecutionApprovalPending,
     composerRegionRef,
@@ -38,7 +30,6 @@ export function ChatWorkspace({
     commandTriggerRef,
     onScroll,
     send,
-    suggest,
     copyMessage,
     openProposal,
     openCommand
@@ -63,32 +54,12 @@ export function ChatWorkspace({
       trigger
     })
   }
-  const { storage, messages, operation } = conversation
-  const errors = [storage.error, conversation.chatError].filter(Boolean)
+  const { storage, messages } = conversation
+  const errors = [storage.error, conversation.chatError, conversation.workspace.error].filter(
+    Boolean
+  )
   return (
-    <main className="chat-workspace" id="conversation">
-      <ChatHeader
-        status={storage.status}
-        needsAttention={storage.dirty || !!storage.error}
-        saving={operation === 'saving'}
-        paused={storage.paused}
-        canEdit={conversation.canEdit}
-        hasMessages={messages.length > 0}
-        onSave={() => {
-          void storage.save()
-        }}
-        onClear={requestClear}
-      />
-      <WorkspaceStatus
-        selection={conversation.contextSelection}
-        operation={operation}
-        stopping={conversation.stopping}
-        waitingApproval={executionApprovalPending}
-        waitingInput={conversation.pendingPlanQuestion !== null}
-        commandProposalOpen={conversation.commandReview.proposal !== null}
-        workspace={conversation.workspace}
-        permissions={conversation.executionPermissions.state}
-      />
+    <main className="chat-workspace" id="conversation" aria-label="聊天">
       {conversation.resumableTask && (
         <div className="task-resume-bar" role="status">
           <span>
@@ -111,22 +82,7 @@ export function ChatWorkspace({
         </div>
       )}
       <div className="chat-scroll-area" ref={scrollArea} onScroll={onScroll}>
-        {conversation.activeConversationId === null ? (
-          <div className="empty-state">
-            <p>还没有会话，先新建一个。</p>
-            <button
-              type="button"
-              disabled={!conversation.canNavigate}
-              onClick={() => {
-                conversation.create()
-              }}
-            >
-              新建会话
-            </button>
-          </div>
-        ) : messages.length === 0 ? (
-          <EmptyState disabled={!conversation.canSend} onSuggestion={suggest} />
-        ) : (
+        {conversation.activeConversationId !== null && messages.length > 0 && (
           <MessageList
             onOpenFile={onOpenFile}
             messageImages={conversation.images?.messages}
@@ -197,12 +153,6 @@ export function ChatWorkspace({
           onClose={() => setImagePreview(null)}
         />
       )}
-      <ClearConversationDialog
-        open={confirmClear}
-        disabled={!conversation.canEdit}
-        onCancel={cancelClear}
-        onConfirm={clear}
-      />
       <CloseGuard conversation={conversation} />
     </main>
   )

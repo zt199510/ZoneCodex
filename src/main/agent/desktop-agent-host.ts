@@ -54,6 +54,7 @@ import { desktopCheckpointStore } from './desktop-checkpoints'
 import { captureTaskDirectoryBinding, createTaskCheckpoint } from '../storage/task-checkpoint-store'
 import { TaskCheckpointError, type TaskCheckpoint } from '../../shared/task-checkpoint'
 import { agentResumeSafetyNotice } from '../../shared/agent-resume'
+import { beginSelectedGitTurn } from '../git/git-turn-host'
 
 type Job = { id: string; controller: AbortController; snapshotId?: string; imageIds: Set<string> }
 const jobs = new Map<number, Job>()
@@ -107,6 +108,8 @@ export async function runAgentRequest(
   const startedAt = performance.now()
   let trace: string[] = []
   let coreHandledTiming = false
+  let finishGitTurn: Awaited<ReturnType<typeof beginSelectedGitTurn>>
+  let gitTurnStatus: 'completed' | 'interrupted' | 'failed' = 'failed'
   // Capture once after IPC validation; later UI changes cannot alter this turn.
   const mode = parseAgentMode(checkedContext.mode)
   if (!mode) return { status: 'error', error: '工作方式参数无效', trace }
@@ -455,6 +458,9 @@ export async function runAgentRequest(
               assertWorkspaceAccess
             )
           : runtime.send
+      finishGitTurn = await beginSelectedGitTurn(windowId)
+      controller.signal.throwIfAborted()
+      if (!assertWorkspaceAccess()) throw new AgentError('运行上下文已失效，请重新发送')
       const outcome = await runAgentCore(
         {
           requestId: id,
@@ -566,6 +572,12 @@ export async function runAgentRequest(
           }
         }
       )
+      gitTurnStatus =
+        outcome.result.status === 'done'
+          ? 'completed'
+          : outcome.result.status === 'cancelled'
+            ? 'interrupted'
+            : 'failed'
       trace = outcome.result.trace
       coreHandledTiming = true
       observedItems = outcome.result.items ?? []
@@ -636,6 +648,9 @@ export async function runAgentRequest(
           items: observedItems
         }
   } finally {
+    await finishGitTurn?.(
+      !coreHandledTiming && controller.signal.aborted ? 'interrupted' : gitTurnStatus
+    )
     controller.abort()
     for (const captured of capturedImages) captured.finish()
     for (const image of historyImages) image.captured.finish()

@@ -1,8 +1,4 @@
 @media (max-width: 1050px) {
-  .app-shell.sidebar-open {
-    grid-template-columns: 220px minmax(0, 1fr);
-  }
-
   .chat-header {
     padding: 0 20px;
   }
@@ -13,28 +9,6 @@
 }
 
 @media (max-width: 760px) {
-  .app-shell.sidebar-open {
-    grid-template-columns: minmax(0, 1fr);
-  }
-
-  .sidebar {
-    position: absolute;
-    z-index: 3;
-    inset: var(--titlebar-height) auto 0 0;
-    width: 248px;
-    box-shadow: 12px 0 45px #252a2414;
-  }
-
-  .sidebar-backdrop {
-    display: block;
-    position: absolute;
-    z-index: 2;
-    inset: var(--titlebar-height) 0 0;
-    border: 0;
-    border-radius: 0;
-    background: #17201533;
-  }
-
   .empty-state {
     padding: 35px 22px;
   }

@@ -64,6 +64,9 @@ import {
   registerSettings
 } from './settings/settings-ipc'
 import { hasConversationDirectoryOperation } from './settings/conversation-directory'
+import { attachGitCleanup, registerGitView } from './git/git-ipc'
+import { registerGitWorkbench } from './git/git-workbench-ipc'
+import { hasAgentUserInput } from './agent/agent-user-input'
 
 function isSettingsConsumerBusy(windowId: number): boolean {
   return hasSettingsMutation() || hasConversationDirectoryOperation(windowId)
@@ -176,6 +179,7 @@ export function attachWindowRuntime(window: BrowserWindow): void {
   // 注册项目快照授权清理处理器
   attachProjectAccessCleanup(window)
   attachFileViewCleanup(window)
+  attachGitCleanup(window)
   attachImageAccessCleanup(window)
   window.webContents.on('did-start-loading', () => {
     clearExecutionApproval(window.id)
@@ -218,6 +222,10 @@ export function registerAppRuntime(): void {
   })
   registerChangePreview(isChangePreviewBusy)
   registerFileView()
+  registerGitView(
+    (id) => hasExecutionApproval(id) || hasAgentUserInput(id) || hasPendingClose(id),
+    registerGitWorkbench
+  )
   configureImageAccess({
     isBusy: (id) =>
       isSettingsConsumerBusy(id) ||

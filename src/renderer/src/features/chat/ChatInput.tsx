@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import type { ClipboardEvent, DragEvent, FormEvent, KeyboardEvent, ReactNode } from 'react'
-import { Icon } from '../../components/ui/Icon'
+import { ComposerIcon } from './ComposerIcon'
 
 type ChatInputProps = {
   value: string
@@ -11,6 +11,7 @@ type ChatInputProps = {
   isSending: boolean
   stopping: boolean
   maxLength: number
+  placeholder?: string
   tools: ReactNode
   attachments?: ReactNode
   draftKey?: string | null
@@ -28,6 +29,7 @@ export function ChatInput({
   isSending,
   stopping,
   maxLength,
+  placeholder = '描述你想完成的任务',
   tools,
   attachments,
   draftKey,
@@ -62,8 +64,23 @@ export function ChatInput({
   useLayoutEffect(() => {
     const element = textarea.current
     if (!element) return
-    element.style.height = 'auto'
-    element.style.height = `${Math.min(element.scrollHeight, 180)}px`
+    const resize = (): void => {
+      element.style.height = 'auto'
+      element.style.height = `${element.scrollHeight}px`
+    }
+    resize()
+    let width = element.clientWidth
+    const observer = new ResizeObserver(() => {
+      if (element.clientWidth === width) return
+      width = element.clientWidth
+      resize()
+    })
+    observer.observe(element)
+    window.addEventListener('resize', resize)
+    return () => {
+      observer.disconnect()
+      window.removeEventListener('resize', resize)
+    }
   }, [value])
   useLayoutEffect(() => {
     const element = textarea.current
@@ -167,6 +184,7 @@ export function ChatInput({
     if (
       event.key === 'Enter' &&
       !event.shiftKey &&
+      !event.altKey &&
       !composing.current &&
       !event.nativeEvent.isComposing &&
       event.nativeEvent.keyCode !== 229
@@ -183,6 +201,15 @@ export function ChatInput({
       onDragOver={onDragOver}
       onDragLeave={onDragLeave}
       onDrop={onDrop}
+      onClick={(event) => {
+        const target = event.target
+        if (
+          !disabled &&
+          target instanceof Element &&
+          !target.closest('button, textarea, a, [role="menu"], .attachment-card, .image-attachment')
+        )
+          textarea.current?.focus({ preventScroll: true })
+      }}
     >
       {attachments}
       {draggingImages && (
@@ -190,44 +217,49 @@ export function ChatInput({
           松开以添加 PNG/JPEG 图片
         </div>
       )}
-      <label className="sr-only" htmlFor="chat-input">
-        发送消息
-      </label>
-      <textarea
-        id="chat-input"
-        ref={textarea}
-        value={value}
-        rows={2}
-        maxLength={maxLength}
-        disabled={disabled}
-        placeholder={
-          isSending
-            ? stopping
-              ? '正在请求停止，请等待任务结束…'
-              : '正在回复，你可以随时停止…'
-            : '有什么想一起探索的？'
-        }
-        onChange={(event) => {
-          latestDraft.current = {
-            value: event.currentTarget.value,
-            key: draftKey,
-            version: latestDraft.current.version + 1
+      <div className="composer-editor">
+        <label className="sr-only" htmlFor="chat-input">
+          发送消息
+        </label>
+        <textarea
+          id="chat-input"
+          aria-describedby="composer-keyboard-hint"
+          ref={textarea}
+          value={value}
+          rows={1}
+          maxLength={maxLength}
+          disabled={disabled}
+          placeholder={
+            isSending
+              ? stopping
+                ? '正在请求停止，请等待任务结束…'
+                : '正在回复，你可以随时停止…'
+              : placeholder
           }
-          onChange(event.currentTarget.value)
-        }}
-        onKeyDown={onKeyDown}
-        onPaste={onPaste}
-        onCompositionStart={() => {
-          composing.current = true
-        }}
-        onCompositionEnd={() => {
-          composing.current = false
-        }}
-      />
+          onChange={(event) => {
+            latestDraft.current = {
+              value: event.currentTarget.value,
+              key: draftKey,
+              version: latestDraft.current.version + 1
+            }
+            onChange(event.currentTarget.value)
+          }}
+          onKeyDown={onKeyDown}
+          onPaste={onPaste}
+          onCompositionStart={() => {
+            composing.current = true
+          }}
+          onCompositionEnd={() => {
+            composing.current = false
+          }}
+        />
+      </div>
       <div className="composer-toolbar">
         {tools}
         <div className="composer-submit">
-          <span className="keyboard-hint">Shift + Enter 换行</span>
+          <span className="keyboard-hint sr-only" id="composer-keyboard-hint">
+            Enter 发送，Shift + Enter 换行
+          </span>
           {isSending ? (
             <button
               className="send-button"
@@ -237,7 +269,7 @@ export function ChatInput({
               aria-label={stopping ? '正在停止' : '停止生成'}
               title={stopping ? '正在停止' : '停止生成'}
             >
-              <Icon name="stop" size={17} />
+              <ComposerIcon name="stop" size={20} />
             </button>
           ) : (
             <button
@@ -247,7 +279,7 @@ export function ChatInput({
               aria-label="发送消息"
               title="发送消息"
             >
-              <Icon name="arrow" size={20} />
+              <ComposerIcon name="send" size={20} />
             </button>
           )}
         </div>

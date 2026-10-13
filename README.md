@@ -1,3 +1,21 @@
+<!-- git-completion-52fbcd9f-8614-4890-9386-9dc727281863:start -->
+
+2026-10-13 [Git 功能补齐与验收](ZoneCodex学习计划/Git功能补齐与验收-2026-10-13.md)：自动刷新、多仓库/All repos、上一回合独立 Git 快照及 PR 详情/检查/人工合并；用户选择先完成本地功能，外部推送/PR业务验收待补。旧课确认、自测和 open 保持；以下为各轮历史记录。
+
+<!-- git-completion-52fbcd9f-8614-4890-9386-9dc727281863:end -->
+
+<!-- git-workbench-49d0ef00-bfaf-4bb7-82aa-7e89cef59388:start -->
+
+2026-10-13 [Codex App Git 对照实现](ZoneCodex学习计划/Git功能对照实现-2026-10-13.md)：已扩展独立Git工作台、比较/全文、人工写Git、工作树及主动AI文案生成；精确对应矩阵与分层验收另记，未宣称全量或像素1:1。第56–61原确认、八题与open保持，下方旧记录按原时间阅读。
+
+<!-- git-workbench-49d0ef00-bfaf-4bb7-82aa-7e89cef59388:end -->
+
+<!-- lesson61-implemented-1cd9d18c-2d7b-4e64-9ade-f9b558a8a9c7:start -->
+
+2026-10-12 [第61课第9节](ZoneCodex学习计划/76-第六十一课-Git改动列表与Diff查看.md#9-本轮实施与分层验收记录2026-10-12)已完成独立只读Git列表/Diff实施，必要自动验收完成，有条件通过：合成76项、真实Git/隔离磁盘22项及必要回归/构建已通过，三种桌面条件46项与最终身份核对通过。Git不调用Agent、不授权限、不写raw/checkpoint；现有侧栏改版与独立终端保持。本课用户确认待补、八题待答，第56–60原状态/open保留；下方旧创建与前轮记录按原时间阅读。
+
+<!-- lesson61-implemented-1cd9d18c-2d7b-4e64-9ade-f9b558a8a9c7:end -->
+
 <!-- terminal-independent-host-ef6bdf50-602d-4fa2-8be3-4c9bca84c3b9 -->
 
 2026-10-12 终端启动补修：[独立 PTY 进程及双版调试/退出复验](./.ui-check/terminal-fixes/implementation-ef6bdf50-602d-4fa2-8be3-4c9bca84c3b9/README.md)；需停止旧 Debug All 并重新启动，第61课仍仅创建、待实施。

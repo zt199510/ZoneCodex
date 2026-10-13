@@ -6,6 +6,11 @@
   "author": "example.com",
   "homepage": "https://electron-vite.org",
   "scripts": {
+    "test:git:offline": "node scripts/checks/git-workbench.mjs offline",
+    "test:git:native": "node scripts/checks/git-workbench.mjs native",
+    "test:git:live": "node scripts/checks/git-workbench.mjs live",
+    "test:git:desktop": "node scripts/checks/git-workbench.mjs desktop",
+    "test:git:list": "node scripts/checks/git-workbench.mjs list",
     "test": "node scripts/checks/lesson58.mjs offline",
     "test:list": "node scripts/checks/lesson58.mjs list",
     "test:lesson60:offline": "node scripts/checks/lesson60.mjs offline",
@@ -49,7 +54,11 @@
     "build:unpack": "npm run build && electron-builder --dir && npm run build:agent",
     "build:win": "npm run build && electron-builder --win",
     "build:mac": "electron-vite build && electron-builder --mac",
-    "build:linux": "electron-vite build && electron-builder --linux"
+    "build:linux": "electron-vite build && electron-builder --linux",
+    "test:lesson61:offline": "node scripts/checks/lesson61.mjs offline",
+    "test:lesson61:native": "node scripts/checks/lesson61.mjs native",
+    "test:lesson61:desktop": "node scripts/checks/lesson61.mjs desktop",
+    "test:lesson61:list": "node scripts/checks/lesson61.mjs list"
   },
   "dependencies": {
     "@electron-toolkit/preload": "^3.0.2",

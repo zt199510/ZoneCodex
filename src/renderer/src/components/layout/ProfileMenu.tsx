@@ -78,7 +78,6 @@ export function ProfileMenu({
         <span className="profile-avatar">Z</span>
         <span className="profile-copy">
           <strong>个人工作空间</strong>
-          <small>本地存储 · ZoneCodex</small>
         </span>
         <Icon name="chevron" size={12} style={{ transform: 'rotate(-90deg)' }} />
       </button>
@@ -131,7 +130,7 @@ export function ProfileMenu({
             onOpenSettings(trigger.current ?? undefined)
           }}
         >
-          <Icon name="panel" size={16} />
+          <Icon name="settings" size={16} />
           <span>设置</span>
           <kbd>Ctrl+,</kbd>
         </button>
