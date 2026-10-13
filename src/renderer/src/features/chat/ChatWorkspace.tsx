@@ -11,14 +11,32 @@ import type { OpenFileView } from '../files/file-view-origin'
 import { ImagePreview } from '../project/ImagePreview'
 import type { ImageDescriptor } from '../../../../shared/image-input'
 import { agentResumeSafetyNotice } from '../../../../shared/agent-resume'
+import { ThreadSummaryPanel } from './ThreadSummaryPanel'
+import type { ThreadSummaryController } from './useThreadSummaryPanel'
+import type { ThreadSummarySource } from './thread-summary-sources'
+import { ThreadSummaryIcon } from './ThreadSummaryIcon'
 
 export function ChatWorkspace({
   conversation,
-  onOpenFile
+  onOpenFile,
+  summary,
+  sources,
+  onShowAllSources
 }: {
   conversation: ConversationController
   onOpenFile: OpenFileView
+  summary: ThreadSummaryController
+  sources: ThreadSummarySource[]
+  onShowAllSources: (trigger: HTMLButtonElement) => void
 }): React.JSX.Element {
+  const {
+    workspaceRef,
+    triggerRef: summaryTriggerRef,
+    enabled: summaryEnabled,
+    visible: summaryVisible,
+    mode: summaryMode,
+    toggle: toggleSummary
+  } = summary
   const {
     draft,
     setDraft,
@@ -59,7 +77,31 @@ export function ChatWorkspace({
     Boolean
   )
   return (
-    <main className="chat-workspace" id="conversation" aria-label="聊天">
+    <main
+      className="chat-workspace"
+      id="conversation"
+      aria-label="聊天"
+      ref={workspaceRef}
+      data-summary-mode={summaryVisible ? summaryMode : undefined}
+    >
+      <header className="thread-toolbar" aria-label="会话工具栏">
+        <div className="thread-toolbar-drag" aria-hidden="true" />
+        {summaryEnabled && (
+          <button
+            ref={summaryTriggerRef}
+            type="button"
+            className="thread-summary-toggle"
+            aria-label={summaryMode === 'overlay' ? '切换摘要' : '切换顶置摘要'}
+            title={summaryMode === 'overlay' ? '切换摘要' : '切换顶置摘要'}
+            aria-pressed={summaryVisible}
+            aria-expanded={summaryVisible}
+            aria-controls="thread-summary-panel"
+            onClick={toggleSummary}
+          >
+            <ThreadSummaryIcon />
+          </button>
+        )}
+      </header>
       {conversation.resumableTask && (
         <div className="task-resume-bar" role="status">
           <span>
@@ -79,43 +121,63 @@ export function ChatWorkspace({
           {errors.map((error, index) => (
             <p key={index}>{error}</p>
           ))}
+          {storage.paused && (
+            <button
+              type="button"
+              className="quiet-button"
+              disabled={!conversation.canEdit}
+              onClick={() => void storage.save()}
+            >
+              重试保存
+            </button>
+          )}
         </div>
       )}
-      <div className="chat-scroll-area" ref={scrollArea} onScroll={onScroll}>
-        {conversation.activeConversationId !== null && messages.length > 0 && (
-          <MessageList
-            onOpenFile={onOpenFile}
-            messageImages={conversation.images?.messages}
-            messageImageErrors={conversation.images?.messageErrors}
-            onPreviewImage={openImage}
-            key={conversation.activeConversationId}
-            commandProposals={conversation.commandProposals}
-            commandSnapshotId={conversation.contextSelection?.snapshotId ?? null}
-            onOpenCommand={openCommand}
-            messages={messages}
-            toolActivity={conversation.toolActivity}
-            toolRuns={conversation.toolRuns}
-            pendingPlanQuestion={conversation.pendingPlanQuestion}
-            onRespondToPlanQuestion={conversation.respondToPlanQuestion}
-            onCancelPlanQuestion={conversation.stop}
-            planQuestionDisabled={!conversation.canRespondToPlanQuestion}
-            changeProposals={conversation.changeProposals}
-            changeProposalStatus={conversation.changeProposalStatus}
-            proposalOpenDisabled={
-              conversation.operation !== 'idle' ||
-              conversation.changePreview.state.status === 'loading'
-            }
-            onOpenProposal={openProposal}
-            onSendEditedMessage={conversation.editAndSend}
-            editDisabled={!conversation.canSend}
-            editMaxLength={2000}
-            onCopyMessage={copyMessage}
-            onRetryAssistant={(message) => {
-              conversation.retryMessage(message.id)
-            }}
-            canRetryAssistant={(message) => conversation.canRetryMessage(message.id)}
-          />
-        )}
+      <div className="chat-transcript">
+        <div className="chat-scroll-area" ref={scrollArea} onScroll={onScroll}>
+          {conversation.activeConversationId !== null && messages.length > 0 && (
+            <MessageList
+              onOpenFile={onOpenFile}
+              messageImages={conversation.images?.messages}
+              messageImageErrors={conversation.images?.messageErrors}
+              onPreviewImage={openImage}
+              key={conversation.activeConversationId}
+              commandProposals={conversation.commandProposals}
+              commandSnapshotId={conversation.contextSelection?.snapshotId ?? null}
+              onOpenCommand={openCommand}
+              messages={messages}
+              toolActivity={conversation.toolActivity}
+              toolRuns={conversation.toolRuns}
+              pendingPlanQuestion={conversation.pendingPlanQuestion}
+              onRespondToPlanQuestion={conversation.respondToPlanQuestion}
+              onCancelPlanQuestion={conversation.stop}
+              planQuestionDisabled={!conversation.canRespondToPlanQuestion}
+              changeProposals={conversation.changeProposals}
+              changeProposalStatus={conversation.changeProposalStatus}
+              proposalOpenDisabled={
+                conversation.operation !== 'idle' ||
+                conversation.changePreview.state.status === 'loading'
+              }
+              onOpenProposal={openProposal}
+              onSendEditedMessage={conversation.editAndSend}
+              editDisabled={!conversation.canSend}
+              editMaxLength={2000}
+              onCopyMessage={copyMessage}
+              onRetryAssistant={(message) => {
+                conversation.retryMessage(message.id)
+              }}
+              canRetryAssistant={(message) => conversation.canRetryMessage(message.id)}
+            />
+          )}
+        </div>
+        <ThreadSummaryPanel
+          key={conversation.activeConversationId}
+          conversation={conversation}
+          summary={summary}
+          onOpenFile={onOpenFile}
+          sources={sources}
+          onShowAll={onShowAllSources}
+        />
       </div>
       <ChangePreviewPanel
         commit={conversation.commit}

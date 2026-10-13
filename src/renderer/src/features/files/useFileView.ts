@@ -51,7 +51,7 @@ export function useFileView(
 ): {
   state: FileViewState
   open: OpenFileView
-  close: () => void
+  close: (restoreFocus?: boolean) => void
 } {
   const conversationId = conversation.activeConversationId
   const workspaceId = conversation.workspace.runtime?.workspaceId
@@ -100,13 +100,15 @@ export function useFileView(
     returnFocus()
   }, [conversation.messages])
 
-  const close = useCallback((): void => {
+  const close = useCallback((restoreFocus = true): void => {
     const previous = active.current
     generation.current += 1
     active.current = null
     setState({ status: 'idle' })
-    if (previous?.contextKey === currentKey.current) returnFocus(previous.trigger)
-    else returnFocus()
+    if (restoreFocus) {
+      if (previous?.contextKey === currentKey.current) returnFocus(previous.trigger)
+      else returnFocus()
+    }
   }, [])
 
   const open = useCallback<OpenFileView>(

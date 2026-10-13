@@ -35,10 +35,14 @@ function languageFor(path: string): string {
 
 export function FileViewPanel({
   state,
-  onClose
+  onClose,
+  embedded = false,
+  active = true
 }: {
   state: FileViewState
   onClose: () => void
+  embedded?: boolean
+  active?: boolean
 }): React.JSX.Element | null {
   const scroll = useRef<HTMLDivElement>(null)
   const closeButton = useRef<HTMLButtonElement>(null)
@@ -55,40 +59,45 @@ export function FileViewPanel({
   const requestedLine = startLine ?? 1
   const outside = !!result && requestedLine > result.lineCount
   const clipped = !!result && !!endLine && endLine > result.lineCount && !outside
+  const positioned = useRef<{ result: typeof result; reference: typeof reference } | null>(null)
 
   useLayoutEffect(() => {
-    if (opened) closeButton.current?.focus({ preventScroll: true })
-  }, [opened, reference])
+    if (opened && active && !embedded) closeButton.current?.focus({ preventScroll: true })
+  }, [opened, reference, active, embedded])
 
   useLayoutEffect(() => {
     const area = scroll.current
-    if (!area || !result) return
+    if (!active || !area || !result) return
+    if (positioned.current?.result === result && positioned.current.reference === reference) return
     const line = area.querySelector<HTMLElement>(`[data-line="${outside ? 1 : requestedLine}"]`)
     area.scrollLeft = 0
     area.scrollTop = line
       ? line.getBoundingClientRect().top - area.getBoundingClientRect().top + area.scrollTop - 24
       : 0
-  }, [result, requestedLine, outside])
+    positioned.current = { result, reference }
+  }, [active, result, reference, requestedLine, outside])
 
   if (state.status === 'idle') return null
   const path = result?.path ?? state.reference.path
   const fileName = result?.fileName ?? path.split(/[\\/]/).at(-1) ?? path
   return (
     <aside className="file-view-panel" aria-label="源码查看">
-      <header className="file-view-header">
-        <Icon name="file" size={16} />
-        <strong title={path}>{fileName}</strong>
-        <button
-          ref={closeButton}
-          type="button"
-          className="icon-button"
-          aria-label="关闭源码查看"
-          title="关闭源码查看（Escape）"
-          onClick={onClose}
-        >
-          <Icon name="close" size={16} />
-        </button>
-      </header>
+      {!embedded && (
+        <header className="file-view-header">
+          <Icon name="file" size={16} />
+          <strong title={path}>{fileName}</strong>
+          <button
+            ref={closeButton}
+            type="button"
+            className="icon-button"
+            aria-label="关闭源码查看"
+            title="关闭源码查看（Escape）"
+            onClick={onClose}
+          >
+            <Icon name="close" size={16} />
+          </button>
+        </header>
+      )}
       <div className="file-view-source">
         <span>
           {state.origin.source.kind === 'snapshot' ? '已选文件快照 · 只读' : '当前磁盘文件 · 只读'}

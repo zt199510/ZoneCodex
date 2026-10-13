@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { CSSProperties } from 'react'
 import { Sidebar } from './components/layout/Sidebar'
 import { SidebarSearch } from './components/layout/SidebarSearch'
@@ -13,9 +13,13 @@ import {
   sidebarMaxWidth
 } from './components/layout/sidebar-layout'
 import { ChatWorkspace } from './features/chat/ChatWorkspace'
+import { useThreadSummaryPanel } from './features/chat/useThreadSummaryPanel'
+import { useSourcesSidePanel } from './features/chat/useSourcesSidePanel'
+import { ThreadSourcesSidePanel } from './features/chat/ThreadSourcesSidePanel'
+import { threadSummarySources } from './features/chat/thread-summary-sources'
+import type { OpenFileView } from './features/files/file-view-origin'
 import { useConversation } from './features/conversation/useConversation'
 import { useFileView } from './features/files/useFileView'
-import { FileViewPanel } from './features/files/FileViewPanel'
 import { SettingsPage } from './features/settings/SettingsPage'
 
 function App(): React.JSX.Element {
@@ -46,6 +50,9 @@ function App(): React.JSX.Element {
   const [searchOpen, setSearchOpen] = useState(false)
   const [sidebarView, setSidebarView] = useState<'active' | 'archived'>('active')
   const [settingsOpen, setSettingsOpen] = useState(false)
+  const threadSummary = useThreadSummaryPanel(
+    settingsOpen ? null : conversation.activeConversationId
+  )
   const [settingsSaving, setSettingsSaving] = useState(false)
   const settingsSavingRef = useRef(false)
   const onSettingsSavingChange = useCallback((saving: boolean): void => {
@@ -53,7 +60,49 @@ function App(): React.JSX.Element {
     setSettingsSaving(saving)
   }, [])
   const [settingsReturnFocus, setSettingsReturnFocus] = useState<HTMLElement>()
-  const fileView = useFileView(conversation, !settingsOpen)
+  const sources = useMemo(
+    () => threadSummarySources(conversation.messages, conversation.toolRuns),
+    [conversation.messages, conversation.toolRuns]
+  )
+  const sourcesContext = JSON.stringify([
+    conversation.activeConversationId,
+    conversation.workspace.runtime?.workspaceId ?? null,
+    conversation.contextSelection?.snapshotId ?? null,
+    conversation.contextSelection?.files.map((file) => file.path) ?? [],
+    conversation.executionPermissions.state?.revision ?? null
+  ])
+  const sourcesPanel = useSourcesSidePanel(
+    settingsOpen || !conversation.activeConversationId ? null : sourcesContext
+  )
+  const fileView = useFileView(conversation, false)
+  const openFile = fileView.open
+  const selectSourceTab = sourcesPanel.select
+  const onOpenFile = useCallback<OpenFileView>(
+    (reference, origin, trigger): void => {
+      selectSourceTab('file')
+      openFile(reference, origin, trigger)
+    },
+    [openFile, selectSourceTab]
+  )
+  const closeSources = sourcesPanel.close
+  const showSources = sourcesPanel.show
+  const closeSummaryOverlay = threadSummary.closeOverlay
+  const onShowAllSources = useCallback(
+    (trigger: HTMLButtonElement): void => {
+      showSources(trigger)
+      closeSummaryOverlay()
+    },
+    [showSources, closeSummaryOverlay]
+  )
+  const closeFile = fileView.close
+  const fileStatus = fileView.state.status
+  const onCloseSources = useCallback((): void => {
+    closeSources(fileStatus === 'idle')
+  }, [closeSources, fileStatus])
+  const onCloseSourceFile = useCallback((): void => {
+    closeFile(!sourcesPanel.open)
+    if (sourcesPanel.open) selectSourceTab('sources')
+  }, [closeFile, selectSourceTab, sourcesPanel.open])
   const changeSidebarWidth = (width: number): void => {
     setSidebarWidthPreference(clampSidebarWidth(width))
   }
@@ -278,10 +327,27 @@ function App(): React.JSX.Element {
       />
       <div className="workspace-shell" hidden={settingsOpen} inert={settingsOpen}>
         <div
-          className={`workspace-body${fileView.state.status !== 'idle' ? ' with-file-view' : ''}`}
+          className={`workspace-body${sourcesPanel.open || fileView.state.status !== 'idle' ? ' with-sources-view' : ''}`}
         >
-          <ChatWorkspace conversation={conversation} onOpenFile={fileView.open} />
-          <FileViewPanel state={fileView.state} onClose={fileView.close} />
+          <ChatWorkspace
+            conversation={conversation}
+            onOpenFile={onOpenFile}
+            summary={threadSummary}
+            sources={sources}
+            onShowAllSources={onShowAllSources}
+          />
+          <ThreadSourcesSidePanel
+            key={sourcesContext}
+            sources={sources}
+            sourcesOpen={sourcesPanel.open}
+            selected={sourcesPanel.selected}
+            fileState={fileView.state}
+            active={!settingsOpen}
+            onSelect={sourcesPanel.select}
+            onCloseSources={onCloseSources}
+            onCloseFile={onCloseSourceFile}
+            onOpenFile={onOpenFile}
+          />
         </div>
       </div>
       <SettingsPage
