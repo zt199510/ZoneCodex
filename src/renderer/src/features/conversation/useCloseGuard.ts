@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import type { ConversationController } from './useConversation'
+import { preparePanelWindowClose } from '../workbench/close-participants'
 
 /**
  * useCloseGuard 是一个自定义 Hook，用于处理关闭窗口时的逻辑。
@@ -48,9 +49,19 @@ export function useCloseGuard(conversation: ConversationController): {
 
   useEffect(() => {
     mounted.current = true
-    const unsubscribe = window.api.onCloseRequested((id) => {
+    const unsubscribe = window.api.onCloseRequested(async (id) => {
       if (pendingId.current) return
       pendingId.current = id
+      try {
+        if (!(await preparePanelWindowClose())) {
+          await finish(id, false)
+          return
+        }
+      } catch {
+        await finish(id, false)
+        return
+      }
+      if (!mounted.current || pendingId.current !== id) return
       setClosePending(true)
       const current = latest.current
       const operation = current.getOperation()

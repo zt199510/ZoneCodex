@@ -189,6 +189,10 @@ globalThis.__lesson59terminal = {
   },
   getAppSettings: () => ({ terminalShell: fixture.shell, defaultPermissionMode: 'default' }),
   hasSettingsMutation: () => fixture.mutation,
+  resolveExecutionContext: async () => {
+    throw Error('Unexpected context in legacy fixture')
+  },
+  executionStillCurrent: () => false,
   resolveTerminalShell(shell) {
     if (fixture.shellError) throw fixture.shellError
     return { program: shell + '.exe', args: shell === 'powershell' ? ['-NoProfile'] : ['/d'] }
@@ -199,7 +203,8 @@ const stubs = {
   'terminal-process': 'createTerminalProcess',
   'settings-service': 'getAppSettings',
   'settings-ipc': 'hasSettingsMutation',
-  'terminal-shell': 'resolveTerminalShell'
+  'terminal-shell': 'resolveTerminalShell',
+  'execution-context': 'resolveExecutionContext, executionStillCurrent'
 }
 const outfile = path.join(evidence, 'terminal-current-source.cjs')
 const compiled = await build({
@@ -230,7 +235,10 @@ const compiled = await build({
       name: 'terminal-native-boundary-fixture',
       setup(builder) {
         builder.onResolve(
-          { filter: /^electron$|\/settings-(service|ipc)$|\/terminal-(shell|process)$/ },
+          {
+            filter:
+              /^electron$|\/settings-(service|ipc)$|\/terminal-(shell|process)$|\/execution-context$/
+          },
           ({ path: name }) => ({ path: name.split('/').at(-1), namespace: 'fixture' })
         )
         builder.onLoad({ filter: /.*/, namespace: 'fixture' }, ({ path: name }) => ({
@@ -390,11 +398,12 @@ await suite.check(
 )
 
 await suite.check(
-  'same-window duplicate start is refused; another owner can run independently',
+  'same-window distinct sessions and another owner run independently; duplicate IDs are refused',
   async () => {
     const a = owner()
     const b = owner()
     const first = await start(a, 'a-session')
+    assert.equal((await invoke(a, 'start', 'second-session', size)).ok, true)
     assert.equal((await invoke(a, 'start', 'second-session', size)).ok, false)
     assert.equal(first.live, true)
     const second = await start(b, 'b-session')
@@ -405,6 +414,7 @@ await suite.check(
     await close(a, 'a-session')
     assert(second.live)
     await close(b, 'b-session')
+    await close(a, 'second-session')
   }
 )
 
@@ -421,8 +431,8 @@ await suite.check(
     await flush()
     assert.equal(observedStart.settled, false)
     assert.equal(child.live, true)
-    assert.equal((await invoke(source, 'start', 'duplicate-pending-ready', size)).ok, false)
-    assert.equal(children.length, count, 'A pending startup must already occupy its owner slot')
+    assert.equal((await invoke(source, 'start', 'pending-ready', size)).ok, false)
+    assert.equal(children.length, count, 'A pending startup must already occupy its session slot')
     assert.deepEqual(await invoke(source, 'close', 'pending-ready'), { ok: true })
     assert.equal(child.killCalls, 1)
     assert.equal(child.live, false)
@@ -591,7 +601,7 @@ await suite.check(
     child.killError = new Error('cannot kill fixture process')
     assert.equal((await invoke(source, 'close', 'session-test')).ok, false)
     assert(child.live)
-    assert.equal((await invoke(source, 'start', 'another', size)).ok, false)
+    assert.equal((await invoke(source, 'start', 'session-test', size)).ok, false)
     child.killError = null
     await close(source)
   }
@@ -688,7 +698,7 @@ await suite.check(
 )
 
 await suite.check(
-  'delayed exit keeps close pending and owner reserved, rejecting start/write/resize until observed exit',
+  'delayed exit keeps close pending and ID reserved, rejecting duplicate start/write/resize until observed exit',
   async () => {
     const source = owner()
     const child = await start(source)
@@ -700,7 +710,7 @@ await suite.check(
     assert.equal(child.live, true)
     assert.equal(child.killCalls, 1)
     assert.equal(child.exitListeners.length, 1)
-    assert.equal((await invoke(source, 'start', 'replacement', size)).ok, false)
+    assert.equal((await invoke(source, 'start', 'session-test', size)).ok, false)
     assert.equal((await invoke(source, 'write', 'session-test', 'must not write')).ok, false)
     assert.equal((await invoke(source, 'resize', 'session-test', size)).ok, false)
     child.data('closing-output-must-not-forward')
@@ -797,7 +807,7 @@ await suite.check(
     assert(result.error.length > 0 && result.error.length <= 300)
     assert.equal(child.live, true)
     assert.equal(child.exitListeners.length, 1)
-    assert.equal((await invoke(source, 'start', 'cannot-replace-timeout', size)).ok, false)
+    assert.equal((await invoke(source, 'start', 'timeout-session', size)).ok, false)
     assert.equal((await invoke(source, 'write', 'timeout-session', 'must not write')).ok, false)
     const retry = invoke(source, 'close', 'timeout-session')
     const duplicate = invoke(source, 'close', 'timeout-session')
@@ -813,7 +823,7 @@ await suite.check(
 )
 
 await suite.check(
-  'first onExit registration failure retries its public subscription and holds the failed-start slot until cleanup exit',
+  'first onExit registration failure retries its public subscription and holds the failed-start ID until cleanup exit',
   async () => {
     const source = owner()
     fixture.spawnKillMode = 'deferred-exit'
@@ -827,7 +837,7 @@ await suite.check(
     assert.equal(child.live, true)
     assert.equal(child.killCalls, 1)
     assert.equal(child.exitListeners.length, 1)
-    assert.equal((await invoke(source, 'start', 'premature-replacement', size)).ok, false)
+    assert.equal((await invoke(source, 'start', 'partial-start', size)).ok, false)
     const closeResult = invoke(source, 'close', 'partial-start')
     const observed = observe(closeResult)
     await flush()
@@ -857,7 +867,7 @@ await suite.check(
     assert(failedClose.error.length > 0 && failedClose.error.length <= 300)
     assert.equal(child.live, true)
     assert.equal(child.exitListeners.length, 0)
-    assert.equal((await invoke(source, 'start', 'cannot-replace-unobserved', size)).ok, false)
+    assert.equal((await invoke(source, 'start', 'unobserved-start', size)).ok, false)
     fixture.onExitError = null
     fixture.onExitFailures = 0
     const retry = invoke(source, 'close', 'unobserved-start')

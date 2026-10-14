@@ -1,5 +1,6 @@
 import { getImageTurnNoticeCount, parseImageDescriptors, type ImageDescriptor } from './image-input'
 import { parseAgentMode, type AgentMode } from './agent'
+import { parseSkillSnapshot, type SkillSnapshot } from './skills'
 
 // 每轮用户消息随附的安全展示元数据；不包含文件正文、绝对根目录或授权标识。
 export type ChatAttachment = {
@@ -17,6 +18,15 @@ export type ChatMessage = {
   mode: AgentMode
   attachments?: ChatAttachment[]
   images?: ImageDescriptor[]
+  /** User-selected task material; retained for this original task only. */
+  skill?: SkillSnapshot
+}
+
+/** The saved text budget includes the complete serialized task material. */
+export function getMessageContentCharacters(
+  message: Pick<ChatMessage, 'content' | 'skill'>
+): number {
+  return message.content.length + (message.skill ? JSON.stringify(message.skill).length : 0)
 }
 
 export function getMessageImages(message: Pick<ChatMessage, 'images'>): ImageDescriptor[] {
@@ -111,7 +121,10 @@ export function parseMessages(value: unknown): ChatMessage[] | null {
     if (
       !isRecord(item) ||
       Object.keys(item).some(
-        (key) => !['id', 'role', 'content', 'status', 'mode', 'attachments', 'images'].includes(key)
+        (key) =>
+          !['id', 'role', 'content', 'status', 'mode', 'attachments', 'images', 'skill'].includes(
+            key
+          )
       ) ||
       typeof item.id !== 'string' ||
       !item.id ||
@@ -135,6 +148,7 @@ export function parseMessages(value: unknown): ChatMessage[] | null {
     if (status === 'complete' && !content.trim()) return null
     let attachments: ChatAttachment[] | undefined
     let images: ImageDescriptor[] | undefined
+    let skill: SkillSnapshot | undefined
     if (Object.prototype.hasOwnProperty.call(item, 'images')) {
       const parsed = parseImageDescriptors(item.images)
       if (role !== 'user' || !parsed || getImageTurnNoticeCount(content) !== parsed.length)
@@ -149,7 +163,12 @@ export function parseMessages(value: unknown): ChatMessage[] | null {
       if (!parsed) return null
       attachments = parsed
     }
-    total += content.length
+    if (Object.prototype.hasOwnProperty.call(item, 'skill')) {
+      const parsed = parseSkillSnapshot(item.skill)
+      if (role !== 'user' || !parsed) return null
+      skill = parsed
+    }
+    total += getMessageContentCharacters({ content, skill })
     if (total > 1_000_000) return null
     ids.add(id)
     const previous = messages[messages.length - 1]
@@ -161,7 +180,8 @@ export function parseMessages(value: unknown): ChatMessage[] | null {
       status,
       mode,
       ...(attachments ? { attachments } : {}),
-      ...(images ? { images } : {})
+      ...(images ? { images } : {}),
+      ...(skill ? { skill } : {})
     })
   }
   return messages

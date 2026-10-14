@@ -107,17 +107,26 @@ await suite.check(
 )
 
 await suite.check(
-  'terminal backend closure cannot invoke Agent, model transport, raw/checkpoint store or approval brokers',
+  'terminal context reads directory and permission state without Agent, model, stores or approval brokers',
   async () => {
     const result = await graph([
       'src/main/terminal/local-terminal.ts',
       'src/main/terminal/terminal-host.ts'
     ])
+    const contextReaders = new Set([
+      'src/main/execution/execution-context.ts',
+      'src/main/execution/execution-context-policy.ts',
+      'src/main/execution/permission-state.ts',
+      'src/main/project/workspace-access.ts',
+      'src/main/project/attachment-access.ts'
+    ])
     assert(
-      !result.files.some((file) =>
-        /src\/main\/(?:agent\/|model\/|execution\/|project\/(?:workspace-access|attachment-access|image-access)|storage\/(?:conversation|task-checkpoint))/.test(
-          file
-        )
+      !result.files.some(
+        (file) =>
+          !contextReaders.has(file) &&
+          /src\/main\/(?:agent\/|model\/|execution\/|project\/(?:workspace-access|attachment-access|image-access)|storage\/(?:conversation|task-checkpoint))/.test(
+            file
+          )
       )
     )
     const tree = await source('src/main/terminal/local-terminal.ts')
@@ -179,7 +188,13 @@ await suite.check(
     assert(
       !result.files.some((name) => /features\/(?:chat|conversation|execution|project)\//.test(name))
     )
-    assert(!result.links.some((link) => /agent|model|checkpoint|conversation/.test(link.name)))
+    assert(
+      !result.links.some(
+        (link) =>
+          /agent|model|checkpoint|conversation/.test(link.name) &&
+          !link.to?.startsWith('src/shared/')
+      )
+    )
     await fs.writeFile(
       path.join(evidence, 'terminal-panel-graph.json'),
       JSON.stringify(result, null, 2)

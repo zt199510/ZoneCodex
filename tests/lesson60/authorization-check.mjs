@@ -313,7 +313,7 @@ await suite.check(
     assert.equal(respond(source, approval.approvalId), false)
     assert.equal(currentApproval(source), null)
     assert.equal(
-      source.sender.listenerCount('did-start-loading') +
+      source.sender.listenerCount('zonecodex-main-navigation') +
         source.sender.listenerCount('render-process-gone') +
         source.sender.listenerCount('destroyed') +
         source.window.listenerCount('closed'),
@@ -360,7 +360,7 @@ await suite.check(
 )
 for (const teardown of [
   'abort',
-  'did-start-loading',
+  'zonecodex-main-navigation',
   'render-process-gone',
   'destroyed',
   'closed',
@@ -840,7 +840,7 @@ await suite.check(
     assert.equal(fixture.processStarts, 0)
     for (const [id, window] of windows) {
       assert.equal(api.hasExecutionApproval(id), false)
-      for (const event of ['did-start-loading', 'render-process-gone', 'destroyed']) {
+      for (const event of ['zonecodex-main-navigation', 'render-process-gone', 'destroyed']) {
         assert.equal(window.webContents.listenerCount(event), 0)
       }
       assert.equal(window.listenerCount('closed'), 0)

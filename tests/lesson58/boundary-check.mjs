@@ -215,9 +215,149 @@ await suite.check(
       'agent:cancel',
       'agent:resume',
       'agent:resume-info',
+      'agent:skill-message',
       'agent:start'
     ])
     return { compatibilityExports: names, ipcChannels: channels }
+  }
+)
+
+await suite.check(
+  'skill-message uses the current IPC source guard and refuses dead, foreign or changed documents before returning a snapshot',
+  async () => {
+    const handlers = new Map()
+    const owners = new Map()
+    const reads = []
+    let nextRead = null
+    globalThis.__lesson58SkillIPC = {
+      ipcMain: { handle: (channel, callback) => handlers.set(channel, callback) },
+      BrowserWindow: { fromWebContents: (sender) => owners.get(sender) ?? null },
+      runAgentRequest: async () => ({ status: 'done', answer: '', trace: [], items: [] }),
+      cancelAgentJob: () => false,
+      registerAgentUserInput: () => {},
+      getResumableAgentTask: async () => null,
+      readSkillMessage: async (windowId, conversationId, messageId) => {
+        reads.push({ windowId, conversationId, messageId })
+        return nextRead ? await nextRead : null
+      }
+    }
+    const outfile = path.join(evidence, 'current-skill-ipc.cjs')
+    const compiled = await build({
+      absWorkingDir: root,
+      entryPoints: ['src/main/agent/agent-ipc.ts'],
+      bundle: true,
+      platform: 'node',
+      format: 'cjs',
+      outfile,
+      metafile: true,
+      logLevel: 'silent',
+      plugins: [
+        {
+          name: 'controlled-electron-and-hosts',
+          setup(builder) {
+            const exports = {
+              electron: ['ipcMain', 'BrowserWindow'],
+              './desktop-agent-host': ['runAgentRequest', 'cancelAgentJob'],
+              './agent-user-input': ['registerAgentUserInput'],
+              './desktop-checkpoints': ['getResumableAgentTask'],
+              './skill-message': ['readSkillMessage']
+            }
+            builder.onResolve(
+              {
+                filter:
+                  /^(?:electron|\.\/(?:desktop-agent-host|agent-user-input|desktop-checkpoints|skill-message))$/
+              },
+              (args) => {
+                if (
+                  args.path !== 'electron' &&
+                  slash(path.relative(root, args.importer)) !== 'src/main/agent/agent-ipc.ts'
+                )
+                  return undefined
+                return { path: args.path, namespace: 'skill-ipc-fixture' }
+              }
+            )
+            builder.onLoad({ filter: /.*/, namespace: 'skill-ipc-fixture' }, (args) => ({
+              contents:
+                'export const {' +
+                exports[args.path].join(',') +
+                '}=globalThis.__lesson58SkillIPC;',
+              loader: 'js'
+            }))
+          }
+        }
+      ]
+    })
+    for (const file of Object.keys(compiled.metafile.inputs))
+      if (!file.startsWith('skill-ipc-fixture:'))
+        identity[slash(file)] = hash(await fs.readFile(path.join(root, file)))
+    const api = createRequire(import.meta.url)(outfile)
+    api.registerAgentRequest()
+    const callback = handlers.get('agent:skill-message')
+    assert.equal(typeof callback, 'function')
+    const owner = () => {
+      const sender = {
+        mainFrame: {},
+        dead: false,
+        isDestroyed() {
+          return this.dead
+        }
+      }
+      const window = {
+        id: owners.size + 1,
+        dead: false,
+        isDestroyed() {
+          return this.dead
+        }
+      }
+      owners.set(sender, window)
+      return { window, sender, event: { sender, senderFrame: sender.mainFrame } }
+    }
+    const conversationId = randomUUID(),
+      messageId = randomUUID()
+    const live = owner()
+    assert.deepEqual(await callback(live.event, conversationId, messageId), {
+      status: 'ready',
+      snapshot: null
+    })
+    const invalid = await callback(live.event, '../outside', messageId)
+    assert.equal(invalid.status, 'error')
+    for (const kind of ['foreign', 'child-frame', 'dead-window', 'dead-sender']) {
+      const item = owner()
+      if (kind === 'foreign') owners.delete(item.sender)
+      if (kind === 'child-frame') item.event.senderFrame = {}
+      if (kind === 'dead-window') item.window.dead = true
+      if (kind === 'dead-sender') item.sender.dead = true
+      const before = reads.length
+      await assert.rejects(() => callback(item.event, conversationId, messageId))
+      assert.equal(reads.length, before, kind + ': no skill material read')
+    }
+    for (const kind of ['dead-window', 'dead-sender', 'document-changed']) {
+      const item = owner()
+      let release
+      nextRead = new Promise((resolve) => {
+        release = resolve
+      })
+      const pending = callback(item.event, conversationId, messageId)
+      await new Promise((resolve) => setImmediate(resolve))
+      if (kind === 'dead-window') item.window.dead = true
+      if (kind === 'dead-sender') item.sender.dead = true
+      if (kind === 'document-changed') item.sender.mainFrame = {}
+      release(null)
+      const result = await pending.then(
+        (value) => ({ value }),
+        (error) => ({ error })
+      )
+      assert(result.error || result.value?.status === 'error', kind + ': no late snapshot')
+      nextRead = null
+    }
+    delete globalThis.__lesson58SkillIPC
+    return {
+      actualCurrentIPCSourceGuard: true,
+      syntheticElectron: true,
+      foreignOrDeadCases: 4,
+      asyncLifetimeCases: 3,
+      compiledSHA256: hash(await fs.readFile(outfile))
+    }
   }
 )
 

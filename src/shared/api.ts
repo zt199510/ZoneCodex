@@ -1,4 +1,5 @@
 import type { CommitRequest, CommitResult } from './change-commit'
+import type { WorkbenchAPI } from './workbench'
 import type { PreparationRequest, PreparationResult } from './change-preparation'
 import type { SaveConversationResult } from './conversation'
 import type { FileViewRequest, FileViewResult } from './file-view'
@@ -72,12 +73,31 @@ import type {
 } from './execution'
 import type { AgentUserInputRequest, AgentUserInputResponse } from './agent-user-input'
 import type { ResumableAgentTask } from './agent-resume'
+import type {
+  SkillAcceptedEvent,
+  SkillDirectoryResult,
+  SkillListResult,
+  SkillMessageResult,
+  SkillPreparationResult
+} from './skills'
 
 // 正式聊天与 Agent 共用的流式文字增量事件。
 export type StreamDelta = AgentDelta
 
 // 应用 API 接口类型
-export interface AppAPI extends GitPullRequestAPI {
+export interface AppAPI extends GitPullRequestAPI, WorkbenchAPI {
+  listSkills: (conversationId: string) => Promise<SkillListResult>
+  prepareSkill: (
+    conversationId: string,
+    skillId: string,
+    generation: string
+  ) => Promise<SkillPreparationResult>
+  releaseSkill: (conversationId: string, selectionId: string) => Promise<boolean>
+  releaseConversationSkills: (conversationId: string) => Promise<boolean>
+  discardConversationSkills: (conversationId: string) => Promise<boolean>
+  openSkillsDirectory: () => Promise<SkillDirectoryResult>
+  validateSkillMessage: (conversationId: string, messageId: string) => Promise<SkillMessageResult>
+  onAgentSkillAccepted: (listener: (event: SkillAcceptedEvent) => void) => () => void
   getSettings: () => Promise<AppSettings>
   updateSettings: (change: SettingsChange) => Promise<AppSettings>
   selectTaskRoot: () => Promise<TaskRootSelection>
@@ -127,7 +147,7 @@ export interface AppAPI extends GitPullRequestAPI {
   // 完成关闭操作
   finishClose: (requestId: string, allow: boolean) => Promise<boolean>
   // 终端相关接口
-  startTerminal: (sessionId: string, size: TerminalSize) => Promise<TerminalResult>
+  startTerminal: (sessionId: string, size: TerminalSize, context?: import('./workbench').WorkbenchContext) => Promise<TerminalResult>
   // 向终端发送数据
   writeTerminal: (sessionId: string, data: string) => Promise<TerminalResult>
   // 调整终端大小

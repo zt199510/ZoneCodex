@@ -109,7 +109,7 @@ function electronFixture() {
       events,
       event: () => ({ sender, senderFrame: sender.mainFrame }),
       reload() {
-        sender.emit('did-start-loading')
+        sender.emit('zonecodex-main-navigation')
         sender.mainFrame = { identity: 'new-document-' + id }
       },
       destroy() {

@@ -40,7 +40,8 @@ function modalOpen(): boolean {
 /** Window-only display state: no conversation, workspace grant or persistence dependencies. */
 export function useGitView(
   activePage = true,
-  directoryBlocked = false
+  directoryBlocked = false,
+  shortcuts = true
 ): {
   state: GitViewState
   cleanupError: string
@@ -360,7 +361,7 @@ export function useGitView(
   )
 
   useEffect(() => {
-    if (!activePage || !state.open) return
+    if (!activePage || !state.open || !shortcuts) return
     const keydown = (event: KeyboardEvent): void => {
       if (event.key !== 'Escape' || event.defaultPrevented || modalOpen()) return
       if (document.activeElement?.closest('.change-preview-panel, .command-review-panel')) return
@@ -370,7 +371,7 @@ export function useGitView(
     }
     window.addEventListener('keydown', keydown, true)
     return () => window.removeEventListener('keydown', keydown, true)
-  }, [activePage, state.open, close])
+  }, [activePage, state.open, close, shortcuts])
 
   const adoptView = useCallback(
     (view: GitViewScope): void => {

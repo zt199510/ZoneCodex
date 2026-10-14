@@ -37,7 +37,7 @@ export function cleanupChangeCommit(windowId: number): void {
 }
 export function attachCommitCleanup(window: BrowserWindow): void {
   const cleanup = (): void => cleanupChangeCommit(window.id)
-  window.webContents.on('did-start-loading', cleanup)
+  window.webContents.on('zonecodex-main-navigation', cleanup)
   window.webContents.on('render-process-gone', cleanup)
   window.webContents.once('destroyed', cleanup)
   window.once('closed', cleanup)

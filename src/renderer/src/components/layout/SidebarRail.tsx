@@ -6,11 +6,14 @@ export function SidebarRail({
   peeking,
   disabled,
   settingsOpen,
+  skillsOpen,
+  skillsDisabled,
   onToggle,
   onOpen,
   onCreate,
   onSearch,
   onOpenSettings,
+  onOpenSkills,
   onPreviewEnter,
   onPreviewLeave
 }: {
@@ -18,11 +21,14 @@ export function SidebarRail({
   peeking: boolean
   disabled: boolean
   settingsOpen: boolean
+  skillsOpen: boolean
+  skillsDisabled: boolean
   onToggle: () => void
   onOpen: () => void
   onCreate: () => Promise<boolean>
   onSearch: () => void
   onOpenSettings: (returnFocus?: HTMLElement) => void
+  onOpenSkills: (returnFocus?: HTMLElement) => void
   onPreviewEnter: () => void
   onPreviewLeave: () => void
 }): React.JSX.Element {
@@ -47,7 +53,7 @@ export function SidebarRail({
           title="会话"
           aria-controls="conversation-sidebar"
           aria-expanded={open || peeking}
-          aria-current={!settingsOpen ? 'page' : undefined}
+          aria-current={!settingsOpen && !skillsOpen ? 'page' : undefined}
           onPointerEnter={onPreviewEnter}
           onPointerLeave={onPreviewLeave}
           onClick={onOpen}
@@ -62,6 +68,17 @@ export function SidebarRail({
           onClick={onSearch}
         >
           <SidebarIcon name="search" size={20} />
+        </button>
+        <button
+          type="button"
+          className="icon-button rail-skills"
+          aria-label="技能"
+          title="技能"
+          aria-current={skillsOpen ? 'page' : undefined}
+          disabled={skillsDisabled}
+          onClick={(event) => onOpenSkills(event.currentTarget)}
+        >
+          <SidebarIcon name="skills" size={20} />
         </button>
       </div>
       <div className="sidebar-rail-footer">

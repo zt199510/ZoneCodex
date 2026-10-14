@@ -272,6 +272,7 @@ export async function runAgentTask(
           rechecked.checkpoint.taskId !== taskId ||
           rechecked.checkpoint.prompt !== prompt ||
           rechecked.checkpoint.conversationId !== loaded.checkpoint.conversationId ||
+          rechecked.checkpoint.skill?.snapshotHash !== loaded.checkpoint.skill?.snapshotHash ||
           rechecked.checkpoint.raw.fingerprint !== loaded.checkpoint.raw.fingerprint
         )
           throw new TaskCheckpointError('RAW_INVALID')
@@ -306,6 +307,7 @@ export async function runAgentTask(
         bindings: checkpointBindings,
         history,
         summary,
+        skill: loaded?.checkpoint.skill,
         progress,
         reason
       })
@@ -321,6 +323,7 @@ export async function runAgentTask(
         execution: execution.info,
         workspaceId,
         resuming: Boolean(loaded),
+        skill: loaded?.checkpoint.skill,
         workspaceInstruction: instructions
           .map((item, index) =>
             item.status === 'read'

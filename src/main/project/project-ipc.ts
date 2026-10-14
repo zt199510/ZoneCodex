@@ -153,10 +153,10 @@ export function attachProjectAccessCleanup(window: BrowserWindow): void {
   const owner = window.webContents
   const cleanup = (): void => cleanupProjectAccess(window.id)
   const remove = (): void => {
-    owner.removeListener('did-start-loading', cleanup)
+    owner.removeListener('zonecodex-main-navigation', cleanup)
     owner.removeListener('render-process-gone', cleanup)
   }
-  owner.on('did-start-loading', cleanup)
+  owner.on('zonecodex-main-navigation', cleanup)
   owner.on('render-process-gone', cleanup)
   owner.once('destroyed', () => {
     cleanup()

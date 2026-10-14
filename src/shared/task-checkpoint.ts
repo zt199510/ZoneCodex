@@ -1,5 +1,6 @@
 import { parseAgentMode, type AgentMode } from './agent'
 import { parseToolScope, type ToolScope } from './project'
+import { parseSkillSnapshot, type SkillSnapshot } from './skills'
 
 export const taskCheckpointSchemaVersion = 1 as const
 export const taskCheckpointProgress = [
@@ -47,6 +48,7 @@ export type TaskCheckpoint = {
   bindings: { cwd: TaskDirectoryBinding; workspace: TaskDirectoryBinding | null }
   raw: { file: string; fingerprint: string; items: number; characters: number }
   summary?: TaskCheckpointSummary
+  skill?: SkillSnapshot
   progress: (typeof taskCheckpointProgress)[number]
   reason: (typeof taskCheckpointReasons)[number]
 }
@@ -199,7 +201,7 @@ export function parseTaskCheckpoint(value: unknown): TaskCheckpoint | null {
           'progress',
           'reason'
         ],
-        ['conversationId', 'summary']
+        ['conversationId', 'summary', 'skill']
       ) ||
       value.schemaVersion !== taskCheckpointSchemaVersion ||
       !id(value.taskId) ||
@@ -235,6 +237,7 @@ export function parseTaskCheckpoint(value: unknown): TaskCheckpoint | null {
     if (Object.hasOwn(value, 'summary')) {
       if (!parseTaskCheckpointSummary(value.summary)) return null
     }
+    if (Object.hasOwn(value, 'skill') && !parseSkillSnapshot(value.skill)) return null
     // Checkpoint metadata must never contain an inline original image.
     if (/data:image\/[^;,]+;base64,/i.test(JSON.stringify(value))) return null
     return structuredClone({ ...value, scope }) as TaskCheckpoint

@@ -3,6 +3,7 @@
 @import './chat.css';
 @import './composer.css';
 @import './file-mentions.css';
+@import './skills.css';
 @import './markdown.css';
 @import './project.css';
 @import './execution.css';
@@ -17,3 +18,5 @@
 @import './sidebar.css';
 @import './assistant-message.css';
 @import './thread-summary.css';
+@import './new-chat.css';
+@import './workbench.css';

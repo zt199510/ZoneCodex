@@ -298,9 +298,13 @@ export function ChatInput({
           </span>
           {isSending ? (
             <button
+              key="stop"
               className="send-button"
               type="button"
-              onClick={onStop}
+              onClick={(event) => {
+                event.preventDefault()
+                onStop()
+              }}
               disabled={stopping}
               aria-label={stopping ? '正在停止' : '停止生成'}
               title={stopping ? '正在停止' : '停止生成'}
@@ -309,6 +313,7 @@ export function ChatInput({
             </button>
           ) : (
             <button
+              key="send"
               className="send-button"
               type="submit"
               disabled={

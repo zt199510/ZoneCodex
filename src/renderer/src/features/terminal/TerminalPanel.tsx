@@ -1,12 +1,12 @@
-import { useEffect, useImperativeHandle, useRef, useState } from 'react'
+import { useEffect, useImperativeHandle, useLayoutEffect, useRef, useState } from 'react'
 import type { Ref } from 'react'
 import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import type { TerminalResult, TerminalSize } from '../../../../shared/terminal'
 import { terminalThemeFor } from './terminal-theme'
-import '@xterm/xterm/css/xterm.css'
+import type { WorkbenchContext } from '../../../../shared/workbench'
 
-export type TerminalPanelHandle = { close: () => void }
+export type TerminalPanelHandle = { close: () => Promise<boolean> }
 type Controls = TerminalPanelHandle & { start: () => void; focus: () => void; fit: () => void }
 
 function boundedError(reason: unknown, fallback: string): string {
@@ -17,10 +17,16 @@ function boundedError(reason: unknown, fallback: string): string {
 export function TerminalPanel({
   onClose,
   visible = true,
+  context,
+  autoStart = false,
+  embedded = false,
   ref
 }: {
   onClose: () => void
   visible?: boolean
+  context?: WorkbenchContext
+  autoStart?: boolean
+  embedded?: boolean
   ref?: Ref<TerminalPanelHandle>
 }): React.JSX.Element {
   const hostRef = useRef<HTMLDivElement>(null)
@@ -31,16 +37,24 @@ export function TerminalPanel({
   const [error, setError] = useState('')
   const [closing, setClosing] = useState(false)
   const [cleanupRequired, setCleanupRequired] = useState(false)
+  const onCloseRef = useRef(onClose)
+  const initialContext = useRef(context)
+  const initialAutoStart = useRef(autoStart)
+  useLayoutEffect(() => {
+    onCloseRef.current = onClose
+    initialContext.current = context
+  }, [onClose, context])
 
   useImperativeHandle(
     ref,
     () => ({
       close: () => {
-        if (controlsRef.current) controlsRef.current.close()
-        else onClose()
+        if (controlsRef.current) return controlsRef.current.close()
+        onCloseRef.current()
+        return Promise.resolve(true)
       }
     }),
-    [onClose]
+    []
   )
 
   useEffect(() => {
@@ -167,7 +181,11 @@ export function TerminalPanel({
       setError('')
       setStatus('启动中')
       try {
-        const result = await window.api.startTerminal(sessionId, dimensions())
+        const result = await window.api.startTerminal(
+          sessionId,
+          dimensions(),
+          initialContext.current
+        )
         if (disposed) {
           // 卸载时的关闭可能早于结果到达，再按旧 ID 关闭一次。
           const closed = await window.api.closeTerminal(sessionId)
@@ -193,26 +211,28 @@ export function TerminalPanel({
       }
     }
 
-    async function close(): Promise<void> {
-      if (disposed || closePending) return
+    async function close(): Promise<boolean> {
+      if (disposed || closePending) return false
       closePending = true
       setClosing(true)
       setError('')
       try {
         if (id) {
           const result = await window.api.closeTerminal(id)
-          if (disposed) return
+          if (disposed) return false
           if (!result.ok) throw new Error(result.error)
         }
         active = false
         id = null
-        onClose()
+        onCloseRef.current()
+        return true
       } catch (reason: unknown) {
         if (!disposed) {
           closePending = false
           setClosing(false)
           setError(boundedError(reason, '终端关闭失败，请重试。'))
         }
+        return false
       }
     }
 
@@ -222,7 +242,7 @@ export function TerminalPanel({
       try {
         term.loadAddon(fit)
         term.open(host)
-        term.writeln('点击“启动终端”使用设置中选择的 Shell，工作目录为用户主目录。')
+        if (!initialAutoStart.current) term.writeln('点击“启动终端”开始本地 Shell。')
         // 先订阅，再允许按钮启动进程，避免丢掉最初的提示符。
         unsubscribe = window.api.onTerminalEvent((event) => {
           if (disposed || event.sessionId !== id) return
@@ -251,12 +271,11 @@ export function TerminalPanel({
           },
           focus,
           fit: scheduleFit,
-          close: () => {
-            void close()
-          }
+          close
         }
         setReady(true)
         scheduleFit()
+        if (initialAutoStart.current) void start()
         void document.fonts.ready.then(() => {
           if (!disposed) scheduleFit()
         })
@@ -283,11 +302,14 @@ export function TerminalPanel({
       }
       term.dispose()
     }
-  }, [onClose])
+  }, [])
 
   const busy = status === '启动中' || status === '运行中'
   return (
-    <section className="terminal-panel" id="terminal-panel" aria-label="本地终端">
+    <section
+      className={`terminal-panel${embedded ? ' terminal-tab-panel' : ''}`}
+      aria-label="本地终端"
+    >
       <div className="terminal-toolbar">
         <strong role="status">本地 Shell · {closing ? '关闭中' : status}</strong>
         <span>{size}</span>

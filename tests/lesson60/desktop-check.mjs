@@ -45,11 +45,12 @@ const report = {
   observerMovedToUtility: true,
   actualDiskStorage: true,
   uiInput:
-    'Trusted CDP mouse/key input; observation/faults and modal whole-task cancellation use separately labelled existing APIs.',
+    'Chat, permission, plan and stop controls use trusted CDP mouse/key input. The currently unmounted terminal panel is exercised through the real public preload startTerminal/writeTerminal API, with separately observed actual PowerShell PTY output. Observation/faults and modal whole-task cancellation use separately labelled existing APIs.',
   checks: [],
   failures: [],
   processes: [],
   notCovered: [
+    'The baseline App does not mount TerminalPanel, ChatHeader or WorkspaceStatus. Legacy terminal-panel mouse/keyboard interaction, manual header save, clear-current-conversation confirmation and workspace status text are not covered. Current autosave, plan controls and stop controls are exercised; real terminal APIs retain the PTY isolation/retirement assertions.',
     'No real model or reviewer networking. SSE responses, held replies, reply failures and stale event replay are synthetic.',
     'The approval dialog is modal and contains no whole-task stop control. Whole-task cancellation during that wait uses the legal existing cancelAgentRequest API and is not claimed as an outside UI click.',
     'PTY command output, the helper-reported public native exit and actual utility-process retirement are observed. Shell PIDs, Conout Workers, process-list helpers and native module loads inside the utility process are not directly observed; native HPCON/pipe handles and arbitrary command descendants remain outside this evidence.',
@@ -378,18 +379,51 @@ async function launch(stage, action) {
         'idle'
       )
     const save = async () => {
-      await click('.chat-header .quiet-button')
-      await until(
-        () =>
-          evaluate('document.querySelector(".save-status").textContent.includes("已同步到本地")'),
-        'real UI save'
+      const expected = await evaluate(
+        '[...document.querySelectorAll(".message")].map(n=>({id:n.dataset.messageId,status:n.dataset.status}))'
       )
-      return (await api('loadConversation')).snapshot
+      const title = await evaluate(
+        'document.querySelector(".conversation-item[aria-current=page]").title'
+      )
+      const liveTasks = await api('listTasks')
+      // Read the isolated file directly: loadConversation restores directory grants and
+      // repeated IPC reads can change their identities during the actual autosave.
+      return until(async () => {
+        const snapshot = JSON.parse(
+          await fs.readFile(path.join(userData, 'conversation.json'), 'utf8')
+        )
+        const active = snapshot.conversations.find((item) => item.title === title)
+        const tasks = snapshot.conversations.flatMap((item) => item.tasks)
+        return active &&
+          snapshot.activeConversationId === active.id &&
+          active.messages.length === expected.length &&
+          expected.every((visible) =>
+            active.messages.some(
+              (message) => message.id === visible.id && message.status === visible.status
+            )
+          ) &&
+          tasks.find((task) => task.taskId === initialOrphan.taskId)?.status === 'interrupted' &&
+          liveTasks.every((task) =>
+            tasks.some((saved) => saved.taskId === task.taskId && saved.status === task.status)
+          )
+          ? snapshot
+          : null
+      }, 'actual autosaved messages and owner task states')
     }
     const mode = async (value) => {
-      await click('.composer-mode .permissions-trigger')
-      await click('.agent-mode-popover [data-mode="' + value + '"]')
+      assert.ok(['execute', 'plan'].includes(value))
+      const planning = await evaluate('!!document.querySelector(".composer-plan-indicator")')
+      if ((value === 'plan') !== planning) {
+        if (value === 'plan') {
+          await click('button[aria-label="添加附件"]')
+          await click('.attachment-popover:popover-open .composer-plan-option')
+        } else await click('button[aria-label="退出计划模式"]')
+      }
       await idle()
+      assert.equal(
+        await evaluate('!!document.querySelector(".composer-plan-indicator")'),
+        value === 'plan'
+      )
     }
     const permissions = async (value) => {
       await click('.composer-permissions .permissions-trigger')
@@ -440,22 +474,12 @@ async function launch(stage, action) {
     }
     let terminalHost
     const openTerminal = async () => {
-      await click('#terminal-panel-toggle')
-      await until(
-        () => evaluate('!!document.querySelector("#terminal-panel .xterm")'),
-        'terminal mounted'
-      )
-      const selector = await evaluate(
-        '(()=>{const n=[...document.querySelectorAll("#terminal-panel button")].find(n=>n.textContent==="启动终端");n.id="lesson60-start-terminal";return "#"+n.id})()'
-      )
-      await click(selector)
-      await until(
-        () =>
-          evaluate(
-            'document.querySelector("#terminal-panel .terminal-toolbar").textContent.includes("运行中")'
-          ),
-        'actual PowerShell PTY'
-      )
+      const sessionId = randomUUID()
+      assert.deepEqual(await api('startTerminal', sessionId, { cols: 100, rows: 24 }), { ok: true })
+      await until(async () => {
+        const observed = await audit()
+        return observed.utilityHosts.some((host) => host.sessionId === sessionId && host.ready)
+      }, 'actual public terminal API starts PowerShell PTY')
       const opened = await audit()
       assert.equal(opened.observerMovedToUtility, true)
       assert.equal(opened.testOverridesUtilityHostForkArguments, false)
@@ -465,6 +489,7 @@ async function launch(stage, action) {
       assert.ok(alive(terminalHost.pid))
       assert.equal(terminalHost.nativeExit, null)
       assert.equal(terminalHost.exitedAtUTC, null)
+      assert.equal(terminalHost.sessionId, sessionId)
       return terminalHost
     }
     const echo = async (suffix) => {
@@ -478,22 +503,14 @@ async function launch(stage, action) {
       const authorityCalls = before.ipc.filter((item) =>
         authorityChannels.test(item.channel)
       ).length
-      await evaluate('document.querySelector("#terminal-panel .xterm-helper-textarea").focus()')
-      await renderer.cdp('Input.insertText', {
-        text: "echo ('zonecodex-terminal-' + '60-" + uuid + '-' + suffix + "')"
-      })
-      await renderer.cdp('Input.dispatchKeyEvent', {
-        type: 'keyDown',
-        key: 'Enter',
-        code: 'Enter',
-        windowsVirtualKeyCode: 13
-      })
-      await renderer.cdp('Input.dispatchKeyEvent', {
-        type: 'keyUp',
-        key: 'Enter',
-        code: 'Enter',
-        windowsVirtualKeyCode: 13
-      })
+      assert.deepEqual(
+        await api(
+          'writeTerminal',
+          terminalHost.sessionId,
+          "echo ('zonecodex-terminal-' + '60-" + uuid + '-' + suffix + "')\r"
+        ),
+        { ok: true }
+      )
       const observed = await until(async () => {
         const value = await audit()
         return value.utilityHosts
@@ -531,6 +548,8 @@ async function launch(stage, action) {
         stage,
         utilityHostPid: terminalHost.pid,
         sessionId: terminalHost.sessionId,
+        actualPublicPreloadAPI: true,
+        terminalPanelUI: false,
         actualNativePTYOutput: true,
         shellPidDirectlyObserved: false
       })
@@ -748,6 +767,7 @@ try {
   )
   await launch('create', async (ui) => {
     const {
+      stage,
       api,
       invoke,
       audit,
@@ -936,9 +956,9 @@ try {
     await until(
       () =>
         evaluate(
-          '!!document.querySelector(".plan-question-card")&&document.querySelector(".workspace-status").textContent.includes("等待回答")'
+          '!!document.querySelector(".plan-question-card")&&!!document.querySelector("button[aria-label=停止生成]")'
         ),
-      'real plan question and status'
+      'real plan question and whole-task stop control'
     )
     const questionStart = await startIPC('question-stop')
     oldQuestion = await api('getPendingAgentUserInput')
@@ -1024,7 +1044,7 @@ try {
     await until(
       () =>
         evaluate(
-          '!!document.querySelector("button[aria-label=正在停止]:disabled")&&document.querySelector(".workspace-status").textContent.includes("正在停止")'
+          '!!document.querySelector("button[aria-label=正在停止]:disabled")&&document.getElementById("chat-input").placeholder.includes("正在请求停止")'
         ),
       'transient stopping UI'
     )
@@ -1069,26 +1089,36 @@ try {
     await idle()
     const deletionStart = await startIPC('deletion'),
       deletionTask = await waitTask(deletionStart, 'completed')
-    await click('button[aria-label="清空对话"]')
-    await until(
-      () => evaluate('!!document.querySelector(".confirm-dialog[open]")'),
-      'actual clear confirmation'
-    )
-    await click('.confirm-dialog .danger-button')
-    await idle()
-    await replay('task:state', { record: { ...deletionTask, status: 'running', finishedAt: null } })
-    await replay('task:state', { record: deletionTask })
-    await delay(200)
-    const deletedSnapshot = await save()
-    assert.deepEqual(
-      deletedSnapshot.conversations.find((conversation) => conversation.id === 'lesson60-deletion')
-        .tasks,
-      []
-    )
-    check(
-      'trusted clear-current-conversation removes tasks; synthetic late running/terminal events do not reinsert deleted records',
-      { syntheticReplay: true, actualSavedEmptyTasks: true }
-    )
+    if (await evaluate('!!document.querySelector("button[aria-label=清空对话]")')) {
+      await click('button[aria-label="清空对话"]')
+      await until(
+        () => evaluate('!!document.querySelector(".confirm-dialog[open]")'),
+        'actual clear confirmation'
+      )
+      await click('.confirm-dialog .danger-button')
+      await idle()
+      await replay('task:state', {
+        record: { ...deletionTask, status: 'running', finishedAt: null }
+      })
+      await replay('task:state', { record: deletionTask })
+      await delay(200)
+      const deletedSnapshot = await save()
+      assert.deepEqual(
+        deletedSnapshot.conversations.find(
+          (conversation) => conversation.id === 'lesson60-deletion'
+        ).tasks,
+        []
+      )
+      check(
+        'trusted clear-current-conversation removes tasks; synthetic late running/terminal events do not reinsert deleted records',
+        { syntheticReplay: true, actualSavedEmptyTasks: true }
+      )
+    } else {
+      report.notCovered.push(
+        stage +
+          ': clear-current-conversation late-event reinsertion scenario unavailable because baseline ChatHeader is unmounted. The original clear/dialog/saved-empty-task assertions remain conditional on that real control; this run does not claim them as passed.'
+      )
+    }
     await click('.conversation-item[title="第60课隔离一致性"]')
     await idle()
 
@@ -1222,7 +1252,7 @@ try {
       JSON.stringify(stoppedCheckpoint, null, 2)
     )
     check(
-      'real UI owner stop and real manual save persist interrupted checkpoint/raw and cancelled history for new-PID reopening',
+      'real UI owner stop and actual autosave persist interrupted checkpoint/raw and cancelled history for new-PID reopening',
       { taskId: stoppedCheckpoint.taskId, requestId: stoppedStart.args[0] }
     )
 

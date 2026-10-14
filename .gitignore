@@ -6,6 +6,7 @@ out
 *.log*
 .local-backups/
 .ui-check/
+docs/workbench-evidence/**/*.png
 .env
 .env.*
 !.env.example

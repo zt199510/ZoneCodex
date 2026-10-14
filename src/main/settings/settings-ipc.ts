@@ -33,7 +33,7 @@ export function attachSettingsCleanup(window: BrowserWindow): void {
     if (mutation?.windowId === window.id) mutation.current = false
     clearConversationDirectories(window.id)
   }
-  window.webContents.on('did-start-loading', cleanup)
+  window.webContents.on('zonecodex-main-navigation', cleanup)
   window.webContents.on('render-process-gone', cleanup)
   window.webContents.once('destroyed', cleanup)
   window.once('closed', cleanup)

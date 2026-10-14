@@ -13,6 +13,8 @@ import type { Conversation, ConversationLibrary } from '../../../../shared/conve
 import { useChatRequest, type ToolActivity, type PendingPlanQuestion } from '../chat/useChatRequest'
 import type { AgentUserInputResponse } from '../../../../shared/agent-user-input'
 import type { ResumableAgentTask } from '../../../../shared/agent-resume'
+import { MAX_SKILL_SNAPSHOT_CHARS, parseSkillMessageResult } from '../../../../shared/skills'
+import { useSkills, type SkillsController } from '../skills/useSkills'
 import { useProjectSelection } from '../project/useProjectSelection'
 import { useImageSelection, type ImageSelectionController } from '../project/useImageSelection'
 import {
@@ -49,7 +51,7 @@ export type ConversationController = ConversationReviewController & {
   canRetryMessage: (messageId: string) => boolean
   retryMessage: (messageId: string) => boolean | Promise<boolean>
   resumableTask: ResumableAgentTask | null
-  resumeTask: () => boolean
+  resumeTask: () => boolean | Promise<boolean>
   operation: Operation
   canEdit: boolean
   canSend: boolean
@@ -76,6 +78,7 @@ export type ConversationController = ConversationReviewController & {
   workspace: WorkspaceController
   executionPermissions: ExecutionPermissionsController
   images: ImageSelectionController
+  skills: SkillsController
   agentMode: AgentMode
   setAgentMode: (mode: AgentMode) => boolean
   send: (content: string) => boolean | Promise<boolean>
@@ -110,6 +113,7 @@ export function useConversation(): ConversationController {
   const [draftInheritanceTarget, setDraftInheritanceTarget] = useState<string | null>(null)
   const [unboundMode, setUnboundMode] = useState<AgentMode>('execute')
   const closePendingRef = useRef(false)
+  const skillsRef = useRef<SkillsController | null>(null)
   const {
     invalidate: invalidateTitle,
     invalidateAll: invalidateTitles,
@@ -118,7 +122,10 @@ export function useConversation(): ConversationController {
   } = useConversationTitle(setSnapshot)
   const setClosePending = useCallback(
     (value: boolean): void => {
-      if (value) invalidateTitles()
+      if (value) {
+        invalidateTitles()
+        void skillsRef.current?.release()
+      }
       closePendingRef.current = value
       setClosePendingState(value)
     },
@@ -192,8 +199,6 @@ export function useConversation(): ConversationController {
   }, [activeConversationId, workspace.runtime?.workspaceId])
   // Saved project metadata does not restore a grant. Without a live project,
   // main resolves this request against the conversation's default directory.
-  const canSubmit =
-    canSubmitBase && executionPermissions.state !== null && !executionPermissions.loading
   const {
     projectSelection,
     pendingSelection,
@@ -218,6 +223,19 @@ export function useConversation(): ConversationController {
     canChange,
     ensureConversation: async () => activeConversationId ?? createId(true)
   })
+  const skills = useSkills({
+    conversationId: activeConversationId,
+    canChange,
+    ensureConversation: async () => snapshotRef.current.activeConversationId ?? createId(true)
+  })
+  useLayoutEffect(() => {
+    skillsRef.current = skills
+  }, [skills])
+  const canSubmit =
+    canSubmitBase &&
+    executionPermissions.state !== null &&
+    !executionPermissions.loading &&
+    !skills.busy
 
   const {
     commandProposals,
@@ -280,10 +298,27 @@ export function useConversation(): ConversationController {
   const retryMessage = useCallback(
     (messageId: string): boolean | Promise<boolean> => {
       if (!canRetryMessage(messageId)) return false
-      const submit = (): boolean => {
+      const userId = active?.toolRuns.find((run) => run.assistantId === messageId)?.userId
+      const originalSkill = active?.messages.find((message) => message.id === userId)?.skill
+      if (active) {
+        const capacityMessage = getCapacityError(
+          snapshot,
+          active,
+          true,
+          originalSkill ? JSON.stringify(originalSkill).length : 0
+        )
+        if (capacityMessage) {
+          setCapacityError(capacityMessage)
+          return false
+        }
+      }
+      const submit = (): boolean | Promise<boolean> => {
         const accepted = request.retry(messageId)
-        if (accepted) markSent()
-        return accepted
+        const settle = (result: boolean): boolean => {
+          if (result) markSent()
+          return result
+        }
+        return typeof accepted === 'boolean' ? settle(accepted) : accepted.then(settle)
       }
       const imageIds = request.getRetryImages(messageId)
       if (!imageIds.length) return submit()
@@ -294,7 +329,7 @@ export function useConversation(): ConversationController {
       if (group.length !== imageIds.length) return false
       return images.withPrepared(group, submit)
     },
-    [canRetryMessage, images, markSent, request]
+    [active, canRetryMessage, images, markSent, request, snapshot]
   )
 
   const editAndSend = useCallback(
@@ -344,12 +379,17 @@ export function useConversation(): ConversationController {
           conversation.id === active.id ? trimmedActive : conversation
         )
       }
-      const capacityMessage = getCapacityError(nextSnapshot, trimmedActive, true)
+      const capacityMessage = getCapacityError(
+        nextSnapshot,
+        trimmedActive,
+        true,
+        editedMessage.skill ? JSON.stringify(editedMessage.skill).length : 0
+      )
       if (capacityMessage) {
         setCapacityError(capacityMessage)
         return false
       }
-      const submit = (): boolean => {
+      const submit = (): boolean | Promise<boolean> => {
         preparation.cancel()
         setCapacityError(null)
         updateConversation(active.id, (previous) => ({
@@ -371,30 +411,82 @@ export function useConversation(): ConversationController {
           },
           messageAttachments,
           undefined,
-          group?.map((image) => image.image.imageId)
+          group?.map((image) => image.image.imageId),
+          undefined,
+          editedMessage.skill ? { kind: 'message', messageId: editedMessage.id } : undefined
         )
-        if (accepted) {
-          commandReview.close()
-          markSent()
-          const keep = new Set([...keptIds])
-          if (acceptedMessageId) keep.add(acceptedMessageId)
-          images.retainMessages(
-            keep,
-            group?.map((image) => image.image.imageId)
-          )
-        } else {
-          updateConversation(active.id, (previous) => ({
-            ...previous,
-            messages: active.messages,
-            toolRuns: active.toolRuns
-          }))
+        const settle = (result: boolean): boolean => {
+          if (result) {
+            commandReview.close()
+            markSent()
+            const keep = new Set([...keptIds])
+            if (acceptedMessageId) keep.add(acceptedMessageId)
+            images.retainMessages(
+              keep,
+              group?.map((image) => image.image.imageId)
+            )
+          } else {
+            updateConversation(active.id, (previous) => ({
+              ...previous,
+              messages: active.messages,
+              toolRuns: active.toolRuns
+            }))
+          }
+          return result
         }
-        return accepted
+        return typeof accepted === 'boolean' ? settle(accepted) : accepted.then(settle)
       }
-      return group ? images.withPrepared(group, submit) : submit()
+      const prepareAndSubmit = (): boolean | Promise<boolean> =>
+        group ? images.withPrepared(group, submit) : submit()
+      if (!editedMessage.skill) return prepareAndSubmit()
+      // Resolve the original host snapshot before any history truncation. The
+      // subsequent start still validates the opaque message reference again.
+      return window.api
+        .validateSkillMessage(active.id, editedMessage.id)
+        .then((value) => {
+          const result = parseSkillMessageResult(value)
+          if (
+            snapshotRef.current.activeConversationId !== active.id ||
+            !canChange() ||
+            getActiveConversation(snapshotRef.current)?.messages.find(
+              (message) => message.id === editedMessage.id
+            ) !== editedMessage
+          )
+            return false
+          if (
+            !result ||
+            result.status === 'error' ||
+            !result.snapshot ||
+            result.snapshot.snapshotHash !== editedMessage.skill?.snapshotHash
+          ) {
+            setConversationError(
+              result?.status === 'error' ? result.error : '原技能快照无法确认，原消息已保留。'
+            )
+            return false
+          }
+          const latestCapacity = getCapacityError(
+            nextSnapshot,
+            trimmedActive,
+            true,
+            JSON.stringify(result.snapshot).length
+          )
+          if (latestCapacity) {
+            setCapacityError(latestCapacity)
+            return false
+          }
+          return prepareAndSubmit()
+        })
+        .catch((cause) => {
+          if (snapshotRef.current.activeConversationId === active.id)
+            setConversationError(
+              cause instanceof Error ? cause.message : '确认原技能失败，原消息已保留。'
+            )
+          return false
+        })
     },
     [
       active,
+      canChange,
       canSubmit,
       images,
       commandReview,
@@ -413,6 +505,7 @@ export function useConversation(): ConversationController {
       return null
     creatingRef.current = true
     try {
+      if (active && !(await skills.release())) return null
       if (!(await revokeSelectionForChange())) return null
       if (!(await images.release())) return null
       if (active) {
@@ -528,6 +621,7 @@ export function useConversation(): ConversationController {
       return false
     }
     if (id === active?.id) return true
+    if (!(await skills.release())) return false
     if (!(await images.release())) return false
     if (active && !(await workspace.release())) return false
     if (!(await revokeSelectionForChange())) return false
@@ -588,6 +682,7 @@ export function useConversation(): ConversationController {
     const target = snapshot.conversations.find((item) => item.id === id)
     if (!target || target.archived) return false
     if (id === active?.id) {
+      if (!(await skills.release())) return false
       if (!(await images.release())) return false
       if (!(await workspace.release())) return false
       if (!(await revokeSelectionForChange())) return false
@@ -619,6 +714,7 @@ export function useConversation(): ConversationController {
       return false
     }
     if (!snapshot.conversations.some((item) => item.id === id && item.archived)) return false
+    if (!(await skills.release())) return false
     if (id !== active?.id && !(await images.release())) return false
     if (active && !(await workspace.release())) return false
     if (id !== active?.id && !(await revokeSelectionForChange())) return false
@@ -639,21 +735,43 @@ export function useConversation(): ConversationController {
 
   async function clear(): Promise<boolean> {
     if (!canChange() || !active) return false
+    if (!(await skills.release())) return false
     if (!(await revokeSelectionForChange())) return false
     if (!(await images.release())) return false
+    if (
+      snapshotRef.current.activeConversationId !== active.id ||
+      closePendingRef.current ||
+      !operations.begin('selecting')
+    )
+      return false
     invalidateTitle(active.id)
-    updateConversation(active.id, (previous) => ({
-      ...previous,
-      messages: [],
-      toolRuns: [],
-      tasks: []
-    }))
-    setCapacityError(null)
-    setConversationError(null)
-    clearProjectError()
-    request.clearError()
-    request.clearActivity()
-    return true
+    try {
+      const next: ConversationLibrary = {
+        ...snapshotRef.current,
+        conversations: snapshotRef.current.conversations.map((conversation) =>
+          conversation.id === active.id
+            ? { ...conversation, messages: [], toolRuns: [], tasks: [] }
+            : conversation
+        )
+      }
+      if (!(await storage.saveSnapshot(next)) || closePendingRef.current) return false
+      snapshotRef.current = next
+      setSnapshot(next)
+      setCapacityError(null)
+      setConversationError(null)
+      clearProjectError()
+      request.clearError()
+      request.clearActivity()
+      try {
+        if (!(await window.api.discardConversationSkills(active.id)))
+          setConversationError('会话已清空并保存，但技能缓存清理未获确认。')
+      } catch {
+        setConversationError('会话已清空并保存，但技能缓存清理失败。')
+      }
+      return true
+    } finally {
+      operations.finish('selecting')
+    }
   }
 
   const canChangeSettings = operations.operation === 'idle' && !closePending
@@ -697,6 +815,16 @@ export function useConversation(): ConversationController {
     resumableTask: request.resumableTask,
     resumeTask: () => {
       if (!active || !canSubmit) return false
+      const capacityMessage = getCapacityError(
+        snapshot,
+        active,
+        true,
+        request.resumableTask?.skillName ? MAX_SKILL_SNAPSHOT_CHARS : 0
+      )
+      if (capacityMessage) {
+        setCapacityError(capacityMessage)
+        return false
+      }
       invalidateTitle(active.id)
       return request.resume()
     },
@@ -710,6 +838,7 @@ export function useConversation(): ConversationController {
       conversationError ??
       capacityError ??
       images.error ??
+      skills.error ??
       projectError ??
       executionPermissions.error ??
       request.error,
@@ -742,6 +871,7 @@ export function useConversation(): ConversationController {
     workspace,
     executionPermissions,
     images,
+    skills,
     agentMode: active?.agentMode ?? unboundMode,
     setAgentMode: (mode) => {
       if (!parseAgentMode(mode) || !canChange() || images.busy) return false
@@ -756,6 +886,9 @@ export function useConversation(): ConversationController {
       // Capture before directory binding or image preparation; this round never
       // reads a later composer selection, including on retry and edit sends.
       const mode = active?.agentMode ?? unboundMode
+      const selectedSkill = skills.pending
+        ? { kind: 'selection' as const, selectionId: skills.pending.selectionId }
+        : undefined
       const group = [...images.pending]
       const question = group.length ? stripImageTurnNotice(content).trim() : content.trim()
       if (
@@ -765,15 +898,23 @@ export function useConversation(): ConversationController {
         setConversationError('消息为空或超过长度上限，请缩短问题后再发送。')
         return false
       }
-      const submitTo = (target: Conversation): boolean => {
+      const submitTo = (target: Conversation): boolean | Promise<boolean> => {
         const nextSnapshot = snapshotRef.current
-        const capacityMessage = getCapacityError(nextSnapshot, target, true)
+        const capacityMessage = getCapacityError(
+          nextSnapshot,
+          target,
+          true,
+          selectedSkill ? MAX_SKILL_SNAPSHOT_CHARS : 0
+        )
         if (capacityMessage) {
           setCapacityError(capacityMessage)
           return false
         }
         preparation.cancel()
-        const hadUserMessage = target.messages.some((message) => message.role === 'user')
+        const hadUserMessage = target.messages.some(
+          (message) =>
+            message.role === 'user' && message.status !== 'failed' && message.status !== 'cancelled'
+        )
         const fallbackTitle =
           !hadUserMessage && isPlaceholderConversationTitle(target.title)
             ? createConversationTitle(question)
@@ -791,22 +932,28 @@ export function useConversation(): ConversationController {
             : undefined,
           pendingSelection?.files ?? [],
           undefined,
-          group.map((image) => image.image.imageId)
+          group.map((image) => image.image.imageId),
+          undefined,
+          selectedSkill,
+          selectedSkill ? () => skills.markAccepted(selectedSkill.selectionId) : undefined
         )
-        if (accepted) {
-          if (fallbackTitle) {
-            updateConversation(target.id, (conversation) =>
-              isPlaceholderConversationTitle(conversation.title)
-                ? { ...conversation, title: fallbackTitle }
-                : conversation
-            )
+        const settle = (result: boolean): boolean => {
+          if (result) {
+            if (fallbackTitle) {
+              updateConversation(target.id, (conversation) =>
+                isPlaceholderConversationTitle(conversation.title)
+                  ? { ...conversation, title: fallbackTitle }
+                  : conversation
+              )
+            }
+            commandReview.close()
+            setCapacityError(null)
+            setConversationError(null)
+            markSent()
           }
-          commandReview.close()
-          setCapacityError(null)
-          setConversationError(null)
-          markSent()
+          return result
         }
-        return accepted
+        return typeof accepted === 'boolean' ? settle(accepted) : accepted.then(settle)
       }
       if (!active) {
         return createId(true).then((id) => {
@@ -814,7 +961,7 @@ export function useConversation(): ConversationController {
           return target ? submitTo(target) : false
         })
       }
-      const submit = (): boolean => submitTo(active)
+      const submit = (): boolean | Promise<boolean> => submitTo(active)
       return group.length ? images.withPrepared(group, submit) : submit()
     },
     editAndSend,

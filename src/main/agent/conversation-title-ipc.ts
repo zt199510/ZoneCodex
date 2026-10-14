@@ -51,7 +51,7 @@ export function registerConversationTitleRequest(): void {
         timedOut = true
         controller.abort()
       }, 30_000)
-      sender.once('did-start-loading', cancel)
+      sender.once('zonecodex-main-navigation', cancel)
       sender.once('render-process-gone', cancel)
       sender.once('destroyed', cancel)
       try {
@@ -70,7 +70,7 @@ export function registerConversationTitleRequest(): void {
         clearTimeout(timer)
         if (windowJobs.get(request.requestId) === job) windowJobs.delete(request.requestId)
         if (windowJobs.size === 0 && jobs.get(windowId) === windowJobs) jobs.delete(windowId)
-        sender.removeListener('did-start-loading', cancel)
+        sender.removeListener('zonecodex-main-navigation', cancel)
         sender.removeListener('render-process-gone', cancel)
         sender.removeListener('destroyed', cancel)
       }

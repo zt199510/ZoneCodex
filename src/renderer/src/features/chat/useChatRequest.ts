@@ -6,6 +6,7 @@ import { toolScopeForAgentRequest } from '../../../../shared/project'
 import type { ChatAttachment, ChatMessage } from '../../../../shared/conversation'
 import type { AgentMode } from '../../../../shared/agent'
 import { type ResumableAgentTask } from '../../../../shared/agent-resume'
+import { parseSkillAcceptedEvent, type SkillReference } from '../../../../shared/skills'
 import { parseAgentContextEvent, parseResponseMessageId } from '../../../../shared/agent'
 import type {
   AgentUserInputRequest,
@@ -66,6 +67,9 @@ type ActiveRequest = {
   startedAt: number
   imageIds?: readonly string[]
   checkpointTaskId?: string
+  accepted: boolean
+  accept: () => void
+  settleAcceptance?: (accepted: boolean) => void
 }
 type ChatRetrySource = {
   conversationId: string
@@ -79,6 +83,7 @@ type ChatRetrySource = {
   permissions: PermissionsState
   execution?: ExecutionInfo
   imageIds?: readonly string[]
+  skillMessageId?: string
 }
 type UpdateMessages = (
   conversationId: string,
@@ -109,7 +114,7 @@ type ChatRequest = {
   toolActivity: ToolActivity
   pendingPlanQuestion: PendingPlanQuestion | null
   resumableTask: ResumableAgentTask | null
-  resume: () => boolean
+  resume: () => boolean | Promise<boolean>
   respondToPlanQuestion: (response: AgentUserInputResponse) => Promise<boolean>
   send: (
     rawContent: string,
@@ -123,10 +128,12 @@ type ChatRequest = {
     messageAttachments?: readonly ChatAttachment[],
     expectedExecution?: ExecutionInfo,
     imageIds?: readonly string[],
-    checkpointTaskId?: string
-  ) => boolean
+    checkpointTaskId?: string,
+    skill?: SkillReference,
+    onSkillAccepted?: () => void
+  ) => boolean | Promise<boolean>
   canRetry: (assistantId: string) => boolean
-  retry: (assistantId: string) => boolean
+  retry: (assistantId: string) => boolean | Promise<boolean>
   getRetryImages: (assistantId: string) => readonly string[]
   stop: () => Promise<void>
   clearError: () => void
@@ -498,6 +505,30 @@ export function useChatRequest({
         )
       })
     })
+    const offSkill = window.api.onAgentSkillAccepted?.((value) => {
+      const event = parseSkillAcceptedEvent(value)
+      const active = activeRequest.current
+      if (
+        !event ||
+        !active ||
+        active.accepted ||
+        active.phase !== 'running' ||
+        event.requestId !== active.requestId ||
+        event.conversationId !== active.conversationId ||
+        event.messageId !== active.userId
+      )
+        return
+      updateMessages(active.conversationId, (previous) =>
+        previous.map((message) =>
+          message.id === active.userId && message.role === 'user'
+            ? { ...message, ...(event.snapshot ? { skill: event.snapshot } : {}) }
+            : message
+        )
+      )
+      const source = retrySources.current.get(active.assistantId)
+      if (source && event.snapshot) source.skillMessageId = active.userId
+      active.accept()
+    })
     subscribed.current = true
     return () => {
       subscribed.current = false
@@ -510,9 +541,11 @@ export function useChatRequest({
       offProgress()
       offTool()
       offTask()
+      offSkill?.()
       const active = activeRequest.current
       activeRequest.current = null
       if (!active) return
+      active.settleAcceptance?.(false)
       if (active.phase === 'running') {
         void window.api.cancelAgentRequest(active.requestId).catch(() => undefined)
       }
@@ -678,6 +711,10 @@ export function useChatRequest({
         )
       }
     } finally {
+      if (!active.accepted) {
+        active.settleAcceptance?.(false)
+        retrySources.current.delete(active.assistantId)
+      }
       if (activeRequest.current?.requestId === active.requestId) {
         pendingInput.current = null
         setPendingPlanQuestion(null)
@@ -701,8 +738,10 @@ export function useChatRequest({
     messageAttachments: readonly ChatAttachment[] = [],
     expectedExecution?: ExecutionInfo,
     imageIds: readonly string[] = [],
-    checkpointTaskId?: string
-  ): boolean {
+    checkpointTaskId?: string,
+    skill?: SkillReference,
+    onSkillAccepted?: () => void
+  ): boolean | Promise<boolean> {
     const frozenImageIds = [...imageIds]
     const question = frozenImageIds.length
       ? stripImageTurnNotice(rawContent).trim()
@@ -798,8 +837,15 @@ export function useChatRequest({
       attachments,
       taskId: crypto.randomUUID(),
       startedAt: performance.now(),
+      accepted: false,
+      accept: () => undefined,
       ...(checkpointTaskId ? { checkpointTaskId } : {}),
       ...(frozenImageIds.length ? { imageIds: frozenImageIds } : {})
+    }
+    active.context = {
+      ...active.context,
+      userMessageId: active.userId,
+      ...(skill ? { skill: { ...skill } } : {})
     }
     if (active.context.images)
       active.context.images = active.context.images.map((image) => ({
@@ -834,13 +880,32 @@ export function useChatRequest({
         }
       ]
     }))
-    onAccepted?.({
-      conversationId: active.conversationId,
-      messageId: active.userId,
-      content,
-      ...(frozenImageIds.length ? { titleContent: question } : {})
-    })
-    if (frozenImageIds.length) onImagesAccepted?.(active.userId, frozenImageIds)
+    const waitForAcceptance = Boolean(skill || checkpointTaskId)
+    const acceptance = waitForAcceptance
+      ? new Promise<boolean>((resolve) => {
+          active.settleAcceptance = resolve
+        })
+      : null
+    active.accept = () => {
+      if (active.accepted || activeRequest.current !== active) return
+      active.accepted = true
+      if (frozenImageIds.length) onImagesAccepted?.(active.userId, frozenImageIds)
+      if (active.stopping) {
+        // Host acceptance is a saved fact even when the stop click reached
+        // renderer first. Consume its selection without launching a title.
+        onSkillAccepted?.()
+        active.settleAcceptance?.(false)
+        return
+      }
+      onAccepted?.({
+        conversationId: active.conversationId,
+        messageId: active.userId,
+        content,
+        ...(frozenImageIds.length ? { titleContent: question } : {})
+      })
+      onSkillAccepted?.()
+      active.settleAcceptance?.(true)
+    }
     retrySources.current.set(active.assistantId, {
       conversationId: active.conversationId,
       prompt: content,
@@ -853,11 +918,12 @@ export function useChatRequest({
       permissions: { ...permissions },
       ...(frozenImageIds.length ? { imageIds: frozenImageIds } : {})
     })
+    if (!waitForAcceptance) active.accept()
     void run(active)
-    return true
+    return acceptance ?? true
   }
 
-  function resume(): boolean {
+  function resume(): boolean | Promise<boolean> {
     const source = resumable?.conversationId === conversationId ? resumable.task : null
     if (!source || !conversationId || activeRequest.current || !operations.isIdle()) return false
     if (source.requiresWorkspace && !workspace) {
@@ -896,7 +962,7 @@ export function useChatRequest({
     )
   }
 
-  function retry(assistantId: string): boolean {
+  function retry(assistantId: string): boolean | Promise<boolean> {
     const source = retrySources.current.get(assistantId)
     if (!source || !canRetry(assistantId)) return false
     const accepted = send(
@@ -910,10 +976,15 @@ export function useChatRequest({
       undefined,
       source.attachments,
       source.execution,
-      source.imageIds
+      source.imageIds,
+      undefined,
+      source.skillMessageId ? { kind: 'message', messageId: source.skillMessageId } : undefined
     )
-    if (accepted) retrySources.current.delete(assistantId)
-    return accepted
+    const settle = (result: boolean): boolean => {
+      if (result) retrySources.current.delete(assistantId)
+      return result
+    }
+    return typeof accepted === 'boolean' ? settle(accepted) : accepted.then(settle)
   }
 
   async function stop(): Promise<void> {
@@ -925,6 +996,8 @@ export function useChatRequest({
     setStopping(true)
     if (active.phase === 'resolving') {
       activeRequest.current = null
+      active.settleAcceptance?.(false)
+      retrySources.current.delete(active.assistantId)
       setStopping(false)
       finishToolTurn(active, 'cancelled', active.trace, [])
       finish('generating')

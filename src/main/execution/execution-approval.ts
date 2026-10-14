@@ -49,7 +49,7 @@ function settle(windowId: number, item: PendingApproval, approved: boolean): boo
   if (pending.get(windowId) !== item) return false
   pending.delete(windowId)
   item.signal.removeEventListener('abort', item.cancel)
-  item.sender.removeListener('did-start-loading', item.cancel)
+  item.sender.removeListener('zonecodex-main-navigation', item.cancel)
   item.sender.removeListener('render-process-gone', item.cancel)
   item.sender.removeListener('destroyed', item.cancel)
   item.owner.removeListener('closed', item.cancel)
@@ -135,7 +135,7 @@ export function requestExecutionApproval(
     }
     pending.set(windowId, item)
     signal.addEventListener('abort', item.cancel, { once: true })
-    sender.once('did-start-loading', item.cancel)
+    sender.once('zonecodex-main-navigation', item.cancel)
     sender.once('render-process-gone', item.cancel)
     sender.once('destroyed', item.cancel)
     owner.once('closed', item.cancel)

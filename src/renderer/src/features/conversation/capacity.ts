@@ -1,4 +1,6 @@
 import type { Conversation, ConversationLibrary } from '../../../../shared/conversation-library'
+import { getMessageContentCharacters } from '../../../../shared/conversation'
+import { MAX_SKILL_SNAPSHOT_CHARS } from '../../../../shared/skills'
 
 const MAX_MESSAGES = 1000
 const MAX_TOOL_RUNS_PER_CONVERSATION = 100
@@ -28,8 +30,15 @@ function utf8Length(value: string): number {
 export function getCapacityError(
   snapshot: ConversationLibrary,
   active: Conversation,
-  includeToolRun: boolean
+  includeToolRun: boolean,
+  skillCharacters = 0
 ): string | null {
+  if (
+    !Number.isInteger(skillCharacters) ||
+    skillCharacters < 0 ||
+    skillCharacters > MAX_SKILL_SNAPSHOT_CHARS
+  )
+    return CAPACITY_ERROR
   const messageCount = snapshot.conversations.reduce(
     (total, conversation) => total + conversation.messages.length,
     0
@@ -44,10 +53,12 @@ export function getCapacityError(
 
   const contentLength = snapshot.conversations.reduce(
     (total, conversation) =>
-      total + conversation.messages.reduce((sum, message) => sum + message.content.length, 0),
+      total +
+      conversation.messages.reduce((sum, message) => sum + getMessageContentCharacters(message), 0),
     0
   )
-  if (contentLength + RESERVED_CONTENT_LENGTH > MAX_CONTENT_LENGTH) return CAPACITY_ERROR
+  if (contentLength + RESERVED_CONTENT_LENGTH + skillCharacters > MAX_CONTENT_LENGTH)
+    return CAPACITY_ERROR
 
   const protocolLength = snapshot.conversations.reduce((total, conversation) => {
     const length = serializedLength(conversation.toolRuns)

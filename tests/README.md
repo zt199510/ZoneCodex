@@ -1,3 +1,43 @@
+## 统一工作面板验证
+
+- `npm run test:workbench:core`：状态模型、真实 UTF-8 文件保存／外部冲突／边界检查，以及模拟 Electron 的真实磁盘 IPC、窗口隔离、草稿存储与删除清理；无需启动界面。
+- `npm run test:workbench:desktop`：先运行 `npm run build`，再启动独立资料目录的实际 Electron，验收布局、菜单、分隔线、快捷键、文件、原生 webview、多终端与重启恢复。
+- `npm run test:workbench:packaged`：先生成 Windows 包，再对 `dist/win-unpacked/zonecodex.exe` 运行同套界面验收。检查打包内容与构建一致，并核对运行前后产物哈希。
+
+界面测试只创建自编写会话、临时文件和本地 HTTP 站点，阻止并记录模型请求；原生网页和 Shell 实例是真实进程。拖动排序使用合成 DataTransfer，附件选择器返回独立文件，文件引用通过真实兼容控制器触发；未把这些夹具动作记为原生对话框或完全人工验收。报告与截图位于 `.ui-check/workbench-ui/<阶段>-<UUID>`。最终结果和边界见[工作面板验收记录](../docs/workbench-acceptance-2026-10-14.md)。
+
+<!-- lesson62-skills-page-ui-20261014:start -->
+
+## 第62课Skills独立页面复验（2026-10-14）
+
+当前入口改为展开/折叠侧栏打开独立技能页；最新合同与保留边界见[第10节](../ZoneCodex学习计划/77-第六十二课-Skills发现选择与按需加载.md#10-skills独立页面调整与复验2026-10-14)，总证据见[ui-refactor-20261014](../.ui-check/lesson62/ui-refactor-20261014/README.md)。维护源继续为`tests/lesson62`与`scripts/checks/lesson62.mjs`，沿用原offline/desktop分组。
+
+本轮第62课renderer24项与第60课renderer回归23项通过；开发与Windows目录包桌面各18项通过，实际Electron/输入/IPC/隔离磁盘与合成模型/受控等待分别标注。新增双列→单列无溢出、元数据详情、Escape入口焦点、展开/折叠同页、草稿/待选保留与零隐式发现，明确刷新才退休旧选择；原快照发送、停止/迟到、重试/编辑/resume及至少5秒新PID被动零请求继续验证。类型/质量/构建与Windows目录包通过。
+
+本轮未重跑live或旧完整offline/CLI分组；下方第9节51项、旧桌面各15项和真实模型各6项均保留为前轮结果。两轮早期Escape焦点deadline失败完整保留，修正后双版最终各18项通过。测试使用新UUID隔离userData，未写回或清空真实用户会话；真实会话hash观察差异按最终核对记录。用户确认与八题仍待补。
+
+<!-- lesson62-skills-page-ui-20261014:end -->
+
+<!-- lesson62-implemented-16f2dbb3-deab-4a1a-8c37-e8c7f99e73ec:start -->
+
+## 第62课Skills维护入口（2026-10-14）
+
+[第62课第9节](../ZoneCodex学习计划/77-第六十二课-Skills发现选择与按需加载.md#9-本轮实施与分层验收记录2026-10-14)记录实际合同、维护源版本及分层证据。源码为[tests/lesson62](lesson62/)，调度为[lesson62.mjs](../scripts/checks/lesson62.mjs)。产品实施与必要自动验收有条件通过；用户实测确认和八题待补。
+
+| 命令 | 当前范围与结果 |
+| --- | --- |
+| `npm run test:lesson62:list` | 列出offline/cli/desktop/live及suite；不构建，不发业务请求。 |
+| `npm run test:lesson62:offline` | 四套51项：skills18、storage10、renderer19、runtime4。真实有界磁盘/Windows属性/Node存储，与合成Electron/IPC/React/DOM/传输分别记录；拒外部网络。 |
+| `npm run test:lesson62:cli` | 实际开发CLI及分发`dist/agent/agent.cmd`各5项，新PID、磁盘、源修改/删除后原快照resume、后续保存、普通任务/坏hash/help/导入；模型合成，无真实TTY SIGINT。 |
+| `npm run test:lesson62:desktop` | 实际开发/Windows目录包各15项，真实输入/读取/保存与合成等待/模型；严格核对当次非空请求、done、实际read/report、accepted和新用户/助手complete。重试/编辑/删除源续接沿A，保留B与未发草稿；至少5秒新PID被动重开模型和源操作均0。 |
+| `npm run test:lesson62:live` | 显式联网，实际默认gpt-6.1-sol双桌面审查各6项；实际read/report/save、独立quantity0缺陷复现、只读hash及新PID被动重开。开发真实轮保留实跑源，后续synthetic加严不冒称其已运行；不默认挂其他组。 |
+
+分组可用`-- --suite=<list中的名称>`。每轮新UUID；不自动构建、安装、修改模型或继承旧结果。默认`npm test`仍为第58课11组；本轮旧第60课offline68项、当前双桌面各37项与Git offline103项通过。
+
+早轮身份护栏、JSON正文断言、Windows helper、停止隐式重发、DOM观察、load轮询诱导保存竞态及旧合成call_id/闭环盲点完整保留。基线App已未挂载TerminalPanel/ChatHeader/WorkspaceStatus；旧第60课当前回归用真实preload PTY，旧面板键鼠/header手动保存/清空确认与late reinsertion/workspace文字不算覆盖，也不是本课新增UI缺失。未构造的Windows特殊reparse tags、任意恶意并发OS沙箱、真实CLI联网/TTY SIGINT不由合成结果代替。旧第56–61确认、八题/open与Git外部待验保持。
+
+<!-- lesson62-implemented-16f2dbb3-deab-4a1a-8c37-e8c7f99e73ec:end -->
+
 <!-- git-completion-52fbcd9f-8614-4890-9386-9dc727281863:start -->
 
 ## Git 功能补齐的维护入口（2026-10-13）

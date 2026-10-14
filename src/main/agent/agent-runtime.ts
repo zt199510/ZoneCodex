@@ -6,6 +6,7 @@ import { createLiveResponse, readModelConfiguration } from '../model/response-cl
 import { createContextSummaryResponse } from '../model/context-summary'
 import type { AgentCoreDependencies, AgentCoreObserver } from './agent-core-contract'
 import type { ExecuteTool } from './tool-loop'
+import { validateSkillSnapshotHash } from '../skills/skill-reader'
 
 type RuntimeInput = {
   capabilities: Parameters<typeof buildAgentRequest>[0]
@@ -21,6 +22,8 @@ export function createAgentRuntime({
   imageCount = 0,
   imageBytes = 0
 }: RuntimeInput): Pick<AgentCoreDependencies, 'send' | 'summarize' | 'networkOverhead'> {
+  if (capabilities.skill && !validateSkillSnapshotHash(capabilities.skill))
+    throw new Error('技能快照指纹不一致')
   const request = buildAgentRequest(capabilities)
   const fixedConfiguration = configuration ?? readModelConfiguration()
   return {

@@ -1,4 +1,5 @@
 import { isAgentId, parseAgentMode, type AgentMode } from './agent'
+import { isSkillName } from './skills'
 
 /** Display metadata only. Raw protocol, bindings and authority never cross this API. */
 export type ResumableAgentTask = {
@@ -7,6 +8,7 @@ export type ResumableAgentTask = {
   updatedAt: string
   prompt: string
   requiresWorkspace: boolean
+  skillName?: string
 }
 
 export const agentResumePrompt =
@@ -22,9 +24,10 @@ export const agentResumeSafetyInstructions = `本次是用户明确触发的任�
 export function parseResumableAgentTask(value: unknown): ResumableAgentTask | null {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) return null
   const fields = Object.getOwnPropertyDescriptors(value)
-  const allowed = ['taskId', 'mode', 'updatedAt', 'prompt', 'requiresWorkspace']
+  const required = ['taskId', 'mode', 'updatedAt', 'prompt', 'requiresWorkspace']
+  const allowed = [...required, 'skillName']
   if (
-    Reflect.ownKeys(fields).length !== allowed.length ||
+    required.some((key) => !Object.hasOwn(fields, key)) ||
     Reflect.ownKeys(fields).some(
       (key) =>
         typeof key !== 'string' ||
@@ -40,7 +43,8 @@ export function parseResumableAgentTask(value: unknown): ResumableAgentTask | nu
     typeof fields.prompt.value !== 'string' ||
     !fields.prompt.value.trim() ||
     fields.prompt.value.length > 2000 ||
-    typeof fields.requiresWorkspace.value !== 'boolean'
+    typeof fields.requiresWorkspace.value !== 'boolean' ||
+    (Object.hasOwn(fields, 'skillName') && !isSkillName(fields.skillName.value))
   )
     return null
   return {
@@ -48,6 +52,7 @@ export function parseResumableAgentTask(value: unknown): ResumableAgentTask | nu
     mode: fields.mode.value as AgentMode,
     updatedAt: fields.updatedAt.value as string,
     prompt: fields.prompt.value as string,
-    requiresWorkspace: fields.requiresWorkspace.value as boolean
+    requiresWorkspace: fields.requiresWorkspace.value as boolean,
+    ...(fields.skillName ? { skillName: fields.skillName.value as string } : {})
   }
 }

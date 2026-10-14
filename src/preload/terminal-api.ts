@@ -7,8 +7,8 @@ export const terminalAPI: Pick<
   AppAPI,
   'startTerminal' | 'writeTerminal' | 'resizeTerminal' | 'closeTerminal' | 'onTerminalEvent'
 > = {
-  startTerminal: async (sessionId, size) =>
-    parseTerminalResult(await ipcRenderer.invoke('terminal:start', sessionId, size)),
+  startTerminal: async (sessionId, size, context) =>
+    parseTerminalResult(await ipcRenderer.invoke('terminal:start', sessionId, size, context)),
   writeTerminal: async (sessionId, data) =>
     parseTerminalResult(await ipcRenderer.invoke('terminal:write', sessionId, data)),
   resizeTerminal: async (sessionId, size) =>

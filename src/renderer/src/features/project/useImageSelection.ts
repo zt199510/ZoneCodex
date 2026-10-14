@@ -36,7 +36,10 @@ export type ImageSelectionController = {
   getMessage: (messageId: string) => RuntimeImage[] | null
   getImage: (imageId: string) => RuntimeImage | null
   isAvailable: (imageId: string) => boolean
-  withPrepared: (images: readonly RuntimeImage[], submit: () => boolean) => Promise<boolean>
+  withPrepared: (
+    images: readonly RuntimeImage[],
+    submit: () => boolean | Promise<boolean>
+  ) => Promise<boolean>
   retainMessages: (messageIds: ReadonlySet<string>, retainedImageIds?: readonly string[]) => void
 }
 
@@ -393,7 +396,7 @@ export function useImageSelection({
 
   async function withPrepared(
     images: readonly RuntimeImage[],
-    submit: () => boolean
+    submit: () => boolean | Promise<boolean>
   ): Promise<boolean> {
     const id = currentConversation.current
     const frozen = [...images]

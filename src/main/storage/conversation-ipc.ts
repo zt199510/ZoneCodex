@@ -3,6 +3,8 @@ import { getIpcWindow } from '../ipc-source'
 import { createConversationStore } from './conversation-store'
 import { parseLibrary } from '../../shared/conversation-library'
 import { hasSettingsMutation } from '../settings/settings-ipc'
+import { configureSavedSkillMessageLookup } from '../agent/skill-message'
+import { assertConversationSkillSources, releasePersistedSkills } from '../skills/skill-service'
 import {
   configureImageStorage,
   captureImageSaveCheckpoint,
@@ -25,6 +27,15 @@ export function hasConversationSave(windowId: number): boolean {
 export function registerConversationStorage(directory: string): void {
   // 创建会话存储器
   const conversationStore = createConversationStore(directory)
+  configureSavedSkillMessageLookup(async (conversationId, messageId) => {
+    const result = await conversationStore.load()
+    if (!result.ok) throw new Error(result.error)
+    const message = result.snapshot.conversations
+      .find((conversation) => conversation.id === conversationId)
+      ?.messages.find((candidate) => candidate.id === messageId && candidate.role === 'user')
+    if (!message) throw new Error('原用户消息不存在，未开始技能任务。')
+    return message.skill ?? null
+  })
   configureConversationDirectoryLookup(async (conversationId) => {
     const result = await conversationStore.load()
     if (!result.ok) throw new Error(result.error)
@@ -68,7 +79,8 @@ export function registerConversationStorage(directory: string): void {
     saves.set(owner.id, (saves.get(owner.id) ?? 0) + 1)
     try {
       const checkpoint = captureImageSaveCheckpoint(owner.id)
-      const result = await conversationStore.save(snapshot, async (checked) => {
+      const result = await conversationStore.save(snapshot, async (checked, existing) => {
+        assertConversationSkillSources(owner.id, checked, existing)
         await checkConversationDirectorySave(owner.id, checked)
         await persistConversationImages(owner.id, checked)
         await checkConversationDirectorySave(owner.id, checked)
@@ -89,6 +101,22 @@ export function registerConversationStorage(directory: string): void {
         ) {
           commitConversationDirectorySave(owner.id, checked)
           rememberConversationImages(owner.id, checked, checkpoint)
+          releasePersistedSkills(
+            owner.id,
+            checked.conversations.flatMap((conversation) =>
+              conversation.messages.flatMap((message) =>
+                message.skill
+                  ? [
+                      {
+                        conversationId: conversation.id,
+                        messageId: message.id,
+                        snapshotHash: message.skill.snapshotHash
+                      }
+                    ]
+                  : []
+              )
+            )
+          )
         }
       }
       return result

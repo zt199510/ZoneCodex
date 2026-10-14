@@ -55,6 +55,9 @@ import { captureTaskDirectoryBinding, createTaskCheckpoint } from '../storage/ta
 import { TaskCheckpointError, type TaskCheckpoint } from '../../shared/task-checkpoint'
 import { agentResumeSafetyNotice } from '../../shared/agent-resume'
 import { beginSelectedGitTurn } from '../git/git-turn-host'
+import { freezePreparedSkill, rememberAcceptedSkill, releaseSkill } from '../skills/skill-service'
+import { readSkillMessage } from './skill-message'
+import type { SkillSnapshot, SkillAcceptedEvent } from '../../shared/skills'
 
 type Job = { id: string; controller: AbortController; snapshotId?: string; imageIds: Set<string> }
 const jobs = new Map<number, Job>()
@@ -144,7 +147,7 @@ export async function runAgentRequest(
   }
   const cancel = (): void => controller.abort()
   jobs.set(windowId, job)
-  sender.once('did-start-loading', cancel)
+  sender.once('zonecodex-main-navigation', cancel)
   sender.once('render-process-gone', cancel)
   sender.once('destroyed', cancel)
   try {
@@ -269,6 +272,27 @@ export async function runAgentRequest(
       : parseToolHistory(history, checkedScope, checkedContext.imageHistory, mode)
     const executeCommandProposal = createCommandProposalExecutor()
     if (!checkedHistory) return { status: 'error', error: '工具历史参数无效', trace }
+    // Fresh selections read current source bytes once; retries/resume use only
+    // the original bounded snapshot. Guidance never changes the tool scope.
+    let skill: SkillSnapshot | null = resumed?.checkpoint.skill ?? null
+    if (!resumed && checkedContext.skill) {
+      skill =
+        checkedContext.skill.kind === 'selection'
+          ? await freezePreparedSkill(
+              windowId,
+              checkedContext.conversationId,
+              checkedContext.skill.selectionId,
+              controller.signal
+            )
+          : await readSkillMessage(
+              windowId,
+              checkedContext.conversationId,
+              checkedContext.skill.messageId,
+              () => controller.signal.throwIfAborted()
+            )
+      controller.signal.throwIfAborted()
+      if (!skill) throw new AgentError('原消息技能快照缺失，未开始任务；请重新选择技能。')
+    }
     let imageBytes = capturedImages.reduce((total, captured) => total + captured.image.bytes, 0)
     const historicalGroups = new Map<number, { messageId: string; imageIds: string[] }>()
     for (const reference of checkedContext.imageHistory ?? []) {
@@ -366,6 +390,7 @@ export async function runAgentRequest(
           bindings,
           history: raw,
           ...(summary ? { summary } : {}),
+          ...(skill ? { skill } : {}),
           progress,
           reason
         })
@@ -436,7 +461,8 @@ export async function runAgentRequest(
           execution: execution.info,
           commandSandboxAvailable: commandBackend !== null,
           imagePresent: capturedImages.length > 0 || historyImages.length > 0,
-          resuming: Boolean(resumed)
+          resuming: Boolean(resumed),
+          skill
         },
         imageCount: capturedImages.length + historyImages.length,
         imageBytes
@@ -461,6 +487,25 @@ export async function runAgentRequest(
       finishGitTurn = await beginSelectedGitTurn(windowId)
       controller.signal.throwIfAborted()
       if (!assertWorkspaceAccess()) throw new AgentError('运行上下文已失效，请重新发送')
+      if (checkedContext.userMessageId) {
+        if (skill)
+          rememberAcceptedSkill(
+            windowId,
+            checkedContext.conversationId,
+            checkedContext.userMessageId,
+            skill
+          )
+        const accepted: SkillAcceptedEvent = {
+          requestId: id,
+          conversationId: checkedContext.conversationId,
+          messageId: checkedContext.userMessageId,
+          snapshot: skill ? structuredClone(skill) : null
+        }
+        sender.send('agent:skill-accepted', accepted)
+        if (!resumed && checkedContext.skill?.kind === 'selection')
+          releaseSkill(windowId, checkedContext.conversationId, checkedContext.skill.selectionId)
+        if (skill) appendTrace(`技能：${skill.name}（本轮固定快照）`)
+      }
       const outcome = await runAgentCore(
         {
           requestId: id,
@@ -655,7 +700,7 @@ export async function runAgentRequest(
     for (const captured of capturedImages) captured.finish()
     for (const image of historyImages) image.captured.finish()
     if (jobs.get(windowId) === job) jobs.delete(windowId)
-    sender.removeListener('did-start-loading', cancel)
+    sender.removeListener('zonecodex-main-navigation', cancel)
     sender.removeListener('render-process-gone', cancel)
     sender.removeListener('destroyed', cancel)
     if (!coreHandledTiming)

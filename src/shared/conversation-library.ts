@@ -1,4 +1,4 @@
-import { parseMessages, type ChatMessage } from './conversation'
+import { getMessageContentCharacters, parseMessages, type ChatMessage } from './conversation'
 import { parseToolRuns, type ToolRun } from './agent-history'
 import type { SavedWorkspace } from './project'
 import { isAbsoluteLocalDirectory } from './settings'
@@ -160,7 +160,10 @@ export function parseLibrary(value: unknown): ConversationLibrary | null {
     const tasks = parseTaskRecords(raw.tasks)
     if (!tasks) return null
     messageCount += messages.length
-    contentLength += messages.reduce((sum, message) => sum + message.content.length, 0)
+    contentLength += messages.reduce(
+      (sum, message) => sum + getMessageContentCharacters(message),
+      0
+    )
     protocolLength += serializedLength(toolRuns) ?? Number.POSITIVE_INFINITY
     if (messageCount > 1000 || contentLength > 1_000_000 || protocolLength > 2_000_000) return null
     ids.add(raw.id)

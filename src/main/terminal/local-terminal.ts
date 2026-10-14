@@ -8,9 +8,12 @@ import { getIpcWindow } from '../ipc-source'
 import { getAppSettings } from '../settings/settings-service'
 import { resolveTerminalShell } from '../settings/terminal-shell'
 import { hasSettingsMutation } from '../settings/settings-ipc'
+import { validContext, type WorkbenchContext } from '../../shared/workbench'
+import { resolveExecutionContext, executionStillCurrent } from '../execution/execution-context'
 
 // 终端会话管理
 type Session = {
+  conversationId?: string
   id: string
   process: TerminalProcess
   subscriptions: Array<{ dispose: () => void }>
@@ -22,9 +25,14 @@ type Session = {
   finishClose?: (result: TerminalResult) => void
 }
 // 终端会话映射：窗口 ID -> 会话
-const sessions = new Map<number, Session>()
+const sessions = new Map<string, Session>()
+const starts = new Map<
+  string,
+  { ownerId: number; id: string; canceled: boolean; finished: Promise<void>; finish: () => void }
+>()
 const CLOSE_TIMEOUT_MS = 10_000
 let quitting = false
+const sessionKey = (ownerId: number, id: string): string => `${ownerId}:${id}`
 // 获取终端请求的窗口来源
 function ownerOf(event: IpcMainInvokeEvent): WebContents {
   getIpcWindow(event, '不支持的终端请求来源', { windowMustBeLive: true, senderMustBeLive: true })
@@ -56,7 +64,8 @@ function observeExit(session: Session): void {
   const subscription = session.process.onExit(({ exitCode, error }) => {
     if (session.exited) return
     session.exited = true
-    if (sessions.get(session.owner.id) === session) sessions.delete(session.owner.id)
+    if (sessions.get(sessionKey(session.owner.id, session.id)) === session)
+      sessions.delete(sessionKey(session.owner.id, session.id))
     for (const listener of session.subscriptions.splice(0)) {
       try {
         listener.dispose()
@@ -75,9 +84,14 @@ function observeExit(session: Session): void {
 
 // kill() 只请求关闭；收到退出事件后才释放窗口槽位并确认成功。
 function stop(ownerId: number, id?: string): Promise<TerminalResult> {
-  const session = sessions.get(ownerId)
+  const pending = id ? starts.get(sessionKey(ownerId, id)) : undefined
+  if (pending) pending.canceled = true
+  const session = id
+    ? sessions.get(sessionKey(ownerId, id))
+    : [...sessions.values()].find((item) => item.owner.id === ownerId)
   // 重复关闭和旧 ID 关闭都不能误伤新会话。
-  if (!session || (id !== undefined && session.id !== id)) return Promise.resolve({ ok: true })
+  if (!session || (id !== undefined && session.id !== id))
+    return pending ? pending.finished.then(() => stop(ownerId, id)) : Promise.resolve({ ok: true })
   if (session.closeRequest) return session.closeRequest
   session.closing = true
   let finish!: (result: TerminalResult) => void
@@ -119,9 +133,20 @@ function stop(ownerId: number, id?: string): Promise<TerminalResult> {
 }
 
 function cleanup(ownerId: number, id?: string): void {
-  void stop(ownerId, id).then((result) => {
-    if (!result.ok) console.error('终端清理失败：', result.error)
-  })
+  const owned = id
+    ? [id]
+    : [
+        ...sessions.values(),
+        ...[...starts.values()]
+          .filter((start) => !sessions.has(sessionKey(start.ownerId, start.id)))
+          .map((start) => ({ id: start.id, owner: { id: start.ownerId } }))
+      ]
+        .filter((session) => session.owner.id === ownerId)
+        .map((session) => session.id)
+  for (const sessionId of owned)
+    void stop(ownerId, sessionId).then((result) => {
+      if (!result.ok) console.error('终端清理失败：', result.error)
+    })
 }
 
 function attachQuitCleanup(): void {
@@ -131,7 +156,9 @@ function attachQuitCleanup(): void {
     event.preventDefault()
     if (quitting) return
     quitting = true
-    void Promise.all([...sessions.keys()].map((ownerId) => stop(ownerId))).then((results) => {
+    void Promise.all(
+      [...sessions.values()].map((session) => stop(session.owner.id, session.id))
+    ).then((results) => {
       const errors = results.filter((result) => !result.ok)
       if (errors.length > 0) {
         errors.forEach((result) => console.error('应用退出时终端清理失败：', result.error))
@@ -162,21 +189,58 @@ export function registerLocalTerminal(): void {
   attachQuitCleanup()
   ipcMain.handle(
     'terminal:start',
-    async (event, id: unknown, size: unknown): Promise<TerminalResult> => {
+    async (
+      event,
+      id: unknown,
+      size: unknown,
+      context?: WorkbenchContext
+    ): Promise<TerminalResult> => {
       const owner = ownerOf(event)
       if (!isTerminalId(id) || !isTerminalSize(size)) {
         return { ok: false, error: '终端 ID 或尺寸无效' }
       }
       if (quitting) return { ok: false, error: '应用正在退出' }
-      if (sessions.has(owner.id)) return { ok: false, error: '当前窗口已有终端，请先关闭' }
+      if (sessions.has(sessionKey(owner.id, id)) || starts.has(sessionKey(owner.id, id)))
+        return { ok: false, error: '终端 ID 已存在' }
+      if ([...sessions.values()].filter((session) => session.owner.id === owner.id).length >= 16)
+        return { ok: false, error: '同一窗口最多运行 16 个终端' }
       if (process.platform !== 'win32') return { ok: false, error: '本课仅支持 Windows' }
 
+      let finishStart!: () => void
+      const startState = {
+        ownerId: owner.id,
+        id,
+        canceled: false,
+        finished: new Promise<void>((resolve) => {
+          finishStart = resolve
+        }),
+        finish: () => finishStart()
+      }
+      starts.set(sessionKey(owner.id, id), startState)
       try {
         if (hasSettingsMutation()) return { ok: false, error: '设置正在保存，请稍后创建终端' }
         const shell = resolveTerminalShell(getAppSettings().terminalShell)
-        const child = createTerminalProcess(id, shell, app.getPath('home'), size)
+        let cwd = app.getPath('home')
+        if (context !== undefined) {
+          if (!validContext(context)) throw new Error('终端会话上下文无效')
+          const window = getIpcWindow(event, '终端来源无效')
+          const execution = await resolveExecutionContext(window.id, {
+            ...context,
+            mode: 'execute'
+          })
+          if (!executionStillCurrent(window.id, { ...context, mode: 'execute' }, execution))
+            throw new Error('终端目录已变化')
+          cwd = execution.info.cwd
+        }
+        if (startState.canceled || owner.isDestroyed() || quitting || hasSettingsMutation())
+          throw new Error('终端启动上下文已失效')
+        if (sessions.has(sessionKey(owner.id, id))) return { ok: false, error: '终端 ID 已存在' }
+        if ([...sessions.values()].filter((session) => session.owner.id === owner.id).length >= 16)
+          return { ok: false, error: '同一窗口最多运行 16 个终端' }
+        const child = createTerminalProcess(id, shell, cwd, size)
         const session: Session = {
           id,
+          conversationId: context?.conversationId,
           owner,
           process: child,
           subscriptions: [],
@@ -184,13 +248,13 @@ export function registerLocalTerminal(): void {
           exitSubscribed: false,
           closing: false
         }
-        sessions.set(owner.id, session)
+        sessions.set(sessionKey(owner.id, id), session)
         observeExit(session)
         if (!session.exited) {
           keepSubscription(
             session,
             child.onData((data) => {
-              if (sessions.get(owner.id) === session && !session.closing)
+              if (sessions.get(sessionKey(owner.id, id)) === session && !session.closing)
                 emit(owner, { sessionId: id, type: 'data', data })
             })
           )
@@ -204,6 +268,9 @@ export function registerLocalTerminal(): void {
         // 若创建后订阅失败，退出未确认之前不丢失清理句柄。
         cleanup(owner.id, id)
         return failure(error)
+      } finally {
+        starts.delete(sessionKey(owner.id, id))
+        startState.finish()
       }
     }
   )
@@ -220,7 +287,7 @@ export function registerLocalTerminal(): void {
       ) {
         return { ok: false, error: '终端输入无效或过长（单次最多 8192 字符）' }
       }
-      const session = sessions.get(owner.id)
+      const session = sessions.get(sessionKey(owner.id, id))
       if (!session || session.id !== id) return { ok: false, error: '终端已经关闭' }
       if (session.closing) return { ok: false, error: '终端正在关闭' }
       try {
@@ -237,7 +304,7 @@ export function registerLocalTerminal(): void {
     async (event, id: unknown, size: unknown): Promise<TerminalResult> => {
       const owner = ownerOf(event)
       if (!isTerminalId(id) || !isTerminalSize(size)) return { ok: false, error: '终端尺寸无效' }
-      const session = sessions.get(owner.id)
+      const session = sessions.get(sessionKey(owner.id, id))
       if (!session || session.id !== id) return { ok: false, error: '终端已经关闭' }
       if (session.closing) return { ok: false, error: '终端正在关闭' }
       try {

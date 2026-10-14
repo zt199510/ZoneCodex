@@ -52,7 +52,7 @@ async function waitUntil(predicate) {
 }
 function released(env) {
   assert.equal(env.runner.hasAgentJob(1), false)
-  for (const event of ['did-start-loading', 'render-process-gone', 'destroyed'])
+  for (const event of ['zonecodex-main-navigation', 'render-process-gone', 'destroyed'])
     assert.equal(env.source.sender.listenerCount(event), 0)
   assert.equal(env.input.hasAgentUserInput(1), false)
   assert.equal(env.approval.hasExecutionApproval(1), false)

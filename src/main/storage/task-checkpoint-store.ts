@@ -4,6 +4,8 @@ import { basename, dirname, join, resolve } from 'node:path'
 import { parseResumableHistory, type ProtocolItem } from '../../shared/agent-history'
 import { parseAgentMode, type AgentMode } from '../../shared/agent'
 import { parseToolScope, type ToolScope } from '../../shared/project'
+import type { SkillSnapshot } from '../../shared/skills'
+import { validateSkillSnapshotHash } from '../skills/skill-reader'
 import {
   parseTaskCheckpoint,
   TaskCheckpointError,
@@ -48,6 +50,7 @@ type CreateTaskCheckpointInput = {
   bindings: TaskCheckpoint['bindings']
   history: ProtocolItem[]
   summary?: TaskCheckpointSummary
+  skill?: SkillSnapshot
   progress: TaskCheckpoint['progress']
   reason: TaskCheckpoint['reason']
 }
@@ -295,10 +298,12 @@ export function createTaskCheckpoint(input: CreateTaskCheckpointInput): TaskChec
       characters: JSON.stringify(history).length
     },
     ...(input.summary === undefined ? {} : { summary: input.summary }),
+    ...(input.skill === undefined ? {} : { skill: input.skill }),
     progress: input.progress,
     reason: input.reason
   })
-  if (!checkpoint) throw new TaskCheckpointError('CHECKPOINT_INVALID')
+  if (!checkpoint || (checkpoint.skill && !validateSkillSnapshotHash(checkpoint.skill)))
+    throw new TaskCheckpointError('CHECKPOINT_INVALID')
   return checkpoint
 }
 
@@ -357,7 +362,8 @@ async function readCheckpoint(file: string): Promise<TaskCheckpoint> {
   if (value && typeof value === 'object' && 'schemaVersion' in value && value.schemaVersion !== 1)
     throw new TaskCheckpointError('CHECKPOINT_VERSION')
   const checkpoint = parseTaskCheckpoint(value)
-  if (!checkpoint) throw new TaskCheckpointError('CHECKPOINT_INVALID')
+  if (!checkpoint || (checkpoint.skill && !validateSkillSnapshotHash(checkpoint.skill)))
+    throw new TaskCheckpointError('CHECKPOINT_INVALID')
   if (checkpointFingerprint(checkpoint.scope) !== checkpoint.scopeFingerprint)
     throw new TaskCheckpointError('SCOPE_MISMATCH')
   return checkpoint
@@ -476,7 +482,8 @@ export async function saveTaskCheckpoint(
     : null
   return serial(target, async () => {
     try {
-      if (!checkpoint) throw new TaskCheckpointError('CHECKPOINT_INVALID')
+      if (!checkpoint || (checkpoint.skill && !validateSkillSnapshotHash(checkpoint.skill)))
+        throw new TaskCheckpointError('CHECKPOINT_INVALID')
       if (
         !history ||
         checkpointFingerprint(history) !== checkpoint.raw.fingerprint ||
@@ -507,6 +514,7 @@ export async function saveTaskCheckpoint(
           previous.createdAt !== checkpoint.createdAt ||
           Date.parse(previous.updatedAt) > Date.parse(checkpoint.updatedAt) ||
           previous.mode !== checkpoint.mode ||
+          previous.skill?.snapshotHash !== checkpoint.skill?.snapshotHash ||
           original.length > history.length ||
           checkpointFingerprint(history.slice(0, original.length)) !==
             checkpointFingerprint(original)

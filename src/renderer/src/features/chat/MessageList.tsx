@@ -161,6 +161,15 @@ export function MessageList({
             }
           >
             {message.role === 'system' && <div className="message-author">系统</div>}
+            {message.role === 'user' && message.skill && (
+              <span
+                className="message-skill"
+                title={message.skill.description}
+                aria-label={`本轮技能：${message.skill.name}`}
+              >
+                技能：{message.skill.name}
+              </span>
+            )}
             {message.role === 'user' && message.mode === 'plan' && (
               <span className="message-mode" aria-label="工作方式：计划">
                 计划

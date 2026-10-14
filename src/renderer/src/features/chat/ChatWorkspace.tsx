@@ -15,6 +15,7 @@ import { ThreadSummaryPanel } from './ThreadSummaryPanel'
 import type { ThreadSummaryController } from './useThreadSummaryPanel'
 import type { ThreadSummarySource } from './thread-summary-sources'
 import { ThreadSummaryIcon } from './ThreadSummaryIcon'
+import { NewChatHero } from './NewChatHero'
 
 export function ChatWorkspace({
   conversation,
@@ -73,6 +74,10 @@ export function ChatWorkspace({
     })
   }
   const { storage, messages } = conversation
+  const newChat = messages.length === 0 && !conversation.resumableTask
+  const projectName = conversation.workspace.runtime?.label ?? conversation.workspace.saved?.label
+  const projectDisabled =
+    !conversation.canNavigate || conversation.skills.busy || Boolean(conversation.images?.busy)
   const errors = [storage.error, conversation.chatError, conversation.workspace.error].filter(
     Boolean
   )
@@ -82,6 +87,7 @@ export function ChatWorkspace({
       id="conversation"
       aria-label="聊天"
       ref={workspaceRef}
+      data-new-chat={newChat || undefined}
       data-summary-mode={summaryVisible ? summaryMode : undefined}
     >
       <header className="thread-toolbar" aria-label="会话工具栏">
@@ -106,6 +112,8 @@ export function ChatWorkspace({
         <div className="task-resume-bar" role="status">
           <span>
             此会话有可继续的任务。继续时会重新核对目录和当前权限。{agentResumeSafetyNotice}
+            {conversation.resumableTask.skillName &&
+              ` 原任务技能：${conversation.resumableTask.skillName}。`}
           </span>
           <button
             type="button"
@@ -135,6 +143,13 @@ export function ChatWorkspace({
       )}
       <div className="chat-transcript">
         <div className="chat-scroll-area" ref={scrollArea} onScroll={onScroll}>
+          {newChat && (
+            <NewChatHero
+              projectName={projectName}
+              disabled={projectDisabled}
+              onSelectProject={() => void conversation.selectReferenceWorkspace()}
+            />
+          )}
           {conversation.activeConversationId !== null && messages.length > 0 && (
             <MessageList
               onOpenFile={onOpenFile}
@@ -198,6 +213,7 @@ export function ChatWorkspace({
       <CommitReceipt commit={conversation.commit} />
       <ChatComposer
         conversation={conversation}
+        newChat={newChat}
         draft={draft}
         onChange={setDraft}
         onSend={send}

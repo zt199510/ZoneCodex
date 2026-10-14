@@ -25,6 +25,7 @@ type SidebarProps = {
   view: SidebarView
   onViewChange: (view: SidebarView) => void
   settingsOpen: boolean
+  skillsOpen: boolean
   width: number
   onWidthChange: (width: number) => void
   onResizingChange: (resizing: boolean) => void
@@ -42,6 +43,7 @@ type SidebarProps = {
   onArchive: (id: string) => void | Promise<unknown>
   onRestore: (id: string) => Promise<boolean>
   onOpenSettings: (returnFocus?: HTMLElement) => void
+  onOpenSkills: (returnFocus?: HTMLElement) => void
 }
 
 type SidebarView = 'active' | 'archived'
@@ -58,6 +60,7 @@ export function Sidebar({
   view,
   onViewChange: setView,
   settingsOpen,
+  skillsOpen,
   width,
   onWidthChange,
   onResizingChange,
@@ -74,7 +77,8 @@ export function Sidebar({
   onTogglePinned,
   onArchive,
   onRestore,
-  onOpenSettings
+  onOpenSettings,
+  onOpenSkills
 }: SidebarProps): React.JSX.Element {
   const sectionId = useId()
   const { isCollapsed, toggleSection } = useSidebarSections()
@@ -177,7 +181,11 @@ export function Sidebar({
               type="button"
               className="conversation-item"
               disabled={disabled || item.archived}
-              aria-current={!settingsOpen && item.id === activeConversationId ? 'page' : undefined}
+              aria-current={
+                !settingsOpen && !skillsOpen && item.id === activeConversationId
+                  ? 'page'
+                  : undefined
+              }
               title={item.title}
               onClick={() => void onSelect(item.id)}
             >
@@ -308,6 +316,16 @@ export function Sidebar({
               <SidebarIcon name="newChat" />
               <span>新建会话</span>
               <kbd>Ctrl+N</kbd>
+            </button>
+            <button
+              type="button"
+              className="sidebar-nav-button sidebar-skills"
+              disabled={disabled}
+              aria-current={skillsOpen ? 'page' : undefined}
+              onClick={(event) => onOpenSkills(event.currentTarget)}
+            >
+              <SidebarIcon name="skills" />
+              <span>技能</span>
             </button>
           </nav>
         </div>

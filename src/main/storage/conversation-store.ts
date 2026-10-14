@@ -4,6 +4,7 @@ import { randomUUID } from 'node:crypto'
 import { parseLibrary } from '../../shared/conversation-library'
 import type { ConversationLibrary, LoadLibraryResult } from '../../shared/conversation-library'
 import type { SaveConversationResult } from '../../shared/conversation'
+import { validateSkillSnapshotHash } from '../skills/skill-reader'
 
 /**
  * 创建一个会话存储实例
@@ -19,11 +20,21 @@ export function createConversationStore(directory: string): {
   load: () => Promise<LoadLibraryResult>
   save: (
     value: unknown,
-    beforeWrite?: (snapshot: ConversationLibrary) => Promise<void>
+    beforeWrite?: (
+      snapshot: ConversationLibrary,
+      existing: ConversationLibrary | null
+    ) => Promise<void>
   ) => Promise<SaveConversationResult>
 } {
   const file = join(directory, 'conversation.json')
   let queue: Promise<unknown> = Promise.resolve()
+
+  function assertSkills(library: ConversationLibrary): void {
+    for (const conversation of library.conversations)
+      for (const message of conversation.messages)
+        if (message.skill && !validateSkillSnapshotHash(message.skill))
+          throw new Error('技能快照指纹不一致，原记录未被覆盖或删除。')
+  }
 
   function serial<T>(work: () => Promise<T>): Promise<T> {
     const next = queue.then(work, work)
@@ -58,6 +69,7 @@ export function createConversationStore(directory: string): {
     }
     const library = parseLibrary(value)
     if (!library) throw new Error('会话格式不支持：只读取当前格式，旧记录未被覆盖或删除。')
+    assertSkills(library)
     return library
   }
 
@@ -121,18 +133,23 @@ export function createConversationStore(directory: string): {
       }),
     save: (
       value: unknown,
-      beforeWrite?: (snapshot: ConversationLibrary) => Promise<void>
+      beforeWrite?: (
+        snapshot: ConversationLibrary,
+        existing: ConversationLibrary | null
+      ) => Promise<void>
     ): Promise<SaveConversationResult> => {
       const snapshot = parseLibrary(value)
       if (!snapshot)
         return Promise.resolve({ ok: false, error: '会话库格式或长度不符合保存要求。' })
       return serial(async (): Promise<SaveConversationResult> => {
         try {
+          assertSkills(snapshot)
           // Read before replacement so an unsupported existing file cannot be overwritten.
-          await readExisting()
-          await beforeWrite?.(snapshot)
+          const existing = await readExisting()
+          await beforeWrite?.(snapshot, existing)
           // Preparing saved resources may await I/O; recheck the format after it.
           await readExisting()
+          assertSkills(snapshot)
           await writeLibrary(snapshot)
           return { ok: true }
         } catch {

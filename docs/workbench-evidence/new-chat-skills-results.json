@@ -1,0 +1,367 @@
+{
+  "pass": true,
+  "stage": "packaged",
+  "packaged": true,
+  "evidence": "D:\\AiTools\\ZoneCodex\\ZoneCodex\\.ui-check\\new-chat-ui\\packaged-8ef36172-2d91-4a29-b3e1-c04ce8572f63",
+  "actualElectron": true,
+  "actualDiskStorage": true,
+  "actualUIInput": "Trusted CDP mouse/key/text input. Responsive dimensions are explicitly emulated. Main inspector supplies isolated userData, cancels the directory chooser, observes IPC, and closes only this owned app.",
+  "syntheticData": "Two self-authored conversation records, a sample skill header, and one explicitly synthetic React state update from the empty conversation to a completed message pair. The resulting autosave is real; no model is invoked.",
+  "modelNetwork": "Main fetch is blocked/counted before app initialization; zero model submission or external URL opening is allowed.",
+  "checks": [
+    {
+      "name": "Empty new-chat layout: 01-initial-wide",
+      "pass": true,
+      "viewport": {
+        "width": 1700,
+        "height": 940
+      },
+      "newChat": "true",
+      "summaryMode": null,
+      "main": {
+        "top": 36,
+        "bottom": 940,
+        "left": 340,
+        "right": 1700,
+        "width": 1360,
+        "height": 904
+      },
+      "hero": {
+        "top": 349,
+        "bottom": 461,
+        "left": 636,
+        "right": 1404,
+        "width": 768,
+        "height": 112
+      },
+      "composer": {
+        "top": 493,
+        "bottom": 591,
+        "left": 652,
+        "right": 1388,
+        "width": 736,
+        "height": 98
+      },
+      "send": {
+        "top": 555,
+        "bottom": 583,
+        "left": 1352,
+        "right": 1380,
+        "width": 28,
+        "height": 28
+      },
+      "pageOverflow": false,
+      "visibleSummaries": 0
+    },
+    {
+      "name": "Empty new-chat layout: 02-new-conversation-wide",
+      "pass": true,
+      "viewport": {
+        "width": 1700,
+        "height": 940
+      },
+      "newChat": "true",
+      "summaryMode": null,
+      "main": {
+        "top": 36,
+        "bottom": 940,
+        "left": 340,
+        "right": 1700,
+        "width": 1360,
+        "height": 904
+      },
+      "hero": {
+        "top": 349,
+        "bottom": 461,
+        "left": 636,
+        "right": 1404,
+        "width": 768,
+        "height": 112
+      },
+      "composer": {
+        "top": 493,
+        "bottom": 591,
+        "left": 652,
+        "right": 1388,
+        "width": 736,
+        "height": 98
+      },
+      "send": {
+        "top": 555,
+        "bottom": 583,
+        "left": 1352,
+        "right": 1380,
+        "width": 28,
+        "height": 28
+      },
+      "pageOverflow": false,
+      "visibleSummaries": 0
+    },
+    {
+      "name": "Sidebar new conversation uses the real saved library and keeps one input DOM instance",
+      "pass": true,
+      "createdId": "7aa7b7e1-b09c-4f54-aba5-b22b69e730ef"
+    },
+    {
+      "name": "Trusted multiline input and Shift+Enter preserve an unsent draft",
+      "pass": true
+    },
+    {
+      "name": "Explicit project chooser cancellation is synthetic and preserves the exact draft",
+      "pass": true
+    },
+    {
+      "name": "Skills entry and Escape return preserve the draft and same chat input",
+      "pass": true
+    },
+    {
+      "name": "Empty new-chat layout: 03-new-conversation-narrow",
+      "pass": true,
+      "viewport": {
+        "width": 620,
+        "height": 600
+      },
+      "newChat": "true",
+      "summaryMode": null,
+      "main": {
+        "top": 36,
+        "bottom": 600,
+        "left": 52,
+        "right": 620,
+        "width": 568,
+        "height": 564
+      },
+      "hero": {
+        "top": 183,
+        "bottom": 295,
+        "left": 52,
+        "right": 620,
+        "width": 568,
+        "height": 112
+      },
+      "composer": {
+        "top": 319,
+        "bottom": 417,
+        "left": 68,
+        "right": 604,
+        "width": 536,
+        "height": 98
+      },
+      "send": {
+        "top": 381,
+        "bottom": 409,
+        "left": 568,
+        "right": 596,
+        "width": 28,
+        "height": 28
+      },
+      "pageOverflow": false,
+      "visibleSummaries": 0
+    },
+    {
+      "name": "Empty new-chat layout: 04-new-conversation-short",
+      "pass": true,
+      "viewport": {
+        "width": 900,
+        "height": 380
+      },
+      "newChat": "true",
+      "summaryMode": null,
+      "main": {
+        "top": 36,
+        "bottom": 380,
+        "left": 340,
+        "right": 900,
+        "width": 560,
+        "height": 344
+      },
+      "hero": {
+        "top": 73,
+        "bottom": 185,
+        "left": 340,
+        "right": 900,
+        "width": 560,
+        "height": 112
+      },
+      "composer": {
+        "top": 209,
+        "bottom": 307,
+        "left": 356,
+        "right": 884,
+        "width": 528,
+        "height": 98
+      },
+      "send": {
+        "top": 271,
+        "bottom": 299,
+        "left": 848,
+        "right": 876,
+        "width": 28,
+        "height": 28
+      },
+      "pageOverflow": false,
+      "visibleSummaries": 0
+    },
+    {
+      "name": "Responsive narrow and short layouts preserve multiline text",
+      "pass": true
+    },
+    {
+      "name": "Explicit synthetic completed messages switch layout and really autosave without replacing the input or draft",
+      "pass": true,
+      "id": "7aa7b7e1-b09c-4f54-aba5-b22b69e730ef",
+      "kind": "synthetic React state update; actual autosave; no Agent call"
+    },
+    {
+      "name": "Empty new-chat layout: 06-original-empty-draft",
+      "pass": true,
+      "viewport": {
+        "width": 1280,
+        "height": 840
+      },
+      "newChat": "true",
+      "summaryMode": null,
+      "main": {
+        "top": 36,
+        "bottom": 840,
+        "left": 340,
+        "right": 1280,
+        "width": 940,
+        "height": 804
+      },
+      "hero": {
+        "top": 299,
+        "bottom": 411,
+        "left": 426,
+        "right": 1194,
+        "width": 768,
+        "height": 112
+      },
+      "composer": {
+        "top": 443,
+        "bottom": 541,
+        "left": 442,
+        "right": 1178,
+        "width": 736,
+        "height": 98
+      },
+      "send": {
+        "top": 505,
+        "bottom": 533,
+        "left": 1142,
+        "right": 1170,
+        "width": 28,
+        "height": 28
+      },
+      "pageOverflow": false,
+      "visibleSummaries": 0
+    },
+    {
+      "name": "Returning to the initial empty conversation restores its exact unsent draft",
+      "pass": true
+    },
+    {
+      "name": "Synthetic long project label on a narrow short viewport keeps icon, heading and send reachable through the outer main scroll",
+      "pass": true,
+      "projectFixture": {
+        "id": "b2d03c08-5e6a-4a4a-a76c-bedfb3e1827e",
+        "label": "合成验收长项目名称合成验收长项目名称合成验收长项目名称合成验收长项目名称合成验收长项目名称合成验收长项目名称合成验收长项目名称合成验收长项目名称",
+        "kind": "synthetic saved workspace display metadata; no runtime directory grant"
+      },
+      "longProjectLayout": {
+        "main": {
+          "top": 36,
+          "bottom": 320,
+          "left": 52,
+          "right": 620,
+          "height": 284
+        },
+        "hero": {
+          "top": 52,
+          "bottom": 252,
+          "left": 52,
+          "right": 613,
+          "height": 200
+        },
+        "icon": {
+          "top": 52,
+          "bottom": 108,
+          "left": 304.5,
+          "right": 360.5,
+          "height": 56
+        },
+        "title": {
+          "top": 132,
+          "bottom": 252,
+          "left": 68,
+          "right": 597,
+          "height": 120
+        },
+        "mainScrollHeight": 390,
+        "mainClientHeight": 284,
+        "mainScrollWidth": 561,
+        "mainClientWidth": 561,
+        "transcriptOverflow": "visible",
+        "iconLoaded": true,
+        "pageOverflow": false
+      }
+    },
+    {
+      "name": "Every action remains zero model requests and external network operations",
+      "pass": true,
+      "modelFetchAttempts": 0
+    },
+    {
+      "name": "Observed build and package artifacts stay unchanged during the run",
+      "pass": true
+    }
+  ],
+  "failures": [],
+  "processes": [
+    {
+      "stage": "packaged",
+      "pid": 35160,
+      "args": [
+        "--user-data-dir=D:\\AiTools\\ZoneCodex\\ZoneCodex\\.ui-check\\new-chat-ui\\packaged-8ef36172-2d91-4a29-b3e1-c04ce8572f63\\user-data",
+        "--inspect-brk=127.0.0.1:56383",
+        "--remote-debugging-address=127.0.0.1",
+        "--remote-debugging-port=56384",
+        "--disable-gpu",
+        "--disable-gpu-compositing",
+        "--in-process-gpu"
+      ],
+      "exitCode": 0,
+      "forcedKill": false
+    }
+  ],
+  "screenshots": [
+    "D:\\AiTools\\ZoneCodex\\ZoneCodex\\.ui-check\\new-chat-ui\\packaged-8ef36172-2d91-4a29-b3e1-c04ce8572f63\\01-initial-wide.png",
+    "D:\\AiTools\\ZoneCodex\\ZoneCodex\\.ui-check\\new-chat-ui\\packaged-8ef36172-2d91-4a29-b3e1-c04ce8572f63\\02-new-conversation-wide.png",
+    "D:\\AiTools\\ZoneCodex\\ZoneCodex\\.ui-check\\new-chat-ui\\packaged-8ef36172-2d91-4a29-b3e1-c04ce8572f63\\03-new-conversation-narrow.png",
+    "D:\\AiTools\\ZoneCodex\\ZoneCodex\\.ui-check\\new-chat-ui\\packaged-8ef36172-2d91-4a29-b3e1-c04ce8572f63\\04-new-conversation-short.png",
+    "D:\\AiTools\\ZoneCodex\\ZoneCodex\\.ui-check\\new-chat-ui\\packaged-8ef36172-2d91-4a29-b3e1-c04ce8572f63\\05-existing-message-layout.png",
+    "D:\\AiTools\\ZoneCodex\\ZoneCodex\\.ui-check\\new-chat-ui\\packaged-8ef36172-2d91-4a29-b3e1-c04ce8572f63\\06-original-empty-draft.png",
+    "D:\\AiTools\\ZoneCodex\\ZoneCodex\\.ui-check\\new-chat-ui\\packaged-8ef36172-2d91-4a29-b3e1-c04ce8572f63\\07-long-project-title-short.png"
+  ],
+  "notCovered": [
+    "No real model, native directory chooser, clipboard or IME acceptance. The message transition is a synthetic React state update, not an accepted Agent turn. No pixel equality claim against upstream Codex."
+  ],
+  "artifactBefore": {
+    "out/main/index.js": "3854d2d5f7ac5b3e875dd9a20f925f86a082beb73c4f6dc65a10c5b9fd14136d",
+    "out/preload/index.js": "2914838914a5208175b197f224e0034b01c82536ab7b552e68aaf94017b539e7",
+    "out/renderer/index.html": "094128a82f5ae27a0f78bd76647b9e23027fb46f427ea507cc800a14137797c9",
+    "dist/win-unpacked/zonecodex.exe": "914f5425c8dfda8e76dfb47b5ca91825b784403309eebe50176bc9d28e94482d",
+    "dist/win-unpacked/resources/app.asar": "445c518ae3d81961da4131672b8b0309c605f899457e3e4a96f8d77422060141"
+  },
+  "rendererAssets": [
+    "file:///D:/AiTools/ZoneCodex/ZoneCodex/dist/win-unpacked/resources/app.asar/out/renderer/assets/index-CuKRW0ii.js"
+  ],
+  "rendererExternalRequests": [],
+  "artifactAfter": {
+    "out/main/index.js": "3854d2d5f7ac5b3e875dd9a20f925f86a082beb73c4f6dc65a10c5b9fd14136d",
+    "out/preload/index.js": "2914838914a5208175b197f224e0034b01c82536ab7b552e68aaf94017b539e7",
+    "out/renderer/index.html": "094128a82f5ae27a0f78bd76647b9e23027fb46f427ea507cc800a14137797c9",
+    "dist/win-unpacked/zonecodex.exe": "914f5425c8dfda8e76dfb47b5ca91825b784403309eebe50176bc9d28e94482d",
+    "dist/win-unpacked/resources/app.asar": "445c518ae3d81961da4131672b8b0309c605f899457e3e4a96f8d77422060141"
+  }
+}

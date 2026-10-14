@@ -1,4 +1,7 @@
+import { attachMainNavigationSignal } from './window/main-navigation'
 import { app } from 'electron'
+import { registerWorkbench, attachWorkbenchCleanup, hasEditorSave } from './workbench/workbench-ipc'
+import { registerBrowserHost, attachBrowserHost } from './workbench/browser-host'
 import type { BrowserWindow } from 'electron'
 import type { CommandSource } from '../shared/command-preparation'
 import { decideCommandPermission } from '../shared/permission-policy'
@@ -67,6 +70,7 @@ import { hasConversationDirectoryOperation } from './settings/conversation-direc
 import { attachGitCleanup, registerGitView } from './git/git-ipc'
 import { registerGitWorkbench } from './git/git-workbench-ipc'
 import { hasAgentUserInput } from './agent/agent-user-input'
+import { attachSkillsCleanup, registerSkills } from './skills/skills-ipc'
 
 function isSettingsConsumerBusy(windowId: number): boolean {
   return hasSettingsMutation() || hasConversationDirectoryOperation(windowId)
@@ -75,6 +79,7 @@ function isSettingsConsumerBusy(windowId: number): boolean {
 function isSettingsChangeBusy(windowId: number): boolean {
   return (
     hasConversationSave(windowId) ||
+    hasEditorSave(windowId) ||
     hasPendingClose(windowId) ||
     hasAgentJob(windowId) ||
     hasExecutionApproval(windowId) ||
@@ -164,6 +169,9 @@ function onProjectAccessChanged(windowId: number, snapshotId?: string): void {
 
 /** Cross-feature cleanup retains the original listener order and per-resource owners. */
 export function attachWindowRuntime(window: BrowserWindow): void {
+  attachMainNavigationSignal(window.webContents)
+  attachWorkbenchCleanup(window)
+  attachBrowserHost(window)
   attachSettingsCleanup(window)
   try {
     initializeExecutionPermissionState(window.id)
@@ -181,7 +189,8 @@ export function attachWindowRuntime(window: BrowserWindow): void {
   attachFileViewCleanup(window)
   attachGitCleanup(window)
   attachImageAccessCleanup(window)
-  window.webContents.on('did-start-loading', () => {
+  attachSkillsCleanup(window)
+  window.webContents.on('zonecodex-main-navigation', () => {
     clearExecutionApproval(window.id)
     cancelConversationTitleJob(window.id)
     cleanupTaskWindow(window.id)
@@ -200,12 +209,14 @@ export function attachWindowRuntime(window: BrowserWindow): void {
 }
 
 export function registerAppRuntime(): void {
+  registerWorkbench()
+  registerBrowserHost()
   registerSettings(isSettingsChangeBusy)
   registerWindowControls()
   registerTaskLifecycle()
   registerExecutionApproval()
   // 注册关闭确认处理器
-  registerCloseGuard(hasChangeCommit)
+  registerCloseGuard((windowId) => hasChangeCommit(windowId) || hasEditorSave(windowId))
   // 注册本地终端接口
   registerLocalTerminal()
   // 注册真实 Agent 请求接口
@@ -238,6 +249,7 @@ export function registerAppRuntime(): void {
     abortImageJob
   })
   registerImageAccess()
+  registerSkills(app.getPath('userData'))
   registerChangePreparation(isChangePreparationBusy)
   registerChangeCommit(isChangeCommitBusy)
 

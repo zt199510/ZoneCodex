@@ -22,7 +22,8 @@
   border-bottom: 0;
 }
 .app-shell > .workspace-shell,
-.app-shell > .settings-page {
+.app-shell > .settings-page,
+.app-shell > .skills-page {
   grid-column: 2;
   grid-row: 2;
 }

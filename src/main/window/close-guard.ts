@@ -68,11 +68,11 @@ export function attachCloseGuard(window: BrowserWindow): void {
   }
 
   window.on('close', onClose)
-  sender.on('did-start-loading', reset)
+  sender.on('zonecodex-main-navigation', reset)
   window.once('closed', () => {
     reset()
     window.removeListener('close', onClose)
-    sender.removeListener('did-start-loading', reset)
+    sender.removeListener('zonecodex-main-navigation', reset)
     guards.delete(window)
   })
 }

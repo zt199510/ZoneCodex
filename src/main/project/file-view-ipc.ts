@@ -18,7 +18,7 @@ import { fileViewError, readLocalFileView, readSnapshotFileView } from '../tools
 const windowSessions = new Map<number, symbol>()
 
 export function attachFileViewCleanup(window: BrowserWindow): void {
-  window.webContents.on('did-start-loading', () => windowSessions.delete(window.id))
+  window.webContents.on('zonecodex-main-navigation', () => windowSessions.delete(window.id))
   window.on('closed', () => windowSessions.delete(window.id))
 }
 

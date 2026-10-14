@@ -12,9 +12,12 @@ import { gitRepositoriesAPI } from './git-repositories-api'
 import { gitPullRequestAPI } from './git-pr-api'
 import { gitObservationAPI } from './git-observation-api'
 import { settingsAPI } from './settings-api'
+import { skillsAPI } from './skills-api'
+import { workbenchAPI } from './workbench-api'
 
 // 分组实现同一个平铺业务接口，页面不直接使用 Node API。
 const api: AppAPI = {
+  ...workbenchAPI,
   ...conversationAPI,
   ...agentAPI,
   ...projectAPI,
@@ -25,7 +28,8 @@ const api: AppAPI = {
   ...gitRepositoriesAPI,
   ...gitPullRequestAPI,
   ...gitObservationAPI,
-  ...settingsAPI
+  ...settingsAPI,
+  ...skillsAPI
 }
 
 // Use `contextBridge` APIs to expose Electron APIs to

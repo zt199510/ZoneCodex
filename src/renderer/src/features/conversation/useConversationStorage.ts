@@ -1,3 +1,7 @@
+import {
+  preparePanelConversationDelete,
+  completePanelConversationDelete
+} from '../workbench/close-participants'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { Dispatch, SetStateAction } from 'react'
 import type { ConversationLibrary } from '../../../../shared/conversation-library'
@@ -37,6 +41,7 @@ export function useConversationStorage({
   const [paused, setPaused] = useState(false)
   const [hasFile, setHasFile] = useState(false)
   const mounted = useRef(false)
+  const storedIds = useRef<string[]>([])
   const signature = JSON.stringify(snapshot)
   const dirty = ready && signature !== savedSignature
 
@@ -51,6 +56,7 @@ export function useConversationStorage({
           setError(result.error)
           return
         }
+        storedIds.current = result.snapshot.conversations.map((item) => item.id)
         setSnapshot(result.snapshot)
         // 缺失文件也以读取结果作为基线，启动本身不会触发写入。
         setSavedSignature(JSON.stringify(result.snapshot))
@@ -75,6 +81,10 @@ export function useConversationStorage({
       setError(null)
       const submittedSignature = JSON.stringify(submitted)
       try {
+        const removed = storedIds.current.filter(
+          (id) => !submitted.conversations.some((item) => item.id === id)
+        )
+        for (const id of removed) if (!(await preparePanelConversationDelete(id))) return false
         const result = await window.api.saveConversation(submitted)
         if (!mounted.current) return false
         if (!result.ok) {
@@ -82,6 +92,8 @@ export function useConversationStorage({
           setPaused(true)
           return false
         }
+        storedIds.current = submitted.conversations.map((item) => item.id)
+        for (const id of removed) await completePanelConversationDelete(id)
         setSavedSignature(submittedSignature)
         setHasFile(true)
         setPaused(false)

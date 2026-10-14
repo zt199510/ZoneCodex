@@ -1,0 +1,58 @@
+{
+  "modelFetchAttempts": 0,
+  "ipc": [
+    {
+      "channel": "window:state",
+      "at": 1791987746301
+    },
+    {
+      "channel": "conversation:load",
+      "at": 1791987746302
+    },
+    {
+      "channel": "execution:permissions-get",
+      "at": 1791987746302
+    },
+    {
+      "channel": "agent:user-input-get",
+      "at": 1791987746302
+    },
+    {
+      "channel": "execution:approval-get",
+      "at": 1791987746306
+    },
+    {
+      "channel": "panel:load",
+      "at": 1791987746338
+    },
+    {
+      "channel": "task:list",
+      "at": 1791987746338
+    },
+    {
+      "channel": "agent:resume-info",
+      "at": 1791987746338
+    },
+    {
+      "channel": "panel:read",
+      "at": 1791987746463
+    }
+  ],
+  "pid": 40452,
+  "external": [],
+  "pickerCancellations": [],
+  "popups": [],
+  "loading": [
+    {
+      "kind": "load",
+      "at": 1791987745932
+    },
+    {
+      "kind": "navigation",
+      "url": "file:///D:/AiTools/ZoneCodex/ZoneCodex/out/renderer/index.html",
+      "inPlace": false,
+      "mainFrame": true,
+      "at": 1791987745932
+    }
+  ]
+}

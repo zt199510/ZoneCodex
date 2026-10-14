@@ -21,6 +21,7 @@ export async function getResumableAgentTask(
     mode: checkpoint.mode,
     updatedAt: checkpoint.updatedAt,
     prompt: checkpoint.prompt,
-    requiresWorkspace: checkpoint.bindings.workspace !== null
+    requiresWorkspace: checkpoint.bindings.workspace !== null,
+    ...(checkpoint.skill ? { skillName: checkpoint.skill.name } : {})
   }
 }

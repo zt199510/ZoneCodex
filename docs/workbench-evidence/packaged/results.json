@@ -1,0 +1,230 @@
+{
+  "pass": true,
+  "stage": "packaged",
+  "packaged": true,
+  "evidence": "D:\\AiTools\\ZoneCodex\\ZoneCodex\\.ui-check\\workbench-ui\\packaged-52eb09b9-7ccc-4997-920c-c5c7b9105497",
+  "userData": "C:\\Users\\Administrator\\AppData\\Local\\Temp\\zc-panel-TR7jGi",
+  "actualElectron": true,
+  "actualDiskStorage": true,
+  "actualUIInput": "Trusted CDP mouse/key/text input for the app; guest page fixture actions use executeJavaScript with a user gesture. Shell writes are real IPC commands, observed separately by session ID. Responsive dimensions are explicitly emulated. Main inspector supplies isolated userData, cancels the directory chooser, observes IPC, and closes only this owned app.",
+  "syntheticData": "Two self-authored conversation records, one sample skill header, and a local HTTP fixture. Files, native browser guests, storage and two shells are real. No model is invoked.",
+  "modelNetwork": "Main fetch is blocked/counted before app initialization; zero model submission or external URL opening is allowed.",
+  "checks": [
+    {
+      "name": "Chat/split/full and responsive fallback preserve a single input and its draft",
+      "pass": true
+    },
+    {
+      "name": "Divider pointer resize, context close-right/close-other and Home/End/Delete tab controls",
+      "pass": true
+    },
+    {
+      "name": "Existing Git workbench and real empty sources list open within unified content hosts",
+      "pass": true
+    },
+    {
+      "name": "Real UTF-8 file edits save only on Ctrl+S",
+      "pass": true
+    },
+    {
+      "name": "Ctrl+W, reopen, PageUp/PageDown, Alt slots and reorder; drag drop uses synthetic DOM DataTransfer",
+      "pass": true
+    },
+    {
+      "name": "External modifications are not overwritten; comparison and canceled close retain draft",
+      "pass": true
+    },
+    {
+      "name": "Native webview isolation, navigation, retained page instance and popup routing",
+      "pass": true
+    },
+    {
+      "name": "Focused webview shortcuts, middle-click close and reopening preserve neighboring tabs",
+      "pass": true
+    },
+    {
+      "name": "Two real shells retain output independently and closed terminal waits for cleanup",
+      "pass": true
+    },
+    {
+      "name": "Real selected snapshot stays read-only and separate from changed disk file through the file-link compatibility entry",
+      "pass": true
+    },
+    {
+      "name": "Actual window close can be canceled without dropping file drafts",
+      "pass": true
+    },
+    {
+      "name": "Long file titles stay within 90–240px and tab strip scrolls in narrow full view",
+      "pass": true,
+      "height": 32,
+      "width": 90,
+      "scroll": 666,
+      "client": 532,
+      "title": "long-title-abcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghij.ts",
+      "visible": true
+    },
+    {
+      "name": "Independent versioned panel state and unsaved draft persisted to disk",
+      "pass": true
+    },
+    {
+      "name": "Every action remains zero model requests and external network operations",
+      "pass": true,
+      "modelFetchAttempts": 0
+    },
+    {
+      "name": "Restart restores draft and tab order; terminal waits for explicit start",
+      "pass": true
+    },
+    {
+      "name": "Every action remains zero model requests and external network operations",
+      "pass": true,
+      "modelFetchAttempts": 0
+    }
+  ],
+  "failures": [],
+  "processes": [
+    {
+      "stage": "packaged",
+      "pid": 48552,
+      "args": [
+        "--user-data-dir=C:\\Users\\Administrator\\AppData\\Local\\Temp\\zc-panel-TR7jGi",
+        "--inspect-brk=127.0.0.1:56392",
+        "--remote-debugging-address=127.0.0.1",
+        "--remote-debugging-port=56393",
+        "--disable-gpu",
+        "--disable-gpu-compositing",
+        "--in-process-gpu"
+      ],
+      "exitCode": 0,
+      "forcedKill": false
+    },
+    {
+      "stage": "packaged",
+      "pid": 42912,
+      "args": [
+        "--user-data-dir=C:\\Users\\Administrator\\AppData\\Local\\Temp\\zc-panel-TR7jGi",
+        "--inspect-brk=127.0.0.1:63455",
+        "--remote-debugging-address=127.0.0.1",
+        "--remote-debugging-port=63456",
+        "--disable-gpu",
+        "--disable-gpu-compositing",
+        "--in-process-gpu"
+      ],
+      "exitCode": 0,
+      "forcedKill": false
+    }
+  ],
+  "screenshots": [
+    "D:\\AiTools\\ZoneCodex\\ZoneCodex\\.ui-check\\workbench-ui\\packaged-52eb09b9-7ccc-4997-920c-c5c7b9105497\\01-split-tools.png",
+    "D:\\AiTools\\ZoneCodex\\ZoneCodex\\.ui-check\\workbench-ui\\packaged-52eb09b9-7ccc-4997-920c-c5c7b9105497\\02-full-tools.png",
+    "D:\\AiTools\\ZoneCodex\\ZoneCodex\\.ui-check\\workbench-ui\\packaged-52eb09b9-7ccc-4997-920c-c5c7b9105497\\03-narrow-full.png",
+    "D:\\AiTools\\ZoneCodex\\ZoneCodex\\.ui-check\\workbench-ui\\packaged-52eb09b9-7ccc-4997-920c-c5c7b9105497\\10-git-workbench.png",
+    "D:\\AiTools\\ZoneCodex\\ZoneCodex\\.ui-check\\workbench-ui\\packaged-52eb09b9-7ccc-4997-920c-c5c7b9105497\\11-sources.png",
+    "D:\\AiTools\\ZoneCodex\\ZoneCodex\\.ui-check\\workbench-ui\\packaged-52eb09b9-7ccc-4997-920c-c5c7b9105497\\04-file-editor.png",
+    "D:\\AiTools\\ZoneCodex\\ZoneCodex\\.ui-check\\workbench-ui\\packaged-52eb09b9-7ccc-4997-920c-c5c7b9105497\\05-external-conflict.png",
+    "D:\\AiTools\\ZoneCodex\\ZoneCodex\\.ui-check\\workbench-ui\\packaged-52eb09b9-7ccc-4997-920c-c5c7b9105497\\06-native-browser.png",
+    "D:\\AiTools\\ZoneCodex\\ZoneCodex\\.ui-check\\workbench-ui\\packaged-52eb09b9-7ccc-4997-920c-c5c7b9105497\\07-multiple-terminals.png",
+    "D:\\AiTools\\ZoneCodex\\ZoneCodex\\.ui-check\\workbench-ui\\packaged-52eb09b9-7ccc-4997-920c-c5c7b9105497\\09-readonly-snapshot.png",
+    "D:\\AiTools\\ZoneCodex\\ZoneCodex\\.ui-check\\workbench-ui\\packaged-52eb09b9-7ccc-4997-920c-c5c7b9105497\\12-narrow-long-title.png",
+    "D:\\AiTools\\ZoneCodex\\ZoneCodex\\.ui-check\\workbench-ui\\packaged-52eb09b9-7ccc-4997-920c-c5c7b9105497\\08-restored-draft.png"
+  ],
+  "notCovered": [
+    "No model, external websites, native chooser, clipboard or IME acceptance. Guest DOM actions explicitly use executeJavaScript with a user gesture; the tab reorder uses a synthetic DataTransfer. No pixel equality claim against upstream Codex."
+  ],
+  "artifactBefore": {
+    "out/main/index.js": "3854d2d5f7ac5b3e875dd9a20f925f86a082beb73c4f6dc65a10c5b9fd14136d",
+    "out/preload/index.js": "2914838914a5208175b197f224e0034b01c82536ab7b552e68aaf94017b539e7",
+    "out/renderer/index.html": "094128a82f5ae27a0f78bd76647b9e23027fb46f427ea507cc800a14137797c9",
+    "dist/win-unpacked/zonecodex.exe": "914f5425c8dfda8e76dfb47b5ca91825b784403309eebe50176bc9d28e94482d",
+    "dist/win-unpacked/resources/app.asar": "445c518ae3d81961da4131672b8b0309c605f899457e3e4a96f8d77422060141"
+  },
+  "divider": {
+    "beforeWidth": 600,
+    "x": 797,
+    "y": 136,
+    "afterWidth": 658
+  },
+  "browserHistoryBeforeBack": [
+    {
+      "url": "about:blank",
+      "title": "about:blank"
+    },
+    {
+      "url": "http://127.0.0.1:56391/",
+      "title": "本地测试网页"
+    },
+    {
+      "url": "http://127.0.0.1:56391/two",
+      "title": "第二页"
+    }
+  ],
+  "browserAfterBack": {
+    "url": "http://127.0.0.1:56391/",
+    "index": 1
+  },
+  "popupPreferences": {
+    "allowRunningInsecureContent": false,
+    "contextIsolation": true,
+    "disableDialogs": false,
+    "disablePopups": false,
+    "enableBlinkFeatures": "",
+    "experimentalFeatures": false,
+    "javascript": true,
+    "nodeIntegration": false,
+    "nodeIntegrationInSubFrames": false,
+    "safeDialogs": false,
+    "safeDialogsMessage": "",
+    "sandbox": true,
+    "webSecurity": true,
+    "webviewTag": false
+  },
+  "popupAttributes": "<webview src=\"http://127.0.0.1:56391/\" allowpopups=\"\" partition=\"persist:zonecodex-browser-497719b1768441fbe540b06b7036aad41647cede7a455dd4c5b176b984ffcdcd\" class=\"panel-browser-webview\"></webview>",
+  "popupResult": false,
+  "popupObserved": [
+    {
+      "title": "sample.ts",
+      "id": "2208df4a-f564-49dd-a370-f60611efb106"
+    },
+    {
+      "title": "文件",
+      "id": "2289dd68-437d-492c-ad21-e03d977d5d14"
+    },
+    {
+      "title": "本地测试网页",
+      "id": "b4dca001-be7a-4df9-abeb-616219a15a55"
+    },
+    {
+      "title": "本地测试网页",
+      "id": "2a339fef-a929-4d1e-8810-82a224db099e"
+    }
+  ],
+  "terminalOutput": {
+    "3ecbd3f8-0eb5-4d46-9e23-23f70d189059": "\u001b[?9001h\u001b[?1004h\u001b[?25l\u001b[2J\u001b[m\u001b[H\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\u001b[H\u001b]0;C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe\u0007\u001b[?25hPS C:\\Users\\Administrator\\AppData\\Local\\Temp\\zc-panel-TR7jGi\\chats\\ec15a668-ce1d-40da-abf2-56c54823ebd8\\workspace> \u001b[?25l\u001b[93mW\u001b[97m\u001b[2m\u001b[3mrite-Output \"WORKBENCH_ad8f1877-ba40-49c5-81fe-49d63c9fd983\"\u001b[2;29H\u001b[?25h\u001b[?25l\u001b[m\u001b[2;26H> \u001b[93mWrite-Output \u001b[36m\"WORKBENCH_ce8c78c9-0578-4932-865d-f82d9b3ebada\"\u001b[4;1H\u001b[?25h\u001b[mWORKBENCH_ce8c78c9-0578-4932-865d-f82d9b3ebada\r\nPS C:\\Users\\Administrator\\AppData\\Local\\Temp\\zc-panel-TR7jGi\\chats\\ec15a668-ce1d-40da-abf2-56c54823ebd8\\workspace> ",
+    "8e809302-1425-4df3-903c-aa0b317ccd53": "\u001b[?9001h\u001b[?1004h\u001b[?25l\u001b[2J\u001b[m\u001b[H\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\u001b[H\u001b]0;C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe\u0007\u001b[?25hPS C:\\Users\\Administrator\\AppData\\Local\\Temp\\zc-panel-TR7jGi\\chats\\ec15a668-ce1d-40da-abf2-56c54823ebd8\\workspace> \u001b[?25l\u001b[91m\u001b[2;26H> \u001b[93mWrite-Output \u001b[36m\"WORKBENCH_f3dc0641-80c7-48f2-a75c-e9a30        \u001b[m\u001b[2;26H> \u001b[93mWrite-Output \u001b[36m\"WORKBENCH_f3dc0641-80c7-48f2-a75c-e9a3095598a2\"\u001b[4;1H\u001b[?25h"
+  },
+  "snapshotSelection": {
+    "status": "selected",
+    "selection": {
+      "snapshotId": "31f2cab5-8773-4c8c-b8ee-ed97ccce931f",
+      "label": "已选附件",
+      "createdAt": "2026-10-14T14:23:46.513Z",
+      "files": [
+        {
+          "path": "file-1ab662e8-1e26-4b2c-9f0d-85780fc4143f/snapshot.ts",
+          "bytes": 22,
+          "lines": 2
+        }
+      ]
+    }
+  },
+  "rendererExternalRequests": [],
+  "artifactAfter": {
+    "out/main/index.js": "3854d2d5f7ac5b3e875dd9a20f925f86a082beb73c4f6dc65a10c5b9fd14136d",
+    "out/preload/index.js": "2914838914a5208175b197f224e0034b01c82536ab7b552e68aaf94017b539e7",
+    "out/renderer/index.html": "094128a82f5ae27a0f78bd76647b9e23027fb46f427ea507cc800a14137797c9",
+    "dist/win-unpacked/zonecodex.exe": "914f5425c8dfda8e76dfb47b5ca91825b784403309eebe50176bc9d28e94482d",
+    "dist/win-unpacked/resources/app.asar": "445c518ae3d81961da4131672b8b0309c605f899457e3e4a96f8d77422060141"
+  }
+}

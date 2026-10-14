@@ -1,5 +1,6 @@
 import { parseExecutionInfo, type ExecutionInfo } from './execution'
 import { parseAgentMode, type AgentMode } from './agent'
+import { parseSkillReference, type SkillReference } from './skills'
 import {
   parseImageReferences,
   parseImageHistoryReferences,
@@ -79,6 +80,8 @@ export type WorkspaceFileSearchResult =
 export type AgentRequestContext = {
   conversationId: string
   mode: AgentMode
+  userMessageId?: string
+  skill?: SkillReference
   workspaceId?: string
   attachment?: { snapshotId: string; allowUpload: true }
   images?: ImageReference[]
@@ -282,6 +285,8 @@ export function parseAgentRequestContext(value: unknown): AgentRequestContext | 
         (key) =>
           key !== 'conversationId' &&
           key !== 'mode' &&
+          key !== 'userMessageId' &&
+          key !== 'skill' &&
           key !== 'workspaceId' &&
           key !== 'attachment' &&
           key !== 'images' &&
@@ -294,6 +299,15 @@ export function parseAgentRequestContext(value: unknown): AgentRequestContext | 
     const mode = parseAgentMode(value.mode)
     if (!mode) return null
     const context: AgentRequestContext = { conversationId: value.conversationId, mode }
+    if (hasOwn(value, 'userMessageId')) {
+      if (!isAgentId(value.userMessageId)) return null
+      context.userMessageId = value.userMessageId
+    }
+    if (hasOwn(value, 'skill')) {
+      const skill = parseSkillReference(value.skill)
+      if (!skill || !context.userMessageId) return null
+      context.skill = skill
+    }
     if (hasOwn(value, 'workspaceId')) context.workspaceId = value.workspaceId as string
     if (hasOwn(value, 'execution')) {
       const execution = parseExecutionInfo(value.execution)

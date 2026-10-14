@@ -1,0 +1,164 @@
+/* New conversation: welcome and shared composer form one centered group. */
+.chat-workspace[data-new-chat='true'] {
+  padding: 24px 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.chat-workspace[data-new-chat='true'] > .thread-toolbar {
+  display: none;
+}
+
+.chat-workspace[data-new-chat='true'] > .chat-transcript {
+  flex: 0 0 auto;
+  margin-top: auto;
+  min-height: min-content;
+  overflow: visible;
+}
+
+.chat-workspace[data-new-chat='true'] .chat-scroll-area {
+  flex: 1 1 0;
+  min-width: 0;
+  min-height: min-content;
+  justify-content: flex-end;
+  padding-bottom: 32px;
+  overflow: visible;
+  scrollbar-gutter: auto;
+}
+
+.new-chat-hero {
+  display: flex;
+  flex-shrink: 0;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 24px;
+  width: min(100%, 768px);
+  min-width: 0;
+  min-height: 112px;
+  margin: 0 auto;
+  padding: 0 20px;
+  color: #1a1c1f;
+  text-align: center;
+}
+
+.new-chat-icon {
+  display: block;
+  width: 56px;
+  height: 56px;
+  opacity: 0.3;
+  user-select: none;
+}
+
+.new-chat-hero h1 {
+  max-width: 100%;
+  font-size: 20px;
+  font-weight: 400;
+  line-height: 1.2;
+  overflow-wrap: anywhere;
+}
+
+.new-chat-project {
+  display: inline-block;
+  max-width: 100%;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  font: inherit;
+  vertical-align: baseline;
+  white-space: normal;
+  text-decoration: underline dotted #1a1c1f80 1px;
+  text-underline-offset: 4px;
+  overflow-wrap: anywhere;
+}
+
+.new-chat-project:hover:not(:disabled) {
+  color: #6a6c6d;
+}
+
+.chat-workspace[data-new-chat='true'] > .composer-region {
+  display: flex;
+  flex: 0 0 auto;
+  flex-direction: column;
+  justify-content: flex-start;
+  width: min(100%, 768px);
+  min-height: min-content;
+  max-height: none;
+  margin-bottom: auto;
+  padding: 0 16px;
+  overflow: visible;
+}
+
+.chat-workspace[data-new-chat='true'] .composer {
+  flex-shrink: 0;
+}
+
+.chat-workspace[data-new-chat='true'] .pending-skill {
+  align-self: flex-start;
+  flex-shrink: 0;
+}
+
+.new-chat-footer {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  min-height: 28px;
+  margin-top: 8px;
+  padding: 0 4px;
+  color: #6a6c6d;
+  font-size: 12px;
+  line-height: 20px;
+}
+
+.new-chat-local,
+.new-chat-workspace {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.new-chat-local {
+  flex-shrink: 0;
+}
+
+.new-chat-workspace {
+  max-width: calc(100% - 64px);
+  height: 28px;
+  padding: 0 6px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  font: inherit;
+}
+
+.new-chat-workspace span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.new-chat-workspace:hover:not(:disabled) {
+  background: #1a1c1f0d;
+}
+
+@media (max-width: 640px) {
+  .new-chat-hero,
+  .chat-workspace[data-new-chat='true'] > .composer-region {
+    padding-right: 16px;
+    padding-left: 16px;
+  }
+}
+
+@media (max-height: 640px) {
+  .chat-workspace[data-new-chat='true'] {
+    padding: 16px 0;
+  }
+
+  .chat-workspace[data-new-chat='true'] .chat-scroll-area {
+    padding-bottom: 24px;
+  }
+}

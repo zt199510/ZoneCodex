@@ -1173,11 +1173,9 @@ await check(
 await check(
   'actual chat workspace wires broker and question independently; command proposal is not broker approval',
   async () => {
-    const status = marker('WorkspaceStatus'),
-      messageList = marker('MessageList'),
+    const messageList = marker('MessageList'),
       composer = marker('ChatComposer')
     const deps = {
-      '../project/WorkspaceStatus': { WorkspaceStatus: status },
       './MessageList': { MessageList: messageList },
       './ChatComposer': { ChatComposer: composer }
     }
@@ -1185,6 +1183,7 @@ await check(
       ['../../components/layout/ChatHeader', 'ChatHeader'],
       ['./ClearConversationDialog', 'ClearConversationDialog'],
       ['./EmptyState', 'EmptyState'],
+      ['./NewChatHero', 'NewChatHero'],
       ['../conversation/CloseGuard', 'CloseGuard'],
       ['../review/ChangePreviewPanel', 'ChangePreviewPanel'],
       ['../review/CommandReviewPanel', 'CommandReviewPanel'],
@@ -1220,17 +1219,34 @@ await check(
         changePreview: { state: { status: 'idle' } },
         canRespondToPlanQuestion: false
       }
-      const tree = view.render({ conversation, onOpenFile: () => {} })
-      const props = find(tree, (node) => node.type === status).props
-      assert.equal(props.stopping, true)
-      assert.equal(props.waitingInput, true)
-      assert.equal(props.waitingApproval, false)
-      assert.equal(props.commandProposalOpen, true)
+      const workspaceProps = {
+        conversation,
+        onOpenFile: () => {},
+        summary: {
+          workspaceRef: { current: null },
+          triggerRef: { current: null },
+          enabled: false,
+          visible: false,
+          mode: 'overlay',
+          toggle: () => {}
+        },
+        sources: [],
+        onShowAllSources: () => {}
+      }
+      const tree = view.render(workspaceProps)
+      const props = find(tree, (node) => node.type === composer).props
+      assert.equal(props.conversation, conversation)
+      assert.equal(props.conversation.stopping, true)
+      assert.equal(props.executionApprovalPending, false)
+      assert.equal(
+        find(tree, (node) => node.type.displayName === 'CommandReviewPanel').props.proposal,
+        conversation.commandReview.proposal
+      )
       assert.equal(find(tree, (node) => node.type === messageList).props.planQuestionDisabled, true)
       chatWorkspace.executionApprovalPending = true
       assert.equal(
-        find(view.render({ conversation, onOpenFile: () => {} }), (node) => node.type === status)
-          .props.waitingApproval,
+        find(view.render(workspaceProps), (node) => node.type === composer).props
+          .executionApprovalPending,
         true
       )
     } finally {
@@ -1250,7 +1266,7 @@ await check(
       ['../project/ComposerAttachments', 'ComposerAttachments'],
       ['../project/AttachmentCards', 'AttachmentCards'],
       ['../project/ImageAttachment', 'ImageAttachment'],
-      ['./ComposerMode', 'ComposerMode']
+      ['./ComposerMode', 'ComposerPlanIndicator']
     ])
       deps[file] = { [name]: marker(name) }
     const composer = await componentFixture(
@@ -1266,6 +1282,9 @@ await check(
     try {
       let stopped = 0
       const conversation = {
+        workspace: { runtime: null },
+        skills: { busy: false },
+        messages: [],
         storage: { paused: false, dirty: false },
         operation: 'generating',
         stopping: true,

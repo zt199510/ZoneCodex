@@ -8,11 +8,43 @@ import { registerAgentUserInput } from './agent-user-input'
 import { getResumableAgentTask } from './desktop-checkpoints'
 import { agentResumePrompt, type ResumableAgentTask } from '../../shared/agent-resume'
 import { isTaskId } from '../../shared/task'
+import { readSkillMessage } from './skill-message'
+import type { SkillMessageResult } from '../../shared/skills'
 
 export function registerAgentRequest(
   isPreparationActive: (windowId: number) => boolean = () => false
 ): void {
   registerAgentUserInput()
+  ipcMain.handle(
+    'agent:skill-message',
+    async (event, conversationId: unknown, messageId: unknown): Promise<SkillMessageResult> => {
+      const window = getIpcWindow(event, '不支持的技能消息来源', {
+        windowMustBeLive: true,
+        senderMustBeLive: true
+      })
+      if (!isAgentId(conversationId) || !isAgentId(messageId))
+        return { status: 'error', error: '技能消息标识无效' }
+      try {
+        const assertCurrent = (): void => {
+          getIpcWindow(event, '技能消息来源已失效', {
+            windowMustBeLive: true,
+            senderMustBeLive: true
+          })
+        }
+        const snapshot = await readSkillMessage(window.id, conversationId, messageId, assertCurrent)
+        getIpcWindow(event, '技能消息来源已失效', {
+          windowMustBeLive: true,
+          senderMustBeLive: true
+        })
+        return { status: 'ready', snapshot }
+      } catch (error) {
+        return {
+          status: 'error',
+          error: error instanceof Error ? error.message : '无法读取原技能快照'
+        }
+      }
+    }
+  )
   ipcMain.handle(
     'agent:start',
     async (

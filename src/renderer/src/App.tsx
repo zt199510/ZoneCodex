@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { CSSProperties } from 'react'
 import { Sidebar } from './components/layout/Sidebar'
 import { SidebarSearch } from './components/layout/SidebarSearch'
@@ -14,13 +14,13 @@ import {
 } from './components/layout/sidebar-layout'
 import { ChatWorkspace } from './features/chat/ChatWorkspace'
 import { useThreadSummaryPanel } from './features/chat/useThreadSummaryPanel'
-import { useSourcesSidePanel } from './features/chat/useSourcesSidePanel'
-import { ThreadSourcesSidePanel } from './features/chat/ThreadSourcesSidePanel'
 import { threadSummarySources } from './features/chat/thread-summary-sources'
 import type { OpenFileView } from './features/files/file-view-origin'
 import { useConversation } from './features/conversation/useConversation'
-import { useFileView } from './features/files/useFileView'
 import { SettingsPage } from './features/settings/SettingsPage'
+import { SkillsPage } from './features/skills/SkillsPage'
+import type { SkillDescriptor } from '../../shared/skills'
+import { WorkbenchWorkspace, type WorkbenchHandle } from './features/workbench/WorkbenchWorkspace'
 
 function App(): React.JSX.Element {
   const conversation = useConversation()
@@ -49,9 +49,25 @@ function App(): React.JSX.Element {
   const sidebarWidth = clampSidebarWidth(sidebarWidthPreference, viewportWidth)
   const [searchOpen, setSearchOpen] = useState(false)
   const [sidebarView, setSidebarView] = useState<'active' | 'archived'>('active')
-  const [settingsOpen, setSettingsOpen] = useState(false)
+  const [page, setPage] = useState<'chat' | 'settings' | 'skills'>('chat')
+  const pageRef = useRef(page)
+  const pageRevision = useRef(0)
+  const conversationIdRef = useRef(conversation.activeConversationId)
+  useLayoutEffect(() => {
+    conversationIdRef.current = conversation.activeConversationId
+  }, [conversation.activeConversationId])
+  const showPage = useCallback((next: 'chat' | 'settings' | 'skills'): void => {
+    pageRef.current = next
+    pageRevision.current++
+    setPage(next)
+  }, [])
+  const settingsOpen = page === 'settings'
+  const skillsOpen = page === 'skills'
+  const auxiliaryPageOpen = page !== 'chat'
   const threadSummary = useThreadSummaryPanel(
-    settingsOpen ? null : conversation.activeConversationId
+    auxiliaryPageOpen || (conversation.messages.length === 0 && !conversation.resumableTask)
+      ? null
+      : conversation.activeConversationId
   )
   const [settingsSaving, setSettingsSaving] = useState(false)
   const settingsSavingRef = useRef(false)
@@ -60,49 +76,31 @@ function App(): React.JSX.Element {
     setSettingsSaving(saving)
   }, [])
   const [settingsReturnFocus, setSettingsReturnFocus] = useState<HTMLElement>()
+  const [skillsReturnFocus, setSkillsReturnFocus] = useState<HTMLElement>()
+  const workbench = useRef<WorkbenchHandle>(null)
   const sources = useMemo(
     () => threadSummarySources(conversation.messages, conversation.toolRuns),
     [conversation.messages, conversation.toolRuns]
   )
-  const sourcesContext = JSON.stringify([
-    conversation.activeConversationId,
-    conversation.workspace.runtime?.workspaceId ?? null,
-    conversation.contextSelection?.snapshotId ?? null,
-    conversation.contextSelection?.files.map((file) => file.path) ?? [],
-    conversation.executionPermissions.state?.revision ?? null
-  ])
-  const sourcesPanel = useSourcesSidePanel(
-    settingsOpen || !conversation.activeConversationId ? null : sourcesContext
-  )
-  const fileView = useFileView(conversation, false)
-  const openFile = fileView.open
-  const selectSourceTab = sourcesPanel.select
   const onOpenFile = useCallback<OpenFileView>(
     (reference, origin, trigger): void => {
-      selectSourceTab('file')
-      openFile(reference, origin, trigger)
+      workbench.current?.openFile(reference, origin, trigger)
     },
-    [openFile, selectSourceTab]
+    []
   )
-  const closeSources = sourcesPanel.close
-  const showSources = sourcesPanel.show
   const closeSummaryOverlay = threadSummary.closeOverlay
   const onShowAllSources = useCallback(
-    (trigger: HTMLButtonElement): void => {
-      showSources(trigger)
+    (): void => {
+      workbench.current?.openSources()
       closeSummaryOverlay()
     },
-    [showSources, closeSummaryOverlay]
+    [closeSummaryOverlay]
   )
-  const closeFile = fileView.close
-  const fileStatus = fileView.state.status
-  const onCloseSources = useCallback((): void => {
-    closeSources(fileStatus === 'idle')
-  }, [closeSources, fileStatus])
-  const onCloseSourceFile = useCallback((): void => {
-    closeFile(!sourcesPanel.open)
-    if (sourcesPanel.open) selectSourceTab('sources')
-  }, [closeFile, selectSourceTab, sourcesPanel.open])
+  useEffect(() => {
+    const reveal = (): void => showPage('chat')
+    window.addEventListener('workbench:show', reveal)
+    return () => window.removeEventListener('workbench:show', reveal)
+  }, [showPage])
   const changeSidebarWidth = (width: number): void => {
     setSidebarWidthPreference(clampSidebarWidth(width))
   }
@@ -128,16 +126,73 @@ function App(): React.JSX.Element {
           (document.activeElement instanceof HTMLElement ? document.activeElement : undefined)
       )
       if (window.innerWidth < sidebarBreakpoint) setSidebarOpen(false)
-      setSettingsOpen(true)
+      showPage('settings')
     },
-    [setSidebarOpen, settingsOpen]
+    [setSidebarOpen, settingsOpen, showPage]
   )
+
+  const openSkills = (returnFocus?: HTMLElement): void => {
+    if (skillsOpen || settingsSavingRef.current || !conversation.canNavigate) return
+    if (document.querySelector('dialog[open], [popover]:popover-open')) return
+    setSkillsReturnFocus(
+      returnFocus ??
+        (document.activeElement instanceof HTMLElement ? document.activeElement : undefined)
+    )
+    if (window.innerWidth < sidebarBreakpoint) setSidebarOpen(false)
+    showPage('skills')
+  }
+
+  const closeSkills = useCallback((): void => {
+    showPage('chat')
+    const revision = pageRevision.current
+    requestAnimationFrame(() => {
+      if (
+        pageRef.current !== 'chat' ||
+        pageRevision.current !== revision ||
+        document.querySelector('dialog[open], [popover]:popover-open')
+      )
+        return
+      const canRestore = (element: HTMLElement | undefined | null): boolean =>
+        Boolean(
+          element?.isConnected &&
+          element.getClientRects().length &&
+          !element.closest('[inert]') &&
+          !element.matches(':disabled')
+        )
+      const target = canRestore(skillsReturnFocus)
+        ? skillsReturnFocus
+        : document.querySelector<HTMLButtonElement>('.rail-skills')
+      if (canRestore(target)) target?.focus({ preventScroll: true })
+      else document.getElementById('chat-input')?.focus({ preventScroll: true })
+    })
+  }, [showPage, skillsReturnFocus])
+
+  const selectSkill = async (item: SkillDescriptor): Promise<boolean> => {
+    if (pageRef.current !== 'skills') return false
+    const revision = pageRevision.current
+    const id = conversation.activeConversationId
+    const accepted = await conversation.skills.select(item)
+    if (
+      accepted &&
+      pageRef.current === 'skills' &&
+      pageRevision.current === revision &&
+      conversationIdRef.current === id &&
+      !document.querySelector('dialog[open], [popover]:popover-open')
+    ) {
+      showPage('chat')
+      requestAnimationFrame(() => {
+        if (pageRef.current !== 'chat' || document.querySelector('dialog[open]')) return
+        document.getElementById('chat-input')?.focus({ preventScroll: true })
+      })
+    }
+    return accepted
+  }
 
   async function showChatAfter(navigate: () => Promise<boolean>): Promise<boolean> {
     if (settingsSavingRef.current) return false
     const accepted = await navigate()
     if (accepted) {
-      setSettingsOpen(false)
+      showPage('chat')
       setSidebarView('active')
       if (window.innerWidth < sidebarBreakpoint) setSidebarOpen(false)
     }
@@ -147,22 +202,22 @@ function App(): React.JSX.Element {
   useEffect(() => {
     return window.api.onAgentUserInputChange((request) => {
       if (request) {
-        setSettingsOpen(false)
+        showPage('chat')
         setSearchOpen(false)
         setConversationSearch('')
       }
     })
-  }, [setConversationSearch])
+  }, [setConversationSearch, showPage])
 
   useEffect(() => {
-    if (!settingsOpen && !searchOpen) return
+    if (!auxiliaryPageOpen && !searchOpen) return
     // An approval or window-close dialog needs the chat surface that owns it.
     const showPendingDialog = (): void => {
       const dialog = document.querySelector<HTMLDialogElement>(
-        'dialog[open]:not(.sidebar-search-dialog)'
+        'dialog[open]:not(.sidebar-search-dialog):not(.skill-detail-dialog)'
       )
       if (!dialog) return
-      setSettingsOpen(false)
+      showPage('chat')
       setSearchOpen(false)
       setConversationSearch('')
       requestAnimationFrame(() => {
@@ -177,7 +232,7 @@ function App(): React.JSX.Element {
     observer.observe(document.body, { subtree: true, attributes: true, attributeFilter: ['open'] })
     showPendingDialog()
     return () => observer.disconnect()
-  }, [settingsOpen, searchOpen, setConversationSearch])
+  }, [auxiliaryPageOpen, searchOpen, setConversationSearch, showPage])
 
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent): void {
@@ -225,15 +280,16 @@ function App(): React.JSX.Element {
         !event.defaultPrevented &&
         !document.querySelector('dialog[open], [popover]:popover-open')
       ) {
-        if (settingsOpen) {
+        if (auxiliaryPageOpen) {
           event.preventDefault()
-          setSettingsOpen(false)
+          if (skillsOpen) closeSkills()
+          else showPage('chat')
         } else setSidebarOpen(false)
       }
     }
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  }, [openSettings, setSidebarOpen, settingsOpen])
+  }, [openSettings, setSidebarOpen, auxiliaryPageOpen, skillsOpen, closeSkills, showPage])
 
   return (
     <div
@@ -258,15 +314,18 @@ function App(): React.JSX.Element {
           !conversation.canNavigate || settingsSaving || conversation.conversations.length >= 100
         }
         settingsOpen={settingsOpen}
+        skillsOpen={skillsOpen}
+        skillsDisabled={!conversation.canNavigate || settingsSaving}
         onToggle={() => setSidebarOpen((previous) => !previous)}
         onOpen={() => {
           if (settingsSavingRef.current) return
-          setSettingsOpen(false)
+          showPage('chat')
           setSidebarOpen(true)
         }}
         onCreate={() => showChatAfter(conversation.create)}
         onSearch={() => setSearchOpen(true)}
         onOpenSettings={openSettings}
+        onOpenSkills={openSkills}
         onPreviewEnter={enterSidebarPreview}
         onPreviewLeave={leaveSidebarPreview}
       />
@@ -291,6 +350,7 @@ function App(): React.JSX.Element {
         view={sidebarView}
         onViewChange={setSidebarView}
         settingsOpen={settingsOpen}
+        skillsOpen={skillsOpen}
         width={sidebarWidth}
         onWidthChange={changeSidebarWidth}
         onResizingChange={setSidebarResizing}
@@ -311,6 +371,7 @@ function App(): React.JSX.Element {
         }}
         onRestore={(id) => showChatAfter(() => conversation.restore(id))}
         onOpenSettings={openSettings}
+        onOpenSkills={openSkills}
       />
       <SidebarSearch
         open={searchOpen}
@@ -325,10 +386,8 @@ function App(): React.JSX.Element {
         onSelect={(id) => showChatAfter(() => conversation.select(id))}
         onRestore={(id) => showChatAfter(() => conversation.restore(id))}
       />
-      <div className="workspace-shell" hidden={settingsOpen} inert={settingsOpen}>
-        <div
-          className={`workspace-body${sourcesPanel.open || fileView.state.status !== 'idle' ? ' with-sources-view' : ''}`}
-        >
+      <div className="workspace-shell" hidden={auxiliaryPageOpen} inert={auxiliaryPageOpen}>
+        <WorkbenchWorkspace ref={workbench} conversation={conversation} sources={sources} active={!auxiliaryPageOpen}>
           <ChatWorkspace
             conversation={conversation}
             onOpenFile={onOpenFile}
@@ -336,26 +395,21 @@ function App(): React.JSX.Element {
             sources={sources}
             onShowAllSources={onShowAllSources}
           />
-          <ThreadSourcesSidePanel
-            key={sourcesContext}
-            sources={sources}
-            sourcesOpen={sourcesPanel.open}
-            selected={sourcesPanel.selected}
-            fileState={fileView.state}
-            active={!settingsOpen}
-            onSelect={sourcesPanel.select}
-            onCloseSources={onCloseSources}
-            onCloseFile={onCloseSourceFile}
-            onOpenFile={onOpenFile}
-          />
-        </div>
+        </WorkbenchWorkspace>
       </div>
       <SettingsPage
         open={settingsOpen}
         canChange={conversation.canChangeSettings}
         returnFocus={settingsReturnFocus}
         onSavingChange={onSettingsSavingChange}
-        onClose={() => setSettingsOpen(false)}
+        onClose={() => showPage('chat')}
+      />
+      <SkillsPage
+        open={skillsOpen}
+        skills={conversation.skills}
+        disabled={!conversation.canNavigate || settingsSaving}
+        returnFocus={skillsReturnFocus}
+        onSelect={selectSkill}
       />
     </div>
   )
