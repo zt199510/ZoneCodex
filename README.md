@@ -1,8 +1,10 @@
+2026-10-16：[第64课](ZoneCodex学习计划/79-第六十四课-模型接口可替换与无登录运行.md)实现可替换模型接口与自动离线运行；[验收记录](docs/lesson64-acceptance-2026-10-16.md)区分合成传输、真实进程和桌面操作。用户实测、自测及第63.1整体欠账独立保留。
+
 ## 右侧工作面板（2026-10-14）
 
 已接入 Codex 风格统一标签页：工具页、文件编辑、原生浏览器、多终端、Git 改动及来源。聊天／分屏／完整视图可切换，文件按 Ctrl+S 手动保存，标签和未保存草稿按会话恢复。点击标签栏加号新建工具页，右键加号选择完整视图新建；Ctrl+T 打开浏览器。
 
-开发版与 Windows 包各 16 项实际界面验收通过，最终包的新对话／Skills 另通过 15 项回归。安装包在 `dist/zonecodex-1.0.0-setup.exe`。详见[验收记录](docs/workbench-acceptance-2026-10-14.md)。
+开发版与 Windows 包各 17 项实际界面验收通过，最终包的新对话／Skills 另通过 16 项回归。安装包在 `dist/zonecodex-1.0.0-setup.exe`。详见[验收记录](docs/workbench-acceptance-2026-10-14.md)。
 
 <!-- lesson62-skills-page-ui-20261014:start -->
 
@@ -217,7 +219,7 @@ npm run lint
 npm run build
 ```
 
-应用运行时只使用真实模型的 Responses SSE 流，不提供模拟聊天入口。当前会话存储仅接受版本9，保存输入框 `agentMode` 和必需的消息 `mode`，每个会话必需保存主进程绑定的 `defaultDirectory`，图片唯一字段为 `images`；旧库或损坏文件拒绝读取及覆盖，历史不恢复运行授权。设置单独使用版本1，保存确认后才更新内存。真实模型调用需要配置 `MODEL_ENDPOINT`、`MODEL_NAME` 和 `MODEL_API_KEY`，端到端结果需实际验收。
+应用提供 Responses SSE 与内置离线 Provider。没有模型配置时自动离线，只返回明确的未执行说明，不推理或执行任务；远程错误不降级。显式 MODEL_PROVIDER 可选 offline 或 responses。当前会话存储仅接受版本9，保存输入框 `agentMode` 和必需的消息 `mode`，每个会话必需保存主进程绑定的 `defaultDirectory`，图片唯一字段为 `images`；旧库或损坏文件拒绝读取及覆盖，历史不恢复运行授权。设置单独使用版本1，保存确认后才更新内存。真实模型调用需要配置 `MODEL_ENDPOINT`、`MODEL_NAME` 和 `MODEL_API_KEY`，端到端结果需实际验收。
 
 ## 项目与课程
 

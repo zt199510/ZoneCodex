@@ -10,7 +10,7 @@ import type { ProtocolItem } from '../../shared/agent-history'
 import type { ImageHistoryReference } from '../../shared/image-input'
 import type { ToolScope } from '../../shared/project'
 import type { TaskCheckpoint } from '../../shared/task-checkpoint'
-import type { SendResponse } from '../model/response-client'
+import type { SendResponse } from '../model/model-contract'
 import type { ExecuteTool } from './tool-loop'
 
 /** Data already verified by the host; scope describes tools, never grants access. */
@@ -46,6 +46,8 @@ export type AgentCoreObserver = {
 export type AgentCoreDependencies = {
   signal: AbortSignal
   send: SendResponse
+  /** Exact MCP names captured during trusted request preparation. */
+  mcpToolNames?: readonly string[]
   /** No business tools or public answer stream; preparation fixes the same model config. */
   summarize?: SendResponse
   networkOverhead?: {

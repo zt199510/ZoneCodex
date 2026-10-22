@@ -7,26 +7,6 @@
   background: var(--surface);
 }
 
-.task-resume-bar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-  padding: 10px 28px;
-  border-bottom: 1px solid #e8e8e3;
-  color: var(--muted);
-  font-size: 12px;
-}
-
-.task-resume-bar button {
-  flex-shrink: 0;
-  padding: 6px 12px;
-  border: 1px solid #d5d8d0;
-  border-radius: 6px;
-  background: var(--surface);
-  color: var(--text);
-}
-
 .chat-header {
   min-height: 65px;
   display: flex;

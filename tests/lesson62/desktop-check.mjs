@@ -1157,16 +1157,13 @@ try {
         'new-PID passive reopening reads saved snapshot but performs zero model requests, SKILL reads, skill root operations, directory scans and attribute helpers for five seconds'
       )
       if (live) return
-      assert.match(
-        await evaluate('document.querySelector(".task-resume-bar").textContent'),
-        /code-review/
-      )
+      assert.equal(await evaluate('!!document.querySelector(".task-resume-bar")'), false)
       await choose('other-review')
       const preservedDraft = '选B技能的未发送草稿，继续A任务时保留。'
       await setDraft(preservedDraft)
       const beforeResume = await audit()
       await configure({ scenario: { name: 'resume' } })
-      await clickText('.task-resume-bar button', '继续此任务')
+      await clickText('.task-resume-button', '继续此任务')
       await idle()
       const resumed = await audit()
       assert.equal(resumed.skillReads.length, beforeResume.skillReads.length)

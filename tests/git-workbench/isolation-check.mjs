@@ -51,7 +51,7 @@ await suite.check(
         ),
         name
       )
-    assert(inputNames.includes('src/main/model/response-client.ts'))
+    assert(inputNames.includes('src/main/model/model-session.ts') && inputNames.includes('src/main/model/responses-provider.ts'))
     for (const name of inputNames)
       assert(
         /^src\/(?:main\/(?:git|model)\/|shared\/)/.test(name) || name === 'src/main/errors.ts',
@@ -73,7 +73,7 @@ await suite.check('only explicitly invoked generation imports model transport', 
     path.join(root, 'src/main/git/git-workbench-generation.ts'),
     'utf8'
   )
-  assert.match(generator, /createLiveResponse\(\[\], instructions\)/)
+  assert.match(generator, /createSend\(\{ purpose: 'git-generation', tools: \[\], instructions \}\)/)
   assert.match(generator, /export async function generateGitText/)
 })
 await suite.check(

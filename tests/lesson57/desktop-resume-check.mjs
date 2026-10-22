@@ -286,22 +286,22 @@ async function launch(stage) {
         false
       )
       await until(
-        () => evaluate('!!document.querySelector(".task-resume-bar button")'),
+        () => evaluate('!!document.querySelector(".task-resume-button")'),
         'explicit resume control'
       )
       await click('document.querySelector(".conversation-item[title=第57课被动切换对照]")')
       await idle()
-      assert.equal(await evaluate('!!document.querySelector(".task-resume-bar button")'), false)
+      assert.equal(await evaluate('!!document.querySelector(".task-resume-button")'), false)
       await click('document.querySelector(".conversation-item[title=第57课隔离价格续接]")')
       await idle()
       await until(
-        () => evaluate('!!document.querySelector(".task-resume-bar button")'),
+        () => evaluate('!!document.querySelector(".task-resume-button")'),
         'passive return to resumable conversation'
       )
       assert.equal((await audit()).requests.length, 0)
       assert(
         await evaluate(
-          'document.querySelector(".task-resume-bar").textContent.includes("中断前的文件或命令操作可能已发生")'
+          '!document.body.textContent.includes("中断前的文件或命令操作可能已发生")'
         )
       )
       assert.equal(
@@ -352,7 +352,7 @@ async function launch(stage) {
       await click('document.querySelector("button[aria-label=停止生成]")')
       await idle()
       await until(
-        () => evaluate('!!document.querySelector(".task-resume-bar button")'),
+        () => evaluate('!!document.querySelector(".task-resume-button")'),
         'checkpoint saved after stop'
       )
       await save()
@@ -373,7 +373,7 @@ async function launch(stage) {
         pass: true
       })
     } else {
-      await click('document.querySelector(".task-resume-bar button")')
+      await click('document.querySelector(".task-resume-button")')
       await until(
         async () => (await audit()).ipc.some((item) => item.channel === 'agent:resume'),
         'explicit resume IPC'

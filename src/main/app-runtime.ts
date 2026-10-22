@@ -71,6 +71,8 @@ import { attachGitCleanup, registerGitView } from './git/git-ipc'
 import { registerGitWorkbench } from './git/git-workbench-ipc'
 import { hasAgentUserInput } from './agent/agent-user-input'
 import { attachSkillsCleanup, registerSkills } from './skills/skills-ipc'
+import { attachMcpCleanup, registerMcpIpc } from './mcp/mcp-manager'
+import { registerModelIpc } from './model/model-ipc'
 
 function isSettingsConsumerBusy(windowId: number): boolean {
   return hasSettingsMutation() || hasConversationDirectoryOperation(windowId)
@@ -190,6 +192,7 @@ export function attachWindowRuntime(window: BrowserWindow): void {
   attachGitCleanup(window)
   attachImageAccessCleanup(window)
   attachSkillsCleanup(window)
+  attachMcpCleanup(window)
   window.webContents.on('zonecodex-main-navigation', () => {
     clearExecutionApproval(window.id)
     cancelConversationTitleJob(window.id)
@@ -209,6 +212,7 @@ export function attachWindowRuntime(window: BrowserWindow): void {
 }
 
 export function registerAppRuntime(): void {
+  registerModelIpc()
   registerWorkbench()
   registerBrowserHost()
   registerSettings(isSettingsChangeBusy)
@@ -255,4 +259,5 @@ export function registerAppRuntime(): void {
 
   registerConversationStorage(app.getPath('userData'))
   registerExternalLinks()
+  registerMcpIpc()
 }

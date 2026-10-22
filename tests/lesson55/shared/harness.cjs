@@ -8,6 +8,19 @@ const { build } = require('esbuild')
 const root = process.cwd()
 
 async function load(relativeFile, dependencies = {}, options = {}) {
+  // Keep historical transport fixtures on the actual new session contract.
+  const transport = dependencies['../model/response-client']
+  if (transport && !dependencies['../model/model-session']) {
+    const sessions = await load('src/main/model/model-session.ts', {
+      './model-configuration': {
+        readModelConfiguration: transport.readModelConfiguration ?? (() => ({ endpoint: 'https://fixture.invalid', model: 'fixture', apiKey: 'synthetic' })),
+        fixedResponsesConfiguration: (value) => value
+      },
+      './responses-provider': { createResponsesSender: transport.createLiveResponse }
+    })
+    dependencies = { ...dependencies, '../model/model-session': sessions,
+      '../mcp/mcp-manager': { connectEnabledMcpServers: async () => [], assertMcpToolCurrent() {}, captureMcpTaskTools() {}, assertMcpTaskResume() {}, callMcpTool: async () => { throw Error('MCP outside historical fixture') } } }
+  }
   const filename = path.resolve(root, relativeFile)
   const bundled = await build({
     entryPoints: [filename],

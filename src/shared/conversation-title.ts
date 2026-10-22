@@ -18,6 +18,7 @@ export type ConversationTitleResult = {
 export type ConversationTitleOutcome =
   | ConversationTitleResult
   | { status: 'cancelled'; requestId: string }
+  | { status: 'skipped'; requestId: string }
   | { status: 'error'; requestId: string; error: string }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -114,6 +115,8 @@ export function parseConversationTitleOutcome(value: unknown): ConversationTitle
   const result = parseConversationTitleResult(value)
   if (result) return result
   if (!isRecord(value) || !isId(value.requestId) || typeof value.status !== 'string') return null
+  if (value.status === 'skipped' && hasExactKeys(value, ['status', 'requestId']))
+    return { status: 'skipped', requestId: value.requestId }
   if (value.status === 'cancelled' && hasExactKeys(value, ['status', 'requestId']))
     return { status: 'cancelled', requestId: value.requestId }
   if (

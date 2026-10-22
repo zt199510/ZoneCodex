@@ -13,6 +13,7 @@ export type ExecutionApprovalInput = {
   | { kind: 'create'; path: string; content: string }
   | { kind: 'edit'; path: string; before: string; after: string }
   | { kind: 'command'; program: string; args: string[]; reason?: string }
+  | { kind: 'mcp'; serverId: string; serverName: string; toolName: string; argumentsText: string }
 )
 
 /** One pending operation, never a persistent permission or directory grant. */
@@ -72,6 +73,11 @@ export function parseExecutionApproval(value: unknown): ExecutionApproval | null
     text(value.content)
   ) {
     return { ...common, kind: 'create', path: value.path, content: value.content }
+  }
+  if (value.kind === 'mcp' && exact(['serverId', 'serverName', 'toolName', 'argumentsText']) &&
+      id(value.serverId) && localPath(value.serverName) && localPath(value.toolName) &&
+      typeof value.argumentsText === 'string' && value.argumentsText.length <= 12000) {
+    return { ...common, kind: 'mcp', serverId: value.serverId, serverName: value.serverName, toolName: value.toolName, argumentsText: value.argumentsText }
   }
   if (
     value.kind === 'edit' &&

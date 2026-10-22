@@ -2,14 +2,19 @@
   "pass": true,
   "stage": "packaged",
   "packaged": true,
-  "evidence": "D:\\AiTools\\ZoneCodex\\ZoneCodex\\.ui-check\\workbench-ui\\packaged-52eb09b9-7ccc-4997-920c-c5c7b9105497",
-  "userData": "C:\\Users\\Administrator\\AppData\\Local\\Temp\\zc-panel-TR7jGi",
+  "evidence": "D:\\AiTools\\ZoneCodex\\ZoneCodex\\.ui-check\\workbench-ui\\packaged-51caabd6-0804-48b4-8fb8-e3b1afa66f23",
+  "userData": "C:\\Users\\Administrator\\AppData\\Local\\Temp\\zc-panel-0mKrpO",
   "actualElectron": true,
   "actualDiskStorage": true,
   "actualUIInput": "Trusted CDP mouse/key/text input for the app; guest page fixture actions use executeJavaScript with a user gesture. Shell writes are real IPC commands, observed separately by session ID. Responsive dimensions are explicitly emulated. Main inspector supplies isolated userData, cancels the directory chooser, observes IPC, and closes only this owned app.",
   "syntheticData": "Two self-authored conversation records, one sample skill header, and a local HTTP fixture. Files, native browser guests, storage and two shells are real. No model is invoked.",
   "modelNetwork": "Main fetch is blocked/counted before app initialization; zero model submission or external URL opening is allowed.",
   "checks": [
+    {
+      "name": "Workbench launcher and chat summary controls have separate hit areas",
+      "pass": true,
+      "topControls": null
+    },
     {
       "name": "Chat/split/full and responsive fallback preserve a single input and its draft",
       "pass": true
@@ -87,12 +92,12 @@
   "processes": [
     {
       "stage": "packaged",
-      "pid": 48552,
+      "pid": 23304,
       "args": [
-        "--user-data-dir=C:\\Users\\Administrator\\AppData\\Local\\Temp\\zc-panel-TR7jGi",
-        "--inspect-brk=127.0.0.1:56392",
+        "--user-data-dir=C:\\Users\\Administrator\\AppData\\Local\\Temp\\zc-panel-0mKrpO",
+        "--inspect-brk=127.0.0.1:60529",
         "--remote-debugging-address=127.0.0.1",
-        "--remote-debugging-port=56393",
+        "--remote-debugging-port=60530",
         "--disable-gpu",
         "--disable-gpu-compositing",
         "--in-process-gpu"
@@ -102,12 +107,12 @@
     },
     {
       "stage": "packaged",
-      "pid": 42912,
+      "pid": 40204,
       "args": [
-        "--user-data-dir=C:\\Users\\Administrator\\AppData\\Local\\Temp\\zc-panel-TR7jGi",
-        "--inspect-brk=127.0.0.1:63455",
+        "--user-data-dir=C:\\Users\\Administrator\\AppData\\Local\\Temp\\zc-panel-0mKrpO",
+        "--inspect-brk=127.0.0.1:51007",
         "--remote-debugging-address=127.0.0.1",
-        "--remote-debugging-port=63456",
+        "--remote-debugging-port=51008",
         "--disable-gpu",
         "--disable-gpu-compositing",
         "--in-process-gpu"
@@ -117,18 +122,18 @@
     }
   ],
   "screenshots": [
-    "D:\\AiTools\\ZoneCodex\\ZoneCodex\\.ui-check\\workbench-ui\\packaged-52eb09b9-7ccc-4997-920c-c5c7b9105497\\01-split-tools.png",
-    "D:\\AiTools\\ZoneCodex\\ZoneCodex\\.ui-check\\workbench-ui\\packaged-52eb09b9-7ccc-4997-920c-c5c7b9105497\\02-full-tools.png",
-    "D:\\AiTools\\ZoneCodex\\ZoneCodex\\.ui-check\\workbench-ui\\packaged-52eb09b9-7ccc-4997-920c-c5c7b9105497\\03-narrow-full.png",
-    "D:\\AiTools\\ZoneCodex\\ZoneCodex\\.ui-check\\workbench-ui\\packaged-52eb09b9-7ccc-4997-920c-c5c7b9105497\\10-git-workbench.png",
-    "D:\\AiTools\\ZoneCodex\\ZoneCodex\\.ui-check\\workbench-ui\\packaged-52eb09b9-7ccc-4997-920c-c5c7b9105497\\11-sources.png",
-    "D:\\AiTools\\ZoneCodex\\ZoneCodex\\.ui-check\\workbench-ui\\packaged-52eb09b9-7ccc-4997-920c-c5c7b9105497\\04-file-editor.png",
-    "D:\\AiTools\\ZoneCodex\\ZoneCodex\\.ui-check\\workbench-ui\\packaged-52eb09b9-7ccc-4997-920c-c5c7b9105497\\05-external-conflict.png",
-    "D:\\AiTools\\ZoneCodex\\ZoneCodex\\.ui-check\\workbench-ui\\packaged-52eb09b9-7ccc-4997-920c-c5c7b9105497\\06-native-browser.png",
-    "D:\\AiTools\\ZoneCodex\\ZoneCodex\\.ui-check\\workbench-ui\\packaged-52eb09b9-7ccc-4997-920c-c5c7b9105497\\07-multiple-terminals.png",
-    "D:\\AiTools\\ZoneCodex\\ZoneCodex\\.ui-check\\workbench-ui\\packaged-52eb09b9-7ccc-4997-920c-c5c7b9105497\\09-readonly-snapshot.png",
-    "D:\\AiTools\\ZoneCodex\\ZoneCodex\\.ui-check\\workbench-ui\\packaged-52eb09b9-7ccc-4997-920c-c5c7b9105497\\12-narrow-long-title.png",
-    "D:\\AiTools\\ZoneCodex\\ZoneCodex\\.ui-check\\workbench-ui\\packaged-52eb09b9-7ccc-4997-920c-c5c7b9105497\\08-restored-draft.png"
+    "D:\\AiTools\\ZoneCodex\\ZoneCodex\\.ui-check\\workbench-ui\\packaged-51caabd6-0804-48b4-8fb8-e3b1afa66f23\\01-split-tools.png",
+    "D:\\AiTools\\ZoneCodex\\ZoneCodex\\.ui-check\\workbench-ui\\packaged-51caabd6-0804-48b4-8fb8-e3b1afa66f23\\02-full-tools.png",
+    "D:\\AiTools\\ZoneCodex\\ZoneCodex\\.ui-check\\workbench-ui\\packaged-51caabd6-0804-48b4-8fb8-e3b1afa66f23\\03-narrow-full.png",
+    "D:\\AiTools\\ZoneCodex\\ZoneCodex\\.ui-check\\workbench-ui\\packaged-51caabd6-0804-48b4-8fb8-e3b1afa66f23\\10-git-workbench.png",
+    "D:\\AiTools\\ZoneCodex\\ZoneCodex\\.ui-check\\workbench-ui\\packaged-51caabd6-0804-48b4-8fb8-e3b1afa66f23\\11-sources.png",
+    "D:\\AiTools\\ZoneCodex\\ZoneCodex\\.ui-check\\workbench-ui\\packaged-51caabd6-0804-48b4-8fb8-e3b1afa66f23\\04-file-editor.png",
+    "D:\\AiTools\\ZoneCodex\\ZoneCodex\\.ui-check\\workbench-ui\\packaged-51caabd6-0804-48b4-8fb8-e3b1afa66f23\\05-external-conflict.png",
+    "D:\\AiTools\\ZoneCodex\\ZoneCodex\\.ui-check\\workbench-ui\\packaged-51caabd6-0804-48b4-8fb8-e3b1afa66f23\\06-native-browser.png",
+    "D:\\AiTools\\ZoneCodex\\ZoneCodex\\.ui-check\\workbench-ui\\packaged-51caabd6-0804-48b4-8fb8-e3b1afa66f23\\07-multiple-terminals.png",
+    "D:\\AiTools\\ZoneCodex\\ZoneCodex\\.ui-check\\workbench-ui\\packaged-51caabd6-0804-48b4-8fb8-e3b1afa66f23\\09-readonly-snapshot.png",
+    "D:\\AiTools\\ZoneCodex\\ZoneCodex\\.ui-check\\workbench-ui\\packaged-51caabd6-0804-48b4-8fb8-e3b1afa66f23\\12-narrow-long-title.png",
+    "D:\\AiTools\\ZoneCodex\\ZoneCodex\\.ui-check\\workbench-ui\\packaged-51caabd6-0804-48b4-8fb8-e3b1afa66f23\\08-restored-draft.png"
   ],
   "notCovered": [
     "No model, external websites, native chooser, clipboard or IME acceptance. Guest DOM actions explicitly use executeJavaScript with a user gesture; the tab reorder uses a synthetic DataTransfer. No pixel equality claim against upstream Codex."
@@ -136,9 +141,9 @@
   "artifactBefore": {
     "out/main/index.js": "3854d2d5f7ac5b3e875dd9a20f925f86a082beb73c4f6dc65a10c5b9fd14136d",
     "out/preload/index.js": "2914838914a5208175b197f224e0034b01c82536ab7b552e68aaf94017b539e7",
-    "out/renderer/index.html": "094128a82f5ae27a0f78bd76647b9e23027fb46f427ea507cc800a14137797c9",
-    "dist/win-unpacked/zonecodex.exe": "914f5425c8dfda8e76dfb47b5ca91825b784403309eebe50176bc9d28e94482d",
-    "dist/win-unpacked/resources/app.asar": "445c518ae3d81961da4131672b8b0309c605f899457e3e4a96f8d77422060141"
+    "out/renderer/index.html": "8d70836a92cb070442d4a331bd6fb736a67855baa188fca2f131705d99816d20",
+    "dist/win-unpacked/zonecodex.exe": "6c29d3671a8fb5abd4aa752779b539fa496d583df043d8d5fe1a670f36571345",
+    "dist/win-unpacked/resources/app.asar": "ed260289c49f3ca02379ea46745135a41d76cf8fbbc62d49f9fc216e6aaf1e5c"
   },
   "divider": {
     "beforeWidth": 600,
@@ -152,16 +157,16 @@
       "title": "about:blank"
     },
     {
-      "url": "http://127.0.0.1:56391/",
+      "url": "http://127.0.0.1:60528/",
       "title": "本地测试网页"
     },
     {
-      "url": "http://127.0.0.1:56391/two",
+      "url": "http://127.0.0.1:60528/two",
       "title": "第二页"
     }
   ],
   "browserAfterBack": {
-    "url": "http://127.0.0.1:56391/",
+    "url": "http://127.0.0.1:60528/",
     "index": 1
   },
   "popupPreferences": {
@@ -180,39 +185,39 @@
     "webSecurity": true,
     "webviewTag": false
   },
-  "popupAttributes": "<webview src=\"http://127.0.0.1:56391/\" allowpopups=\"\" partition=\"persist:zonecodex-browser-497719b1768441fbe540b06b7036aad41647cede7a455dd4c5b176b984ffcdcd\" class=\"panel-browser-webview\"></webview>",
+  "popupAttributes": "<webview src=\"http://127.0.0.1:60528/\" allowpopups=\"\" partition=\"persist:zonecodex-browser-726476ad5482669423b5a0a23744d2b8ba6b55cb7b2e2b551a5cddfb69467261\" class=\"panel-browser-webview\"></webview>",
   "popupResult": false,
   "popupObserved": [
     {
       "title": "sample.ts",
-      "id": "2208df4a-f564-49dd-a370-f60611efb106"
+      "id": "b817994e-b6ca-470e-9e5f-30065b0c2050"
     },
     {
       "title": "文件",
-      "id": "2289dd68-437d-492c-ad21-e03d977d5d14"
+      "id": "da7e627d-52a5-470b-a14c-346a63593bee"
     },
     {
       "title": "本地测试网页",
-      "id": "b4dca001-be7a-4df9-abeb-616219a15a55"
+      "id": "3c8cbf72-a3ed-44bc-81c3-014d98cc98b8"
     },
     {
       "title": "本地测试网页",
-      "id": "2a339fef-a929-4d1e-8810-82a224db099e"
+      "id": "513fcbda-c441-41c7-aea4-d8a640239f51"
     }
   ],
   "terminalOutput": {
-    "3ecbd3f8-0eb5-4d46-9e23-23f70d189059": "\u001b[?9001h\u001b[?1004h\u001b[?25l\u001b[2J\u001b[m\u001b[H\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\u001b[H\u001b]0;C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe\u0007\u001b[?25hPS C:\\Users\\Administrator\\AppData\\Local\\Temp\\zc-panel-TR7jGi\\chats\\ec15a668-ce1d-40da-abf2-56c54823ebd8\\workspace> \u001b[?25l\u001b[93mW\u001b[97m\u001b[2m\u001b[3mrite-Output \"WORKBENCH_ad8f1877-ba40-49c5-81fe-49d63c9fd983\"\u001b[2;29H\u001b[?25h\u001b[?25l\u001b[m\u001b[2;26H> \u001b[93mWrite-Output \u001b[36m\"WORKBENCH_ce8c78c9-0578-4932-865d-f82d9b3ebada\"\u001b[4;1H\u001b[?25h\u001b[mWORKBENCH_ce8c78c9-0578-4932-865d-f82d9b3ebada\r\nPS C:\\Users\\Administrator\\AppData\\Local\\Temp\\zc-panel-TR7jGi\\chats\\ec15a668-ce1d-40da-abf2-56c54823ebd8\\workspace> ",
-    "8e809302-1425-4df3-903c-aa0b317ccd53": "\u001b[?9001h\u001b[?1004h\u001b[?25l\u001b[2J\u001b[m\u001b[H\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\u001b[H\u001b]0;C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe\u0007\u001b[?25hPS C:\\Users\\Administrator\\AppData\\Local\\Temp\\zc-panel-TR7jGi\\chats\\ec15a668-ce1d-40da-abf2-56c54823ebd8\\workspace> \u001b[?25l\u001b[91m\u001b[2;26H> \u001b[93mWrite-Output \u001b[36m\"WORKBENCH_f3dc0641-80c7-48f2-a75c-e9a30        \u001b[m\u001b[2;26H> \u001b[93mWrite-Output \u001b[36m\"WORKBENCH_f3dc0641-80c7-48f2-a75c-e9a3095598a2\"\u001b[4;1H\u001b[?25h"
+    "1a5ed49d-3a1f-42db-b252-c48377a3a416": "\u001b[?9001h\u001b[?1004h\u001b[?25l\u001b[2J\u001b[m\u001b[H\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\u001b[H\u001b]0;C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe\u0007\u001b[?25hPS C:\\Users\\Administrator\\AppData\\Local\\Temp\\zc-panel-0mKrpO\\chats\\eed70822-169b-4dcb-a240-bf6ad1714877\\workspace> \u001b[?25l\u001b[91m\u001b[2;26H> \u001b[93mWrite-Output \u001b[36m\"WORKBENCH_114b2bd7-015b-403c-b450-45f408d97    \u001b[2;85H\u001b[?25h\u001b[?25l\u001b[m\u001b[2;26H> \u001b[93mWrite-Output \u001b[36m\"WORKBENCH_114b2bd7-015b-403c-b450-45f408d97aa4\"\u001b[4;1H\u001b[?25h\u001b[mWORKBENCH_114b2bd7-015b-403c-b450-45f408d97aa4\r\nPS C:\\Users\\Administrator\\AppData\\Local\\Temp\\zc-panel-0mKrpO\\chats\\eed70822-169b-4dcb-a240-bf6ad1714877\\workspace> ",
+    "973a1a4e-5547-450c-a495-25aabc5edecc": "\u001b[?9001h\u001b[?1004h\u001b[?25l\u001b[2J\u001b[m\u001b[H\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\u001b[H\u001b]0;C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe\u0007\u001b[?25hPS C:\\Users\\Administrator\\AppData\\Local\\Temp\\zc-panel-0mKrpO\\chats\\eed70822-169b-4dcb-a240-bf6ad1714877\\workspace> \u001b[?25l\u001b[91m\u001b[2;26H> \u001b[93mWrite-Output \u001b[36m\"WORKBENCH_b635695a-18e6-4f09-af55-e83d900734   \u001b[m\u001b[2;26H> \u001b[93mWrite-Output \u001b[36m\"WORKBENCH_b635695a-18e6-4f09-af55-e83d90073452\"\u001b[4;1H\u001b[?25h\u001b[mWORKBENCH_b635695a-18e6-4f09-af55-e83d90073452"
   },
   "snapshotSelection": {
     "status": "selected",
     "selection": {
-      "snapshotId": "31f2cab5-8773-4c8c-b8ee-ed97ccce931f",
+      "snapshotId": "7493b07c-2aa0-4bfb-8b9c-f71ec43f40e8",
       "label": "已选附件",
-      "createdAt": "2026-10-14T14:23:46.513Z",
+      "createdAt": "2026-10-14T14:49:48.266Z",
       "files": [
         {
-          "path": "file-1ab662e8-1e26-4b2c-9f0d-85780fc4143f/snapshot.ts",
+          "path": "file-bae7e39b-dbe2-46df-8abe-e6d2d09e6941/snapshot.ts",
           "bytes": 22,
           "lines": 2
         }
@@ -223,8 +228,8 @@
   "artifactAfter": {
     "out/main/index.js": "3854d2d5f7ac5b3e875dd9a20f925f86a082beb73c4f6dc65a10c5b9fd14136d",
     "out/preload/index.js": "2914838914a5208175b197f224e0034b01c82536ab7b552e68aaf94017b539e7",
-    "out/renderer/index.html": "094128a82f5ae27a0f78bd76647b9e23027fb46f427ea507cc800a14137797c9",
-    "dist/win-unpacked/zonecodex.exe": "914f5425c8dfda8e76dfb47b5ca91825b784403309eebe50176bc9d28e94482d",
-    "dist/win-unpacked/resources/app.asar": "445c518ae3d81961da4131672b8b0309c605f899457e3e4a96f8d77422060141"
+    "out/renderer/index.html": "8d70836a92cb070442d4a331bd6fb736a67855baa188fca2f131705d99816d20",
+    "dist/win-unpacked/zonecodex.exe": "6c29d3671a8fb5abd4aa752779b539fa496d583df043d8d5fe1a670f36571345",
+    "dist/win-unpacked/resources/app.asar": "ed260289c49f3ca02379ea46745135a41d76cf8fbbc62d49f9fc216e6aaf1e5c"
   }
 }

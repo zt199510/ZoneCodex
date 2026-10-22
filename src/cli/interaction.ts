@@ -133,6 +133,10 @@ export class TerminalInteraction {
         this.output.diagnostic(
           `程序：${request.program}\n参数：${JSON.stringify(request.args)}\n原因：${request.reason ?? '本次精确命令需要批准'}`
         )
+      } else if (request.kind === 'mcp') {
+        this.output.diagnostic(
+          `Server：${request.serverName}；工具：${request.toolName}\n参数：${request.argumentsText.slice(0, 4000)}`
+        )
       } else {
         const after = request.kind === 'create' ? request.content : request.after
         const digest = (text: string): string => createHash('sha256').update(text).digest('hex')

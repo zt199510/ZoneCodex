@@ -1,3 +1,5 @@
+import { createModelSession, assertModelInput } from '../model/model-session'
+import { createApprovalReviewer } from '../execution/approval-reviewer'
 import { performance } from 'node:perf_hooks'
 import type { WebContents } from 'electron'
 import type { AgentResult } from '../../shared/agent'
@@ -58,6 +60,9 @@ import { beginSelectedGitTurn } from '../git/git-turn-host'
 import { freezePreparedSkill, rememberAcceptedSkill, releaseSkill } from '../skills/skill-service'
 import { readSkillMessage } from './skill-message'
 import type { SkillSnapshot, SkillAcceptedEvent } from '../../shared/skills'
+import type { McpToolDescriptor } from '../../shared/mcp'
+import { connectEnabledMcpServers, callMcpTool, assertMcpToolCurrent, captureMcpTaskTools, assertMcpTaskResume } from '../mcp/mcp-manager'
+import { requestExecutionApproval } from '../execution/execution-approval'
 
 type Job = { id: string; controller: AbortController; snapshotId?: string; imageIds: Set<string> }
 const jobs = new Map<number, Job>()
@@ -151,6 +156,8 @@ export async function runAgentRequest(
   sender.once('render-process-gone', cancel)
   sender.once('destroyed', cancel)
   try {
+    const modelSession = createModelSession()
+    assertModelInput(modelSession, Boolean(imageReferences.length || checkedContext.imageHistory?.length), Boolean(checkpointTaskId))
     if (
       getImageTurnNoticeCount(prompt) !== (imageReferences.length || null) ||
       imageReferences.length + (checkedContext.imageHistory?.length ?? 0) > maxRequestImages ||
@@ -272,6 +279,7 @@ export async function runAgentRequest(
       : parseToolHistory(history, checkedScope, checkedContext.imageHistory, mode)
     const executeCommandProposal = createCommandProposalExecutor()
     if (!checkedHistory) return { status: 'error', error: '工具历史参数无效', trace }
+    if (resumed) assertMcpTaskResume(windowId, resumed.checkpoint.taskId, checkedHistory)
     // Fresh selections read current source bytes once; retries/resume use only
     // the original bounded snapshot. Guidance never changes the tool scope.
     let skill: SkillSnapshot | null = resumed?.checkpoint.skill ?? null
@@ -400,7 +408,9 @@ export async function runAgentRequest(
         savedSummary = summary
       }
       const sourceFrame = sender.mainFrame
+      let frozenMcpTools: readonly McpToolDescriptor[] = []
       const assertWorkspaceAccess = (): boolean => {
+        for (const tool of frozenMcpTools) assertMcpToolCurrent(windowId, tool)
         for (const captured of capturedImages) captured.assertCurrent()
         for (const image of historyImages) image.captured.assertCurrent()
         return (
@@ -449,10 +459,14 @@ export async function runAgentRequest(
           }
         }
       }
-      const commandBackend = mode === 'execute' ? await inspectWindowsCommandBackend() : null
+      const commandBackend = mode === 'execute' && modelSession.capabilities.tools ? await inspectWindowsCommandBackend() : null
       controller.signal.throwIfAborted()
       if (!assertWorkspaceAccess()) throw new AgentError('运行上下文已失效，请重新发送')
+      const mcpTools: McpToolDescriptor[] = mode === 'execute' && modelSession.capabilities.tools ? await connectEnabledMcpServers(windowId) : []
+      frozenMcpTools = mcpTools
+      captureMcpTaskTools(windowId, checkpointId, mcpTools)
       const runtime = createAgentRuntime({
+        session: modelSession,
         capabilities: {
           mode,
           snapshot: projectSnapshot,
@@ -463,6 +477,7 @@ export async function runAgentRequest(
           imagePresent: capturedImages.length > 0 || historyImages.length > 0,
           resuming: Boolean(resumed),
           skill
+          , mcpTools
         },
         imageCount: capturedImages.length + historyImages.length,
         imageBytes
@@ -540,7 +555,7 @@ export async function runAgentRequest(
               }
             : undefined,
           startedAt,
-          transportLabel: '真实模型 SSE',
+          transportLabel: modelSession.label,
           createTools: (observer) => {
             const authorizationOptions: Parameters<typeof createWorkspaceAuthorization>[0] = {
               windowId,
@@ -548,6 +563,7 @@ export async function runAgentRequest(
               conversationId: checkedContext.conversationId,
               userRequest: stripImageTurnNotice(prompt),
               execution,
+              reviewApproval: createApprovalReviewer(modelSession),
               assertCurrent: assertWorkspaceAccess,
               beginApproval: () => {
                 if (!updateTask(windowId, lifecycleId, 'waiting_approval')) {
@@ -573,6 +589,28 @@ export async function runAgentRequest(
                 authorizeCommand: createWorkspaceCommandAuthorization(authorizationOptions),
                 projectSnapshot,
                 executeCommandProposal,
+                mcpTools,
+                validateMcpTool: (tool) => assertMcpToolCurrent(windowId, tool),
+                callMcpTool: (tool, args, signal) => callMcpTool(windowId, tool, args, signal),
+                approveMcpTool: async (tool, argumentsText, signal) => {
+                  if (!assertWorkspaceAccess()) return false
+                  if (execution.info.mode === 'full-access') return true
+                  if (!updateTask(windowId, lifecycleId, 'waiting_approval')) return false
+                  try {
+                    return await requestExecutionApproval(windowId, {
+                      requestId: id,
+                      conversationId: checkedContext.conversationId,
+                      cwd: execution.info.cwd,
+                      kind: 'mcp',
+                      serverId: tool.serverId,
+                      serverName: tool.description.split(':', 1)[0] || tool.serverId,
+                      toolName: tool.name,
+                      argumentsText
+                    }, signal)
+                  } finally {
+                    if (!controller.signal.aborted) updateTask(windowId, lifecycleId, 'running')
+                  }
+                },
                 requestUserInput: async (input, signal, callId) => {
                   signal.throwIfAborted()
                   if (mode !== 'plan' || !assertWorkspaceAccess())

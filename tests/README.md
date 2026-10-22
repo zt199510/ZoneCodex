@@ -1,3 +1,11 @@
+## 第 64 课（2026-10-16）
+
+- `npm run test:lesson64:list`：查看真实与合成边界。
+- `npm run test:lesson64:offline`：编译当前产品模块，真实 CLI / stdio 子进程；合成 SSE 和测试专用 Provider，无真实模型请求，不自动打包。
+- `npm run test:lesson64:desktop`：隔离实际开发版和当前 Windows 目录包，真实鼠标键盘操作、生产离线 Provider、MCP 设置及子进程清理。先显式构建目录包，制品身份必须一致。
+
+脚本 Provider 只在测试进程内部注入，不随产品发布。证据和截图保存在忽略的 `.ui-check/test-runs/lesson64/`，不加入 Git。默认 `npm test` 保持第 58 课；旧测试替身已接到固定 Session / Responses 传输边界，原权限断言保留。详情见 [本课验收记录](../docs/lesson64-acceptance-2026-10-16.md)。
+
 ## 统一工作面板验证
 
 - `npm run test:workbench:core`：状态模型、真实 UTF-8 文件保存／外部冲突／边界检查，以及模拟 Electron 的真实磁盘 IPC、窗口隔离、草稿存储与删除清理；无需启动界面。

@@ -1,3 +1,4 @@
+import { getModelStatus } from '../model/model-session'
 import path from 'node:path'
 import { createHash } from 'node:crypto'
 import type { GitActionRequest, GitActionData, GitMetadata } from '../../shared/git-workbench'
@@ -189,19 +190,9 @@ export function createGitWorkbenchRemote(
           ? '没有 GitHub HTTPS 远程地址'
           : 'PR 需要选择仓库根目录'
     )
-    let modelConfigured = false
-    try {
-      const endpoint = new URL(process.env.MODEL_ENDPOINT ?? '')
-      modelConfigured =
-        endpoint.protocol === 'https:' &&
-        !endpoint.username &&
-        !endpoint.password &&
-        !!process.env.MODEL_NAME &&
-        !!process.env.MODEL_API_KEY
-    } catch {
-      /* Availability only; do not expose credentials. */
-    }
-    const modelReason = '请配置模型地址、名称和密钥后重启'
+    const modelStatus = getModelStatus()
+    const modelConfigured = modelStatus.state === 'ready'
+    const modelReason = modelStatus.state === 'offline' ? '离线模式不支持生成 Git 文案，请手工填写' : modelStatus.label
     capability('generate', modelConfigured, modelReason)
     capability('generate-commit', modelConfigured, modelReason)
     capability('generate-pr', modelConfigured, modelReason)

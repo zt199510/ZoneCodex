@@ -566,6 +566,11 @@ try {
         )
       )
       await screenshot('01-split-tools')
+      const topControls = await evaluate(
+        '(()=>{const a=document.querySelector(".panel-launcher"),b=document.querySelector(".thread-summary-toggle");if(!a||!b||!a.getClientRects().length||!b.getClientRects().length)return null;const x=a.getBoundingClientRect(),y=b.getBoundingClientRect();return{x:x.toJSON(),y:y.toJSON(),overlap:x.left<y.right&&x.right>y.left&&x.top<y.bottom&&x.bottom>y.top}})()'
+      )
+      if (topControls) assert.equal(topControls.overlap, false)
+      check('Workbench launcher and chat summary controls have separate hit areas', { topControls })
       await click('[aria-label="完整视图"]')
       assert(
         await evaluate(
@@ -579,6 +584,31 @@ try {
           'document.querySelector("#chat-input")===window.__originalChatInput&&document.querySelector("#chat-input").value'
         ),
         '聊天草稿保持不变'
+      )
+      await clickText('.conversation-item', alternateTitle)
+      await until(
+        () =>
+          evaluate(
+            'Boolean(document.querySelector(".panel-launcher")?.getClientRects().length&&document.querySelector(".thread-summary-toggle")?.getClientRects().length)'
+          ),
+        'aligned chat toolbar actions'
+      )
+      const alignedTopControls = await evaluate(
+        '(()=>{const a=document.querySelector(".panel-launcher"),b=document.querySelector(".thread-summary-toggle");if(!a||!b)throw Error("Missing aligned chat toolbar actions");const x=a.getBoundingClientRect(),y=b.getBoundingClientRect();return{x:x.toJSON(),y:y.toJSON(),widthEqual:Math.abs(x.width-y.width)<0.1,heightEqual:Math.abs(x.height-y.height)<0.1,topAligned:Math.abs(x.top-y.top)<0.1,gap:Math.round((y.left-x.right)*100)/100,rightInset:Math.round((document.querySelector(".thread-toolbar").getBoundingClientRect().right-y.right)*100)/100}})()'
+      )
+      assert.equal(alignedTopControls.widthEqual, true)
+      assert.equal(alignedTopControls.heightEqual, true)
+      assert.equal(alignedTopControls.topAligned, true)
+      assert.equal(alignedTopControls.gap, 8)
+      assert.equal(alignedTopControls.rightInset, 8)
+      check('Summary and new-tab controls share the Codex toolbar geometry', {
+        topControls: alignedTopControls
+      })
+      await screenshot('04-aligned-toolbar')
+      await clickText('.conversation-item', primaryTitle)
+      await until(
+        () => evaluate('Boolean(document.querySelector(".panel-tab:not([data-tab-id=chat])"))'),
+        'primary workbench tab after toolbar check'
       )
       await click('.panel-tab:not([data-tab-id="chat"])')
       await click('[aria-label="左右分屏"]')
@@ -952,7 +982,7 @@ try {
               'window.api.writeTerminal(' +
                 JSON.stringify(ids[i]) +
                 ',' +
-                JSON.stringify('Write-Output \"' + markers[i] + '\"\r') +
+                JSON.stringify('Write-Output "' + markers[i] + '"\r') +
                 ')'
             )
           ).ok

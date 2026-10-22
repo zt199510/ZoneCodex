@@ -3,7 +3,7 @@ import type { WorkspaceApprovalRequest, WorkspaceApprove } from '../tools/worksp
 import type { ExecutionContext } from './execution-context-policy'
 import { getExecutionPermissionState } from './permission-state'
 import { requestExecutionApproval } from './execution-approval'
-import { reviewExecutionApproval } from './approval-reviewer'
+import { reviewExecutionApproval, type ApprovalReviewer } from './approval-reviewer'
 import {
   createHostWorkspaceAuthorization,
   createHostWorkspaceCommandAuthorization,
@@ -30,6 +30,7 @@ type WorkspaceAuthorizationOptions = {
   beginApproval: () => boolean
   finishApproval: () => void
   onApproved: (request: WorkspaceApprovalRequest) => void
+  reviewApproval?: ApprovalReviewer
 }
 
 function desktopOptions(options: WorkspaceAuthorizationOptions): HostWorkspaceAuthorizationOptions {
@@ -43,7 +44,7 @@ function desktopOptions(options: WorkspaceAuthorizationOptions): HostWorkspaceAu
       conversationId: options.conversationId
     },
     requestApproval: (input, signal) => requestExecutionApproval(windowId, input, signal),
-    reviewApproval: reviewExecutionApproval
+    reviewApproval: options.reviewApproval ?? reviewExecutionApproval
   }
 }
 

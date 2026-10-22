@@ -543,6 +543,7 @@ export function isToolAllowed(
   mode: AgentMode = 'execute'
 ): name is string {
   if (!parseAgentMode(mode)) return false
+  if (mode === 'execute' && isMcpToolName(name)) return true
   if (name === 'request_user_input') return mode === 'plan'
   if (
     mode === 'plan' &&
@@ -568,4 +569,8 @@ export function isToolAllowed(
         name === 'propose_file_change' ||
         name === 'propose_command'))
   )
+}
+
+export function isMcpToolName(value: unknown): value is string {
+  return typeof value === 'string' && /^mcp__[A-Za-z0-9_-]{1,32}__[A-Za-z0-9_.-]{1,128}$/.test(value)
 }

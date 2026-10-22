@@ -35,26 +35,35 @@
 .layout-full .panel-chat {
   min-width: 0;
 }
-.panel-launcher {
-  position: absolute;
-  top: 10px;
-  right: 12px;
-  z-index: 5;
+.workbench-workspace {
+  --toolbar-button-size: 28px;
+  --toolbar-action-gap: 8px;
+  --toolbar-inline-padding: 8px;
+  --toolbar-button-radius: 8px;
 }
-.panel-launcher,
+
+.panel-tabs-actions {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: var(--toolbar-action-gap);
+}
+
+.thread-toolbar-button,
 .panel-icon-button {
   display: grid;
   place-items: center;
   flex-shrink: 0;
-  width: 28px;
-  height: 28px;
+  width: var(--toolbar-button-size);
+  height: var(--toolbar-button-size);
   padding: 0;
   border: 0;
-  border-radius: 8px;
+  border-radius: var(--toolbar-button-radius);
   color: #1a1c1fa6;
   background: transparent;
 }
-.panel-launcher:hover,
+
+.thread-toolbar-button:hover,
 .panel-icon-button:hover {
   background: #1a1c1f0d;
   color: #1a1c1f;
@@ -93,10 +102,10 @@
 .panel-tabs-header {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: var(--toolbar-action-gap);
   height: 46px;
   flex-shrink: 0;
-  padding: 0 6px 0 8px;
+  padding: 0 var(--toolbar-inline-padding);
   border-bottom: 0.5px solid #1a1c1f14;
 }
 .panel-tabs {

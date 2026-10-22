@@ -13,6 +13,8 @@ import { WorkspaceReadEvidence } from './workspace-read-evidence'
 import type { ProjectSnapshot } from '../tools/project-snapshot'
 import { projectTools } from '../tools/project-file-tools'
 import { parseAgentMode, type AgentMode } from '../../shared/agent'
+import type { McpToolDescriptor } from '../../shared/mcp'
+import { validateMcpArguments } from '../../shared/mcp'
 import {
   parseAgentUserInputArguments,
   type AgentUserInputArguments
@@ -35,6 +37,10 @@ type AgentToolsOptions = {
     signal: AbortSignal,
     callId: string
   ) => Promise<string>
+  mcpTools?: readonly McpToolDescriptor[]
+  callMcpTool?: (tool: McpToolDescriptor, args: unknown, signal: AbortSignal) => Promise<string>
+  validateMcpTool?: (tool: McpToolDescriptor) => void
+  approveMcpTool?: (tool: McpToolDescriptor, argumentsText: string, signal: AbortSignal) => Promise<boolean>
 }
 
 /** Visible-line evidence belongs to this request only and never grants file access. */
@@ -51,8 +57,12 @@ export function createAgentToolExecutor(options: AgentToolsOptions): ExecuteTool
     projectSnapshot,
     projectExecutor,
     executeCommandProposal,
-    requestUserInput
+    requestUserInput,
+    mcpTools = [],
+    callMcpTool,
+    approveMcpTool
   } = options
+  const fixedMcpTools = structuredClone([...mcpTools])
   if (!parseAgentMode(mode)) throw new AgentError('工作方式参数无效')
   const readWorkspace = createWorkspaceReadExecutor(execution.info.cwd, assertCurrent, {
     isPathAllowed: () => assertCurrent()
@@ -69,6 +79,22 @@ export function createAgentToolExecutor(options: AgentToolsOptions): ExecuteTool
       : null
   return async (name, args, signal, callId): Promise<string> => {
     signal.throwIfAborted()
+    const mcpTool = fixedMcpTools.find((tool) => tool.qualifiedName === name)
+    if (mcpTool) {
+      if (mode !== 'execute' || !assertCurrent()) throw new AgentError('当前请求不允许调用 MCP 工具')
+      if (!callMcpTool) throw new AgentError('当前请求未连接 MCP 工具')
+      let parsed: unknown
+      try { parsed = JSON.parse(args) } catch { throw new AgentError('MCP 工具参数不是有效 JSON') }
+      if (!validateMcpArguments(parsed, mcpTool.inputSchema)) throw new AgentError('MCP 工具参数不符合 schema')
+      options.validateMcpTool?.(mcpTool)
+      if (approveMcpTool ? !(await approveMcpTool(mcpTool, args, signal)) : execution.info.mode !== 'full-access')
+        return JSON.stringify({ ok: false, error: 'MCP 工具调用未获批准' })
+      signal.throwIfAborted()
+      if (!assertCurrent()) throw new AgentError('运行上下文已失效')
+      options.validateMcpTool?.(mcpTool)
+      return callMcpTool(mcpTool, parsed, signal)
+    }
+    if (name.startsWith('mcp__')) throw new AgentError('MCP 工具不在当前请求冻结的白名单中')
     if (name === 'request_user_input') {
       if (mode !== 'plan') throw new AgentError('只有计划模式可以向用户提问')
       if (!requestUserInput) throw new AgentError('当前请求不支持向用户提问')

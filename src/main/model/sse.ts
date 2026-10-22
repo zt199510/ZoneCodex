@@ -46,6 +46,30 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
+function streamFailureDetails(event: Record<string, unknown>): string {
+  const response = isRecord(event.response) ? event.response : null
+  const error = response && isRecord(response.error)
+    ? response.error : isRecord(event.error) ? event.error : event
+  const incomplete = response && isRecord(response.incomplete_details)
+    ? response.incomplete_details : null
+  // Only known protocol codes are public. Server messages may echo private input,
+  // addresses or credentials and must never be copied into chat or checkpoints.
+  const reasons: Record<string, string> = {
+    insufficient_quota: '服务额度不足，请检查服务端账户额度',
+    rate_limit_exceeded: '服务请求限流，请稍后重试',
+    invalid_api_key: '服务端拒绝密钥，请检查模型配置后重启',
+    model_not_found: '模型不存在或当前账户无权使用',
+    context_length_exceeded: '请求超过服务端上下文限制',
+    max_output_tokens: '达到服务端输出长度限制',
+    content_filter: '服务端内容过滤中止了回复',
+    invalid_request_error: '服务端拒绝了请求格式或参数',
+    server_error: '模型服务内部错误，请稍后重试'
+  }
+  const code = incomplete?.reason ?? error.code ?? error.type
+  const reason = typeof code === 'string' && Object.hasOwn(reasons, code) ? reasons[code] : ''
+  return `模型未完整完成回复，请重试。服务事件：${event.type}${reason ? `；${reason}` : '；服务未提供可公开的具体原因'}`
+}
+
 export type ResponseStreamEvent = Record<string, unknown>
 
 // 读取 Responses SSE，并在 response.completed 时返回服务端的完整响应对象。
@@ -110,7 +134,7 @@ export async function readResponseStreamResult(
       parsed.type === 'response.incomplete' ||
       parsed.type === 'error'
     ) {
-      throw new StreamError('模型未完整完成回复，请重试。')
+      throw new StreamError(streamFailureDetails(parsed))
     } else if (
       parsed.type === 'response.refusal.delta' ||
       parsed.type === 'response.refusal.done'

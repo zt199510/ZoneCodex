@@ -40,7 +40,8 @@ export const HELP = `ZoneCodex Agent — 一次明确任务
 resume 沿用已校验的任务意图；可用 cwd/workspace 复核原目录，权限缺省仍为 default。
 不会恢复旧批准、读取凭据或命令票据；无 checkpoint/resume 时保持空历史单次任务。
 审批和计划问答只使用未被任务占用的交互终端；缺少交互时以 3 结束。
-模型需预先配置 MODEL_ENDPOINT、MODEL_NAME、MODEL_API_KEY；密钥不放命令参数。
+未配置模型时自动离线，仅返回离线说明，不执行任务。MODEL_PROVIDER 可设 offline 或 responses。
+远程模型配置 MODEL_ENDPOINT、MODEL_NAME、MODEL_API_KEY；密钥不放命令参数。
 text 的 stdout 仅为最终回答；公开过程和交互提示在 stderr。
 jsonl 的 stdout 为公开事件和一次安全结果；不包含原协议历史。
 退出码：0 完成，1 任务/宿主/输出失败，2 输入/配置错误，3 缺少交互或仍待批准，130 取消。

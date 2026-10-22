@@ -19,6 +19,7 @@ import type { OpenFileView } from './features/files/file-view-origin'
 import { useConversation } from './features/conversation/useConversation'
 import { SettingsPage } from './features/settings/SettingsPage'
 import { SkillsPage } from './features/skills/SkillsPage'
+import { Icon } from './components/ui/Icon'
 import type { SkillDescriptor } from '../../shared/skills'
 import { WorkbenchWorkspace, type WorkbenchHandle } from './features/workbench/WorkbenchWorkspace'
 
@@ -387,14 +388,38 @@ function App(): React.JSX.Element {
         onRestore={(id) => showChatAfter(() => conversation.restore(id))}
       />
       <div className="workspace-shell" hidden={auxiliaryPageOpen} inert={auxiliaryPageOpen}>
-        <WorkbenchWorkspace ref={workbench} conversation={conversation} sources={sources} active={!auxiliaryPageOpen}>
-          <ChatWorkspace
-            conversation={conversation}
-            onOpenFile={onOpenFile}
-            summary={threadSummary}
-            sources={sources}
-            onShowAllSources={onShowAllSources}
-          />
+        <WorkbenchWorkspace
+          ref={workbench}
+          conversation={conversation}
+          sources={sources}
+          active={!auxiliaryPageOpen}
+        >
+          {({ newTabVisible, openNewTab, openNewTabMenu }) => (
+            <ChatWorkspace
+              conversation={conversation}
+              onOpenFile={onOpenFile}
+              summary={threadSummary}
+              sources={sources}
+              onShowAllSources={onShowAllSources}
+              toolbarActions={
+                newTabVisible ? (
+                  <button
+                    type="button"
+                    className="thread-toolbar-button panel-launcher"
+                    aria-label="新建标签页"
+                    title="新建标签页"
+                    onClick={openNewTab}
+                    onContextMenu={(event) => {
+                      event.preventDefault()
+                      openNewTabMenu()
+                    }}
+                  >
+                    <Icon name="plus" size={16} />
+                  </button>
+                ) : undefined
+              }
+            />
+          )}
         </WorkbenchWorkspace>
       </div>
       <SettingsPage

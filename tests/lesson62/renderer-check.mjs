@@ -1198,7 +1198,15 @@ async function appFixture() {
     './features/skills/SkillsPage': { SkillsPage: markers.SkillsPage }
   })
   const render = () => harness.render(() => module.default())
-  const get = (name) => nodes(render()).find((node) => node.type === markers[name])
+  const get = (name) => {
+    const tree = nodes(render())
+    if (name === 'ChatWorkspace') {
+      const panel = tree.find((node) => node.type === markers.WorkbenchWorkspace)
+      const child = Array.isArray(panel?.props.children) ? panel.props.children[0] : panel?.props.children
+      if (typeof child === 'function') return child({ newTabVisible: false, openNewTab() {}, openNewTabMenu() {} })
+    }
+    return tree.find((node) => node.type === markers[name])
+  }
   const shell = () => nodes(render()).find((node) => node.props?.className === 'workspace-shell')
   const flushFrames = () => {
     while (frames.length) frames.shift()()

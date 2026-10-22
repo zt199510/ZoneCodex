@@ -21,6 +21,7 @@ type AgentCapabilities = {
   imagePresent?: boolean
   resuming?: boolean
   skill?: SkillSnapshot | null
+  mcpTools?: readonly unknown[]
 }
 
 const commonRules =
@@ -73,7 +74,8 @@ export function buildAgentRequest({
   commandSandboxAvailable = false,
   imagePresent = false,
   resuming = false,
-  skill = null
+  skill = null,
+  mcpTools = []
 }: AgentCapabilities): { tools: readonly unknown[]; instructions: string } {
   if (!parseAgentMode(mode)) throw new Error('工作方式参数无效')
   const tools = [
@@ -83,6 +85,13 @@ export function buildAgentRequest({
     ...(mode === 'execute' && (execution || workspaceId) ? workspaceActionTools : []),
     ...(snapshot ? projectTools : []),
     ...(mode === 'execute' && snapshot ? [changeProposalTool, commandProposalTool] : [])
+    , ...(mode === 'execute' ? mcpTools.map((tool) => ({
+      type: 'function',
+      name: (tool as { qualifiedName: string }).qualifiedName,
+      description: (tool as { description: string }).description,
+      strict: false,
+      parameters: (tool as { inputSchema: unknown }).inputSchema
+    })) : [])
   ]
   const sections = [
     commonRules,

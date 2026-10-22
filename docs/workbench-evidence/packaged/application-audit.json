@@ -3,56 +3,56 @@
   "ipc": [
     {
       "channel": "window:state",
-      "at": 1791987830173
+      "at": 1791989391731
     },
     {
       "channel": "conversation:load",
-      "at": 1791987830174
+      "at": 1791989391732
     },
     {
       "channel": "execution:permissions-get",
-      "at": 1791987830174
+      "at": 1791989391732
     },
     {
       "channel": "agent:user-input-get",
-      "at": 1791987830174
+      "at": 1791989391733
     },
     {
       "channel": "execution:approval-get",
-      "at": 1791987830178
+      "at": 1791989391738
     },
     {
       "channel": "panel:load",
-      "at": 1791987830206
+      "at": 1791989391767
     },
     {
       "channel": "task:list",
-      "at": 1791987830207
+      "at": 1791989391767
     },
     {
       "channel": "agent:resume-info",
-      "at": 1791987830207
+      "at": 1791989391768
     },
     {
       "channel": "panel:read",
-      "at": 1791987830314
+      "at": 1791989391881
     }
   ],
-  "pid": 42912,
+  "pid": 40204,
   "external": [],
   "pickerCancellations": [],
   "popups": [],
   "loading": [
     {
       "kind": "load",
-      "at": 1791987829712
+      "at": 1791989391389
     },
     {
       "kind": "navigation",
       "url": "file:///D:/AiTools/ZoneCodex/ZoneCodex/dist/win-unpacked/resources/app.asar/out/renderer/index.html",
       "inPlace": false,
       "mainFrame": true,
-      "at": 1791987829712
+      "at": 1791989391389
     }
   ]
 }

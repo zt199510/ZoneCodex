@@ -7,6 +7,10 @@ import { build } from 'esbuild'
 import { root, hash, createEvidence, checksFor } from './runtime.mjs'
 
 assert.equal(process.argv.length, 2)
+process.env.MODEL_PROVIDER = 'responses'
+process.env.MODEL_ENDPOINT = 'https://fixture.invalid/responses'
+process.env.MODEL_NAME = 'synthetic'
+process.env.MODEL_API_KEY = 'SYNTHETIC_ONLY'
 const evidence = await createEvidence('authorization')
 const handlers = new Map(),
   windows = new Map(),
@@ -44,7 +48,7 @@ globalThis.__lesson60Authorization = {
     fixture.processStarts++
     throw new Error('No process launch allowed in synthetic authorization suite')
   },
-  createLiveResponse:
+  createResponsesSender:
     () =>
     async (...args) => {
       fixture.modelCalls++
@@ -60,7 +64,7 @@ const stubs = {
   'windows-command-backend':
     'inspectCommandHost, inspectWindowsCommandBackend, verifyCommandHost, verifyWindowsCommandBackend',
   'command-runner': 'startCommandProcess',
-  'response-client': 'createLiveResponse'
+  'responses-provider': 'createResponsesSender'
 }
 const files = [
   'src/main/execution/execution-ipc.ts',

@@ -7,7 +7,7 @@ import {
 } from '../../shared/image-input'
 import type { CapturedImage } from '../project/image-access'
 import { AgentError } from '../errors'
-import type { SendResponse } from './response-client'
+import type { SendResponse } from './model-contract'
 
 export type CapturedImageInput = { index: number; prompt: string; captured: CapturedImage }
 

@@ -9,7 +9,7 @@ import { parseTaskCheckpointSummary, type TaskCheckpoint } from '../../shared/ta
 import { parseAgentContextState, type AgentContextState } from '../../shared/agent-context'
 import type { ToolScope } from '../../shared/project'
 import { AgentError } from '../errors'
-import type { SendResponse } from '../model/response-client'
+import type { SendResponse } from '../model/model-contract'
 
 export const contextLimits = Object.freeze({
   workingCharacters: 128000,

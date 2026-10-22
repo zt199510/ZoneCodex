@@ -297,7 +297,8 @@ export async function runAgentCore(
               publish({ type: 'context', event })
             }
           }
-        : undefined
+        : undefined,
+      dependencies.mcpToolNames
     )
     assertCurrent()
     const needsApproval = completed.items.some(

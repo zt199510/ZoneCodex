@@ -3,56 +3,56 @@
   "ipc": [
     {
       "channel": "window:state",
-      "at": 1791987746301
+      "at": 1791989207874
     },
     {
       "channel": "conversation:load",
-      "at": 1791987746302
+      "at": 1791989207874
     },
     {
       "channel": "execution:permissions-get",
-      "at": 1791987746302
+      "at": 1791989207875
     },
     {
       "channel": "agent:user-input-get",
-      "at": 1791987746302
+      "at": 1791989207875
     },
     {
       "channel": "execution:approval-get",
-      "at": 1791987746306
+      "at": 1791989207879
     },
     {
       "channel": "panel:load",
-      "at": 1791987746338
+      "at": 1791989207906
     },
     {
       "channel": "task:list",
-      "at": 1791987746338
+      "at": 1791989207907
     },
     {
       "channel": "agent:resume-info",
-      "at": 1791987746338
+      "at": 1791989207907
     },
     {
       "channel": "panel:read",
-      "at": 1791987746463
+      "at": 1791989208014
     }
   ],
-  "pid": 40452,
+  "pid": 20828,
   "external": [],
   "pickerCancellations": [],
   "popups": [],
   "loading": [
     {
       "kind": "load",
-      "at": 1791987745932
+      "at": 1791989207566
     },
     {
       "kind": "navigation",
       "url": "file:///D:/AiTools/ZoneCodex/ZoneCodex/out/renderer/index.html",
       "inPlace": false,
       "mainFrame": true,
-      "at": 1791987745932
+      "at": 1791989207566
     }
   ]
 }

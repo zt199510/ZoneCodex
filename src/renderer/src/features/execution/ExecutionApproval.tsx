@@ -25,7 +25,8 @@ function approvalPanelStyle({
 const approvalTitles = {
   create: '允许新建此文件吗？',
   edit: '允许修改此文件吗？',
-  command: '允许运行此命令吗？'
+  command: '允许运行此命令吗？',
+  mcp: '允许调用此 MCP 工具吗？'
 } as const
 
 function formatCommand(program: string, args: string[]): string {
@@ -207,12 +208,19 @@ export function ExecutionApproval({
                 <dd>
                   {pending.kind === 'command'
                     ? (pending.reason ?? '当前权限下，运行此命令需要你的批准。')
+                    : pending.kind === 'mcp'
+                      ? '本地 MCP 工具可能访问文件、网络或启动其他进程。'
                     : '目标文件位于当前允许写入的目录之外，需要你的批准。'}
                 </dd>
                 {pending.kind === 'command' ? (
                   <>
                     <dt>工作目录</dt>
                     <dd>{pending.cwd}</dd>
+                  </>
+                ) : pending.kind === 'mcp' ? (
+                  <>
+                    <dt>Server</dt><dd>{pending.serverName}</dd>
+                    <dt>工具</dt><dd>{pending.toolName}</dd>
                   </>
                 ) : (
                   <>

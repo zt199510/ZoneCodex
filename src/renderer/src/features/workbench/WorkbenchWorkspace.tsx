@@ -39,6 +39,11 @@ export type WorkbenchHandle = {
   openSources: () => void
   openNew: (full?: boolean) => void
 }
+export type WorkbenchToolbarActions = {
+  newTabVisible: boolean
+  openNewTab: () => void
+  openNewTabMenu: () => void
+}
 type Session = {
   state: PanelState
   context: WorkbenchContext
@@ -71,7 +76,7 @@ export const WorkbenchWorkspace = forwardRef<
     conversation: ConversationController
     sources: ThreadSummarySource[]
     active: boolean
-    children: ReactNode
+    children: (actions: WorkbenchToolbarActions) => ReactNode
   }
 >(function WorkbenchWorkspace({ conversation, sources, active, children }, ref) {
   const id = conversation.activeConversationId
@@ -316,6 +321,8 @@ export const WorkbenchWorkspace = forwardRef<
     },
     [update]
   )
+  const openNewTab = useCallback((): void => add('new'), [add])
+  const openNewTabMenu = useCallback((): void => setAddMenu(true), [])
   useImperativeHandle(
     ref,
     () => ({
@@ -634,42 +641,44 @@ export const WorkbenchWorkspace = forwardRef<
         {effectiveLayout === 'full' && tabButton('chat', '聊天', 'chat')}
         {state.tabs.map((tab) => tabButton(tab.id, tab.title, tab.kind))}
       </div>
-      <button
-        type="button"
-        className="panel-icon-button"
-        aria-label="新建标签页"
-        onClick={() => add('new')}
-        onContextMenu={(event) => {
-          event.preventDefault()
-          setAddMenu(true)
-        }}
-      >
-        <Icon name="plus" size={16} />
-      </button>
-      <button
-        type="button"
-        className="panel-icon-button"
-        aria-label={effectiveLayout === 'split' ? '完整视图' : '左右分屏'}
-        onClick={() =>
-          id &&
-          update(id, (previous) => ({
-            ...previous,
-            layout: effectiveLayout === 'split' ? 'full' : 'split'
-          }))
-        }
-      >
-        <Icon name="panel" size={16} />
-      </button>
-      <button
-        type="button"
-        className="panel-icon-button"
-        aria-label="隐藏工作面板"
-        onClick={() =>
-          id && update(id, (previous) => ({ ...previous, layout: 'chat', selected: 'chat' }))
-        }
-      >
-        <Icon name="close" size={16} />
-      </button>
+      <div className="panel-tabs-actions">
+        <button
+          type="button"
+          className="panel-icon-button"
+          aria-label="新建标签页"
+          onClick={() => add('new')}
+          onContextMenu={(event) => {
+            event.preventDefault()
+            setAddMenu(true)
+          }}
+        >
+          <Icon name="plus" size={16} />
+        </button>
+        <button
+          type="button"
+          className="panel-icon-button"
+          aria-label={effectiveLayout === 'split' ? '完整视图' : '左右分屏'}
+          onClick={() =>
+            id &&
+            update(id, (previous) => ({
+              ...previous,
+              layout: effectiveLayout === 'split' ? 'full' : 'split'
+            }))
+          }
+        >
+          <Icon name="panel" size={16} />
+        </button>
+        <button
+          type="button"
+          className="panel-icon-button"
+          aria-label="隐藏工作面板"
+          onClick={() =>
+            id && update(id, (previous) => ({ ...previous, layout: 'chat', selected: 'chat' }))
+          }
+        >
+          <Icon name="close" size={16} />
+        </button>
+      </div>
     </header>
   )
   return (
@@ -677,22 +686,11 @@ export const WorkbenchWorkspace = forwardRef<
       {effectiveLayout === 'full' && tabStrip}
       <div className="workbench-body">
         <div id="panel-chat" className="panel-chat" hidden={!chatVisible} inert={!chatVisible}>
-          {effectiveLayout !== 'full' && (
-            <button
-              type="button"
-              className="panel-launcher"
-              aria-label="新建标签页"
-              title="新建标签页"
-              onClick={() => add('new')}
-              onContextMenu={(event) => {
-                event.preventDefault()
-                setAddMenu(true)
-              }}
-            >
-              <Icon name="plus" size={16} />
-            </button>
-          )}
-          {children}
+          {children({
+            newTabVisible: effectiveLayout !== 'full',
+            openNewTab,
+            openNewTabMenu
+          })}
         </div>
         {effectiveLayout === 'split' && (
           <div

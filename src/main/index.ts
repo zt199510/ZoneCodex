@@ -5,6 +5,7 @@ import icon from '../../resources/icon.png?asset'
 import { attachWindowRuntime, registerAppRuntime } from './app-runtime'
 import { openExternalUrl } from './window/external-links'
 import { initializeAppSettings } from './settings/settings-service'
+import { cleanupAllMcp } from './mcp/mcp-manager'
 
 function createWindow(): void {
   // Create the browser window.
@@ -70,6 +71,22 @@ app.whenReady().then(async () => {
     // On macOS it's common to re-create a window in the app when the
     // dock icon is clicked and there are no other windows open.
     if (BrowserWindow.getAllWindows().length === 0) createWindow()
+  })
+})
+
+let mcpQuitCleaning = false
+let mcpQuitComplete = false
+app.on('before-quit', (event) => {
+  if (mcpQuitComplete) return
+  event.preventDefault()
+  if (mcpQuitCleaning) return
+  mcpQuitCleaning = true
+  void cleanupAllMcp().then(() => {
+    mcpQuitComplete = true
+    app.quit()
+  }, () => {
+    mcpQuitCleaning = false
+    console.error('MCP 子进程尚未退出，请重试退出应用')
   })
 })
 

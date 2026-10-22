@@ -1,6 +1,6 @@
 import { performance } from 'node:perf_hooks'
 import { AgentError } from '../errors'
-import type { SendResponse } from '../model/response-client'
+import type { SendResponse } from '../model/model-contract'
 import { executeTimeTool } from '../tools/current-time'
 import { parseProtocolTurn } from '../../shared/agent-history'
 import type { ProtocolItem } from '../../shared/agent-history'
@@ -49,12 +49,14 @@ export async function runToolLoop(
   onMessageEvent?: (event: Omit<AgentMessageEvent, 'requestId'>) => void,
   mode: AgentMode = 'execute',
   onRetry?: (event: Omit<AgentRetryEvent, 'requestId'>) => void,
-  contextOptions?: ContextLoopOptions
+  contextOptions?: ContextLoopOptions,
+  mcpToolNames: readonly string[] = []
 ): Promise<{ answer: string; items: ProtocolItem[] }> {
   if (!parseAgentMode(mode)) throw new AgentError('工作方式参数无效')
   const parsedScope = parseToolScope(scope)
   if (!parsedScope) throw new AgentError('工具范围参数无效')
   const checkedScope: ToolScope = parsedScope
+  const allowedMcpNames = new Set(mcpToolNames)
 
   function record(message: string): void {
     const line = message.slice(0, 500)
@@ -260,6 +262,8 @@ export async function runToolLoop(
     // Leave room in the existing turn capacity for this result and a final answer.
     context.checkRawTurn(2)
     const call = calls[0]
+    if (call.name.startsWith('mcp__') && !allowedMcpNames.has(call.name))
+      throw new AgentError('MCP 工具不在当前请求冻结的白名单中')
     if (seenCalls.has(call.callId)) throw new AgentError('收到重复 call_id，未重复执行')
     // The hidden-tool defense precedes tool events and all executor side effects.
     if (mode === 'plan' && !isToolAllowed(call.name, checkedScope, mode))

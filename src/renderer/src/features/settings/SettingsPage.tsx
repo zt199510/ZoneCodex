@@ -1,5 +1,7 @@
-import { useId, useLayoutEffect, useRef } from 'react'
+import { useEffect, useId, useLayoutEffect, useRef, useState } from 'react'
 import type { TerminalShell } from '../../../../shared/settings'
+import type { McpServerConfig, McpServerStatus } from '../../../../shared/mcp'
+import type { ModelStatus } from '../../../../shared/model'
 import { Icon } from '../../components/ui/Icon'
 import { permissionModeOptions, permissionModeTitles } from '../execution/permissionPresentation'
 import { useSettings } from './useSettings'
@@ -36,6 +38,29 @@ export function SettingsPage({
     onSavingChange
   )
   const disabled = !canChange || loading || saving || !settings
+  const [mcpServers, setMcpServers] = useState<McpServerStatus[]>([])
+  const [modelStatus, setModelStatus] = useState<ModelStatus | null>(null)
+  const [modelError, setModelError] = useState('')
+  const [mcpError, setMcpError] = useState('')
+  const [mcpBusy, setMcpBusy] = useState<string | null>(null)
+  const [mcpDraft, setMcpDraft] = useState({ id: '', name: '', command: '', args: '', cwd: '', enabled: true })
+  useEffect(() => {
+    if (!open) return
+    let active = true
+    void window.api.getModelStatus().then((item) => { if (active) { setModelStatus(item); setModelError('') } })
+      .catch(() => { if (active) setModelError('模型状态读取失败，请重新打开设置') })
+    void window.api.listMcpServers().then((items) => { if (active) setMcpServers(items) }).catch((error) => { if (active) setMcpError(error instanceof Error ? error.message : 'MCP 设置读取失败') })
+    const off = window.api.onMcpStatus((item) => setMcpServers((items) => items.map((current) => current.id === item.id ? item : current)))
+    return () => { active = false; off() }
+  }, [open])
+  const saveMcp = async (): Promise<void> => {
+    const config: McpServerConfig = { id: mcpDraft.id.trim(), name: mcpDraft.name.trim(), transport: 'stdio', command: mcpDraft.command, args: mcpDraft.args.split(/\r?\n/).filter(Boolean), ...(mcpDraft.cwd.trim() ? { cwd: mcpDraft.cwd.trim() } : {}), enabled: mcpDraft.enabled, timeoutMs: 60000 }
+    setMcpError(''); try { await window.api.upsertMcpServer(config); setMcpServers(await window.api.listMcpServers()); setMcpDraft({ id: '', name: '', command: '', args: '', cwd: '', enabled: true }) } catch (error) { setMcpError(error instanceof Error ? error.message : 'MCP 设置保存失败') }
+  }
+  const editMcp = async (id: string): Promise<void> => {
+    const config = (await window.api.listMcpConfigs()).find((item) => item.id === id)
+    if (config) setMcpDraft({ id: config.id, name: config.name, command: config.command, args: config.args.join('\n'), cwd: config.cwd ?? '', enabled: config.enabled })
+  }
 
   useLayoutEffect(() => {
     const element = page.current
@@ -83,6 +108,12 @@ export function SettingsPage({
         {loading && <p className="settings-notice">正在读取设置…</p>}
         {settings && (
           <>
+            <section className="settings-section" aria-labelledby="settings-model-title">
+              <h3 id="settings-model-title">模型</h3>
+              <p role="status">{modelStatus?.label ?? (modelError || '正在读取模型状态…')}</p>
+              <p className="settings-description">模型通过环境配置切换，修改后重启生效。离线模式仍可管理本地 MCP；聊天不进行模型推理或执行任务。</p>
+              {modelStatus?.errorCode && <p className="settings-error" role="alert">{modelStatus.errorCode}</p>}
+            </section>
             <section className="settings-section" aria-labelledby="settings-permissions-title">
               <h3 id="settings-permissions-title">权限</h3>
               <p className="settings-description" id="settings-permissions-description">
@@ -148,6 +179,39 @@ export function SettingsPage({
                 </select>
               </div>
             </section>
+            <section className="settings-section" aria-labelledby="settings-mcp-title">
+              <h3 id="settings-mcp-title">本地 MCP</h3>
+              <p className="settings-description">仅支持本机 stdio Server；不会保存网络地址、环境变量或凭据。</p>
+              {mcpServers.map((server) => (
+                <div className="settings-row" key={server.id}>
+                  <div className="settings-row-copy">
+                    <strong>{server.name}</strong>
+                    <small>{server.id} · {server.state} · {server.tools.length} 个工具{server.error ? ` · ${server.error}` : ''}</small>
+                    {server.lastRefresh && <small>最近刷新：{server.lastRefresh}</small>}
+                    {server.tools.length > 0 && <details><summary>查看工具</summary><ul>{server.tools.map((tool) => <li key={tool.qualifiedName}><strong>{tool.qualifiedName}</strong><small>{tool.description}</small></li>)}</ul></details>}
+                  </div>
+                  <div>
+                    <button type="button" className="quiet-button" disabled={mcpBusy === server.id} onClick={() => void window.api.setMcpServerEnabled(server.id, !server.enabled).then(() => window.api.listMcpServers()).then(setMcpServers).catch((error) => setMcpError(error instanceof Error ? error.message : 'MCP 状态更新失败'))}>{server.enabled ? '禁用' : '启用'}</button>
+                    <button type="button" className="quiet-button" onClick={() => void editMcp(server.id)}>编辑</button>
+                    {server.state === 'connected' ? <button type="button" className="quiet-button" disabled={mcpBusy === server.id} onClick={() => { setMcpBusy(server.id); void window.api.disconnectMcpServer(server.id).then(() => window.api.listMcpServers()).then(setMcpServers).catch((error) => setMcpError(error instanceof Error ? error.message : 'MCP 断开失败')).finally(() => setMcpBusy(null)) }}>断开</button> : <button type="button" className="quiet-button" disabled={!server.enabled || mcpBusy === server.id} onClick={() => { setMcpBusy(server.id); void window.api.connectMcpServer(server.id).then(() => window.api.listMcpServers()).then(setMcpServers).catch((error) => setMcpError(error instanceof Error ? error.message : 'MCP 连接失败')).finally(() => setMcpBusy(null)) }}>连接</button>}
+                    <button type="button" className="quiet-button" disabled={mcpBusy === server.id} onClick={() => { setMcpBusy(server.id); void window.api.refreshMcpServer(server.id).then(() => window.api.listMcpServers()).then(setMcpServers).catch((error) => setMcpError(error instanceof Error ? error.message : 'MCP 刷新失败')).finally(() => setMcpBusy(null)) }}>刷新工具</button>
+                    <button type="button" className="quiet-button" disabled={mcpBusy === server.id} onClick={() => void window.api.removeMcpServer(server.id).then(() => window.api.listMcpServers()).then(setMcpServers).catch((error) => setMcpError(error instanceof Error ? error.message : 'MCP 删除失败'))}>删除</button>
+                  </div>
+                </div>
+              ))}
+              <div className="settings-row settings-directory-row">
+                <div className="settings-row-copy"><strong>添加本地 Server</strong><small>参数每行一个，工作目录可留空。</small></div>
+                <div className="settings-mcp-form">
+                  <input placeholder="ID" value={mcpDraft.id} onChange={(event) => { const value = event.currentTarget.value; setMcpDraft((draft) => ({ ...draft, id: value })) }} />
+                  <input placeholder="名称" value={mcpDraft.name} onChange={(event) => { const value = event.currentTarget.value; setMcpDraft((draft) => ({ ...draft, name: value })) }} />
+                  <input placeholder="可执行文件" value={mcpDraft.command} onChange={(event) => { const value = event.currentTarget.value; setMcpDraft((draft) => ({ ...draft, command: value })) }} />
+                  <textarea placeholder="参数，每行一个" value={mcpDraft.args} onChange={(event) => { const value = event.currentTarget.value; setMcpDraft((draft) => ({ ...draft, args: value })) }} />
+                  <input placeholder="工作目录（可选）" value={mcpDraft.cwd} onChange={(event) => { const value = event.currentTarget.value; setMcpDraft((draft) => ({ ...draft, cwd: value })) }} />
+                  <label><input type="checkbox" checked={mcpDraft.enabled} onChange={(event) => { const value = event.currentTarget.checked; setMcpDraft((draft) => ({ ...draft, enabled: value })) }} />启用</label>
+                  <button type="button" className="quiet-button" disabled={disabled} onClick={() => void saveMcp()}>保存 Server</button>
+                </div>
+              </div>
+            </section>
           </>
         )}
         <div className="settings-feedback" id={statusId}>
@@ -158,6 +222,7 @@ export function SettingsPage({
               {error}
             </p>
           )}
+          {mcpError && <p className="settings-error" role="alert">{mcpError}</p>}
           {!settings && !loading && !saving && (
             <button type="button" className="quiet-button" onClick={() => void reload()}>
               重新读取

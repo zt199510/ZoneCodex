@@ -14,10 +14,14 @@ import { gitObservationAPI } from './git-observation-api'
 import { settingsAPI } from './settings-api'
 import { skillsAPI } from './skills-api'
 import { workbenchAPI } from './workbench-api'
+import { mcpAPI } from './mcp-api'
+import { modelAPI } from './model-api'
 
 // 分组实现同一个平铺业务接口，页面不直接使用 Node API。
 const api: AppAPI = {
+  ...modelAPI,
   ...workbenchAPI,
+  ...mcpAPI,
   ...conversationAPI,
   ...agentAPI,
   ...projectAPI,

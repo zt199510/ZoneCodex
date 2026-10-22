@@ -64,9 +64,15 @@
     "test:lesson62:desktop": "node scripts/checks/lesson62.mjs desktop",
     "test:lesson62:live": "node scripts/checks/lesson62.mjs live",
     "test:lesson62:list": "node scripts/checks/lesson62.mjs list",
+    "test:lesson63:offline": "node tests/lesson63/mcp-client-check.mjs",
+    "test:lesson63.1:offline": "node tests/lesson63.1/offline-check.mjs",
+    "test:lesson63:list": "node tests/lesson63/mcp-client-check.mjs",
     "test:workbench:core": "node tests/workbench/core-check.mjs && node tests/workbench/ipc-check.mjs",
     "test:workbench:desktop": "node tests/workbench/desktop-check.mjs --run",
-    "test:workbench:packaged": "node tests/workbench/desktop-check.mjs --run --packaged"
+    "test:workbench:packaged": "node tests/workbench/desktop-check.mjs --run --packaged",
+    "test:lesson64:offline": "node scripts/checks/lesson64.mjs offline",
+    "test:lesson64:desktop": "node scripts/checks/lesson64.mjs desktop",
+    "test:lesson64:list": "node scripts/checks/lesson64.mjs list"
   },
   "dependencies": {
     "@codemirror/commands": "^6.11.1",

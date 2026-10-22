@@ -63,7 +63,8 @@ if (offline) {
   const modelStub = `export function readModelConfiguration() { return { endpoint:'https://example.invalid/v1/responses', model:'gpt-6.1-sol', apiKey:'SYNTHETIC_ONLY' }; }
 export function createLiveResponse(tools) { return (input, signal) => globalThis.__lesson60CLI.send(tools.length ? 'main' : 'review', input, signal); }`
   const stubs = {
-    'response-client': modelStub,
+    'model-configuration': modelStub + `export const fixedResponsesConfiguration = (value) => value;`,
+    'responses-provider': modelStub.replace('createLiveResponse', 'createResponsesSender'),
     'context-summary': `export function createContextSummaryResponse() { return async () => { globalThis.__lesson60CLI.summary++; throw new Error('No summary permitted'); }; }`,
     'windows-command-backend': `export async function inspectWindowsCommandBackend() { return null; } export async function inspectCommandHost(){ return null; } export function verifyCommandHost(){ return false; } export function verifyWindowsCommandBackend(){ return false; }`,
     'command-runner': `export function startCommandProcess(){ globalThis.__lesson60CLI.command++; throw new Error('No process allowed'); }`

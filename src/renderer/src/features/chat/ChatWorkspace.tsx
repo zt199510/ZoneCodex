@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import type { ReactNode } from 'react'
 import type { ConversationController } from '../conversation/useConversation'
 import { MessageList } from './MessageList'
 import { ChatComposer } from './ChatComposer'
@@ -10,7 +11,6 @@ import { CommitReceipt } from '../review/CommitReceipt'
 import type { OpenFileView } from '../files/file-view-origin'
 import { ImagePreview } from '../project/ImagePreview'
 import type { ImageDescriptor } from '../../../../shared/image-input'
-import { agentResumeSafetyNotice } from '../../../../shared/agent-resume'
 import { ThreadSummaryPanel } from './ThreadSummaryPanel'
 import type { ThreadSummaryController } from './useThreadSummaryPanel'
 import type { ThreadSummarySource } from './thread-summary-sources'
@@ -22,13 +22,15 @@ export function ChatWorkspace({
   onOpenFile,
   summary,
   sources,
-  onShowAllSources
+  onShowAllSources,
+  toolbarActions
 }: {
   conversation: ConversationController
   onOpenFile: OpenFileView
   summary: ThreadSummaryController
   sources: ThreadSummarySource[]
   onShowAllSources: (trigger: HTMLButtonElement) => void
+  toolbarActions?: ReactNode
 }): React.JSX.Element {
   const {
     workspaceRef,
@@ -78,7 +80,8 @@ export function ChatWorkspace({
   const projectName = conversation.workspace.runtime?.label ?? conversation.workspace.saved?.label
   const projectDisabled =
     !conversation.canNavigate || conversation.skills.busy || Boolean(conversation.images?.busy)
-  const errors = [storage.error, conversation.chatError, conversation.workspace.error].filter(
+  const failedReply = [...messages].reverse().find((message) => message.role === 'assistant')?.status === 'failed'
+  const errors = [storage.error, failedReply ? null : conversation.chatError, conversation.workspace.error].filter(
     Boolean
   )
   return (
@@ -92,38 +95,25 @@ export function ChatWorkspace({
     >
       <header className="thread-toolbar" aria-label="会话工具栏">
         <div className="thread-toolbar-drag" aria-hidden="true" />
-        {summaryEnabled && (
-          <button
-            ref={summaryTriggerRef}
-            type="button"
-            className="thread-summary-toggle"
-            aria-label={summaryMode === 'overlay' ? '切换摘要' : '切换顶置摘要'}
-            title={summaryMode === 'overlay' ? '切换摘要' : '切换顶置摘要'}
-            aria-pressed={summaryVisible}
-            aria-expanded={summaryVisible}
-            aria-controls="thread-summary-panel"
-            onClick={toggleSummary}
-          >
-            <ThreadSummaryIcon />
-          </button>
-        )}
-      </header>
-      {conversation.resumableTask && (
-        <div className="task-resume-bar" role="status">
-          <span>
-            此会话有可继续的任务。继续时会重新核对目录和当前权限。{agentResumeSafetyNotice}
-            {conversation.resumableTask.skillName &&
-              ` 原任务技能：${conversation.resumableTask.skillName}。`}
-          </span>
-          <button
-            type="button"
-            disabled={!conversation.canSend}
-            onClick={() => conversation.resumeTask()}
-          >
-            继续此任务
-          </button>
+        <div className="thread-toolbar-actions">
+          {toolbarActions}
+          {summaryEnabled && (
+            <button
+              ref={summaryTriggerRef}
+              type="button"
+              className="thread-toolbar-button thread-summary-toggle"
+              aria-label={summaryMode === 'overlay' ? '切换摘要' : '切换顶置摘要'}
+              title={summaryMode === 'overlay' ? '切换摘要' : '切换顶置摘要'}
+              aria-pressed={summaryVisible}
+              aria-expanded={summaryVisible}
+              aria-controls="thread-summary-panel"
+              onClick={toggleSummary}
+            >
+              <ThreadSummaryIcon />
+            </button>
+          )}
         </div>
-      )}
+      </header>
       {errors.length > 0 && (
         <div className="error-banner" role="alert">
           {errors.map((error, index) => (
@@ -161,6 +151,7 @@ export function ChatWorkspace({
               commandSnapshotId={conversation.contextSelection?.snapshotId ?? null}
               onOpenCommand={openCommand}
               messages={messages}
+              requestError={conversation.chatError}
               toolActivity={conversation.toolActivity}
               toolRuns={conversation.toolRuns}
               pendingPlanQuestion={conversation.pendingPlanQuestion}

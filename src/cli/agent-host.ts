@@ -9,7 +9,7 @@ import { parseAgentUserInputRequest, parseAgentUserInputResult } from '../shared
 import { runAgentCore } from '../main/agent/agent-core'
 import { createAgentRuntime, createAgentRuntimeTools } from '../main/agent/agent-runtime'
 import { readProjectInstruction } from '../main/project/project-instruction'
-import { readModelConfiguration } from '../main/model/response-client'
+import { createModelSession, assertModelInput } from '../main/model/model-session'
 import { createApprovalReviewer } from '../main/execution/approval-reviewer'
 import type { ExecutionContext } from '../main/execution/execution-context-policy'
 import {
@@ -154,9 +154,10 @@ export async function runAgentTask(
     throw new CLIInputError('审批或计划问答回调无效')
   const directories = [directory(cwd ?? process.cwd())]
   if (workspace !== undefined) directories.push(directory(workspace))
-  let configuration: ReturnType<typeof readModelConfiguration>
+  let modelSession: ReturnType<typeof createModelSession>
   try {
-    configuration = readModelConfiguration()
+    modelSession = createModelSession()
+    assertModelInput(modelSession, false, Boolean(loaded))
   } catch (cause) {
     throw new CLIInputError(cause instanceof Error ? cause.message : '模型配置无效')
   }
@@ -253,7 +254,7 @@ export async function runAgentTask(
       writableRoots: Object.freeze([directories[0].canonical])
     })
     const workspaceId = workspace === undefined ? undefined : randomUUID()
-    const backend = await inspectWindowsCommandBackend(runtimeRoot)
+    const backend = modelSession.capabilities.tools ? await inspectWindowsCommandBackend(runtimeRoot) : null
     controller.signal.throwIfAborted()
     const scope = {
       kind: 'time' as const,
@@ -317,7 +318,7 @@ export async function runAgentTask(
       latestRaw = structuredClone(history)
     }
     const runtime = createAgentRuntime({
-      configuration,
+      session: modelSession,
       capabilities: {
         mode,
         execution: execution.info,
@@ -335,7 +336,7 @@ export async function runAgentTask(
         commandSandboxAvailable: backend !== null
       }
     })
-    const reviewApproval = createApprovalReviewer(configuration)
+    const reviewApproval = createApprovalReviewer(modelSession)
     const outcome = await runAgentCore(
       {
         requestId,
@@ -351,7 +352,7 @@ export async function runAgentTask(
         ...runtime,
         assertCurrent,
         startedAt,
-        transportLabel: '普通 Node 真实模型 SSE',
+        transportLabel: `普通 Node ${modelSession.label}`,
         onRawCheckpoint: checkpointFile
           ? (history, summary, completed) =>
               persist(

@@ -27,6 +27,8 @@ export function createLiveResponse() { return (...args) => globalThis.__lesson57
 // Shared runtime resolves these same adapters from main/agent rather than cli.
 fixtureSources['../model/response-client'] = fixtureSources['../main/model/response-client']
 fixtureSources['../model/context-summary'] = fixtureSources['../main/model/context-summary']
+fixtureSources['./model-configuration'] = fixtureSources['../main/model/response-client'] + `export const fixedResponsesConfiguration = (value) => value;`
+fixtureSources['./responses-provider'] = fixtureSources['../main/model/response-client'].replace('createLiveResponse', 'createResponsesSender')
 const bundle = await build({
   absWorkingDir: root,
   entryPoints: ['src/cli/agent-host.ts'],

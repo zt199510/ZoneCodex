@@ -80,12 +80,24 @@ import type {
   SkillMessageResult,
   SkillPreparationResult
 } from './skills'
+import type { McpServerConfig, McpServerStatus } from './mcp'
+import type { ModelStatus } from './model'
 
 // 正式聊天与 Agent 共用的流式文字增量事件。
 export type StreamDelta = AgentDelta
 
 // 应用 API 接口类型
 export interface AppAPI extends GitPullRequestAPI, WorkbenchAPI {
+  getModelStatus: () => Promise<ModelStatus>
+  listMcpServers: () => Promise<McpServerStatus[]>
+  listMcpConfigs: () => Promise<McpServerConfig[]>
+  upsertMcpServer: (config: McpServerConfig) => Promise<McpServerConfig>
+  setMcpServerEnabled: (id: string, enabled: boolean) => Promise<McpServerStatus>
+  removeMcpServer: (id: string) => Promise<boolean>
+  connectMcpServer: (id: string) => Promise<McpServerStatus>
+  disconnectMcpServer: (id: string) => Promise<boolean>
+  refreshMcpServer: (id: string) => Promise<McpServerStatus>
+  onMcpStatus: (listener: (status: McpServerStatus) => void) => () => void
   listSkills: (conversationId: string) => Promise<SkillListResult>
   prepareSkill: (
     conversationId: string,

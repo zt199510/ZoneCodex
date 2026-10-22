@@ -157,6 +157,23 @@
   background: var(--surface);
 }
 
+.settings-mcp-form {
+  display: grid;
+  gap: 6px;
+  min-width: min(360px, 100%);
+}
+
+.settings-mcp-form input,
+.settings-mcp-form textarea {
+  width: 100%;
+  border: 1px solid var(--border-subtle, #d7d7d7);
+  border-radius: 6px;
+  padding: 6px 8px;
+  font: inherit;
+}
+
+.settings-mcp-form textarea { min-height: 54px; resize: vertical; }
+
 .settings-feedback {
   display: grid;
   gap: 8px;

@@ -2,14 +2,19 @@
   "pass": true,
   "stage": "development",
   "packaged": false,
-  "evidence": "D:\\AiTools\\ZoneCodex\\ZoneCodex\\.ui-check\\workbench-ui\\development-67fd12cd-db0c-459f-baba-67ed766ae856",
-  "userData": "C:\\Users\\Administrator\\AppData\\Local\\Temp\\zc-panel-6aNFgm",
+  "evidence": "D:\\AiTools\\ZoneCodex\\ZoneCodex\\.ui-check\\workbench-ui\\development-0f0713cc-59d4-4f7f-b783-23e886478226",
+  "userData": "C:\\Users\\Administrator\\AppData\\Local\\Temp\\zc-panel-Rpjo09",
   "actualElectron": true,
   "actualDiskStorage": true,
   "actualUIInput": "Trusted CDP mouse/key/text input for the app; guest page fixture actions use executeJavaScript with a user gesture. Shell writes are real IPC commands, observed separately by session ID. Responsive dimensions are explicitly emulated. Main inspector supplies isolated userData, cancels the directory chooser, observes IPC, and closes only this owned app.",
   "syntheticData": "Two self-authored conversation records, one sample skill header, and a local HTTP fixture. Files, native browser guests, storage and two shells are real. No model is invoked.",
   "modelNetwork": "Main fetch is blocked/counted before app initialization; zero model submission or external URL opening is allowed.",
   "checks": [
+    {
+      "name": "Workbench launcher and chat summary controls have separate hit areas",
+      "pass": true,
+      "topControls": null
+    },
     {
       "name": "Chat/split/full and responsive fallback preserve a single input and its draft",
       "pass": true
@@ -87,13 +92,13 @@
   "processes": [
     {
       "stage": "development",
-      "pid": 3500,
+      "pid": 43924,
       "args": [
         "D:\\AiTools\\ZoneCodex\\ZoneCodex\\out\\main\\index.js",
-        "--user-data-dir=C:\\Users\\Administrator\\AppData\\Local\\Temp\\zc-panel-6aNFgm",
-        "--inspect-brk=127.0.0.1:51091",
+        "--user-data-dir=C:\\Users\\Administrator\\AppData\\Local\\Temp\\zc-panel-Rpjo09",
+        "--inspect-brk=127.0.0.1:58581",
         "--remote-debugging-address=127.0.0.1",
-        "--remote-debugging-port=51092",
+        "--remote-debugging-port=58582",
         "--disable-gpu",
         "--disable-gpu-compositing",
         "--in-process-gpu"
@@ -103,13 +108,13 @@
     },
     {
       "stage": "development",
-      "pid": 40452,
+      "pid": 20828,
       "args": [
         "D:\\AiTools\\ZoneCodex\\ZoneCodex\\out\\main\\index.js",
-        "--user-data-dir=C:\\Users\\Administrator\\AppData\\Local\\Temp\\zc-panel-6aNFgm",
-        "--inspect-brk=127.0.0.1:61988",
+        "--user-data-dir=C:\\Users\\Administrator\\AppData\\Local\\Temp\\zc-panel-Rpjo09",
+        "--inspect-brk=127.0.0.1:62906",
         "--remote-debugging-address=127.0.0.1",
-        "--remote-debugging-port=61989",
+        "--remote-debugging-port=62907",
         "--disable-gpu",
         "--disable-gpu-compositing",
         "--in-process-gpu"
@@ -119,18 +124,18 @@
     }
   ],
   "screenshots": [
-    "D:\\AiTools\\ZoneCodex\\ZoneCodex\\.ui-check\\workbench-ui\\development-67fd12cd-db0c-459f-baba-67ed766ae856\\01-split-tools.png",
-    "D:\\AiTools\\ZoneCodex\\ZoneCodex\\.ui-check\\workbench-ui\\development-67fd12cd-db0c-459f-baba-67ed766ae856\\02-full-tools.png",
-    "D:\\AiTools\\ZoneCodex\\ZoneCodex\\.ui-check\\workbench-ui\\development-67fd12cd-db0c-459f-baba-67ed766ae856\\03-narrow-full.png",
-    "D:\\AiTools\\ZoneCodex\\ZoneCodex\\.ui-check\\workbench-ui\\development-67fd12cd-db0c-459f-baba-67ed766ae856\\10-git-workbench.png",
-    "D:\\AiTools\\ZoneCodex\\ZoneCodex\\.ui-check\\workbench-ui\\development-67fd12cd-db0c-459f-baba-67ed766ae856\\11-sources.png",
-    "D:\\AiTools\\ZoneCodex\\ZoneCodex\\.ui-check\\workbench-ui\\development-67fd12cd-db0c-459f-baba-67ed766ae856\\04-file-editor.png",
-    "D:\\AiTools\\ZoneCodex\\ZoneCodex\\.ui-check\\workbench-ui\\development-67fd12cd-db0c-459f-baba-67ed766ae856\\05-external-conflict.png",
-    "D:\\AiTools\\ZoneCodex\\ZoneCodex\\.ui-check\\workbench-ui\\development-67fd12cd-db0c-459f-baba-67ed766ae856\\06-native-browser.png",
-    "D:\\AiTools\\ZoneCodex\\ZoneCodex\\.ui-check\\workbench-ui\\development-67fd12cd-db0c-459f-baba-67ed766ae856\\07-multiple-terminals.png",
-    "D:\\AiTools\\ZoneCodex\\ZoneCodex\\.ui-check\\workbench-ui\\development-67fd12cd-db0c-459f-baba-67ed766ae856\\09-readonly-snapshot.png",
-    "D:\\AiTools\\ZoneCodex\\ZoneCodex\\.ui-check\\workbench-ui\\development-67fd12cd-db0c-459f-baba-67ed766ae856\\12-narrow-long-title.png",
-    "D:\\AiTools\\ZoneCodex\\ZoneCodex\\.ui-check\\workbench-ui\\development-67fd12cd-db0c-459f-baba-67ed766ae856\\08-restored-draft.png"
+    "D:\\AiTools\\ZoneCodex\\ZoneCodex\\.ui-check\\workbench-ui\\development-0f0713cc-59d4-4f7f-b783-23e886478226\\01-split-tools.png",
+    "D:\\AiTools\\ZoneCodex\\ZoneCodex\\.ui-check\\workbench-ui\\development-0f0713cc-59d4-4f7f-b783-23e886478226\\02-full-tools.png",
+    "D:\\AiTools\\ZoneCodex\\ZoneCodex\\.ui-check\\workbench-ui\\development-0f0713cc-59d4-4f7f-b783-23e886478226\\03-narrow-full.png",
+    "D:\\AiTools\\ZoneCodex\\ZoneCodex\\.ui-check\\workbench-ui\\development-0f0713cc-59d4-4f7f-b783-23e886478226\\10-git-workbench.png",
+    "D:\\AiTools\\ZoneCodex\\ZoneCodex\\.ui-check\\workbench-ui\\development-0f0713cc-59d4-4f7f-b783-23e886478226\\11-sources.png",
+    "D:\\AiTools\\ZoneCodex\\ZoneCodex\\.ui-check\\workbench-ui\\development-0f0713cc-59d4-4f7f-b783-23e886478226\\04-file-editor.png",
+    "D:\\AiTools\\ZoneCodex\\ZoneCodex\\.ui-check\\workbench-ui\\development-0f0713cc-59d4-4f7f-b783-23e886478226\\05-external-conflict.png",
+    "D:\\AiTools\\ZoneCodex\\ZoneCodex\\.ui-check\\workbench-ui\\development-0f0713cc-59d4-4f7f-b783-23e886478226\\06-native-browser.png",
+    "D:\\AiTools\\ZoneCodex\\ZoneCodex\\.ui-check\\workbench-ui\\development-0f0713cc-59d4-4f7f-b783-23e886478226\\07-multiple-terminals.png",
+    "D:\\AiTools\\ZoneCodex\\ZoneCodex\\.ui-check\\workbench-ui\\development-0f0713cc-59d4-4f7f-b783-23e886478226\\09-readonly-snapshot.png",
+    "D:\\AiTools\\ZoneCodex\\ZoneCodex\\.ui-check\\workbench-ui\\development-0f0713cc-59d4-4f7f-b783-23e886478226\\12-narrow-long-title.png",
+    "D:\\AiTools\\ZoneCodex\\ZoneCodex\\.ui-check\\workbench-ui\\development-0f0713cc-59d4-4f7f-b783-23e886478226\\08-restored-draft.png"
   ],
   "notCovered": [
     "No model, external websites, native chooser, clipboard or IME acceptance. Guest DOM actions explicitly use executeJavaScript with a user gesture; the tab reorder uses a synthetic DataTransfer. No pixel equality claim against upstream Codex."
@@ -138,7 +143,7 @@
   "artifactBefore": {
     "out/main/index.js": "3854d2d5f7ac5b3e875dd9a20f925f86a082beb73c4f6dc65a10c5b9fd14136d",
     "out/preload/index.js": "2914838914a5208175b197f224e0034b01c82536ab7b552e68aaf94017b539e7",
-    "out/renderer/index.html": "094128a82f5ae27a0f78bd76647b9e23027fb46f427ea507cc800a14137797c9"
+    "out/renderer/index.html": "8d70836a92cb070442d4a331bd6fb736a67855baa188fca2f131705d99816d20"
   },
   "divider": {
     "beforeWidth": 600,
@@ -152,16 +157,16 @@
       "title": "about:blank"
     },
     {
-      "url": "http://127.0.0.1:51090/",
+      "url": "http://127.0.0.1:58580/",
       "title": "本地测试网页"
     },
     {
-      "url": "http://127.0.0.1:51090/two",
+      "url": "http://127.0.0.1:58580/two",
       "title": "第二页"
     }
   ],
   "browserAfterBack": {
-    "url": "http://127.0.0.1:51090/",
+    "url": "http://127.0.0.1:58580/",
     "index": 1
   },
   "popupPreferences": {
@@ -180,39 +185,39 @@
     "webSecurity": true,
     "webviewTag": false
   },
-  "popupAttributes": "<webview src=\"http://127.0.0.1:51090/\" allowpopups=\"\" partition=\"persist:zonecodex-browser-71affbd8b7a486b3343bc9febe4626301ce100057dcdc5dae7e2c14772330886\" class=\"panel-browser-webview\"></webview>",
+  "popupAttributes": "<webview src=\"http://127.0.0.1:58580/\" allowpopups=\"\" partition=\"persist:zonecodex-browser-c370d37934122998171a3662d303708448a826b5c6c1a17c6fc3d788e731f8ad\" class=\"panel-browser-webview\"></webview>",
   "popupResult": false,
   "popupObserved": [
     {
       "title": "sample.ts",
-      "id": "67c9c39c-5343-42f9-aea9-c6a508f1f154"
+      "id": "d3820440-09e9-4e62-b47a-8257eb8be2a4"
     },
     {
       "title": "文件",
-      "id": "ed7659c6-a7d9-46ae-a91f-c527bcced072"
+      "id": "a4141a8a-a898-4678-8ce7-55831312404a"
     },
     {
       "title": "本地测试网页",
-      "id": "d7b7a1e7-7041-46e3-be76-446eb03b928b"
+      "id": "b97ce852-0def-4027-992c-d5bc173ea911"
     },
     {
       "title": "本地测试网页",
-      "id": "4257a306-7e88-419f-bda7-feb4a6c674e9"
+      "id": "c06ed53f-eb91-44be-8bc3-e6b9c0faa5ed"
     }
   ],
   "terminalOutput": {
-    "02685eac-b206-43f3-9eec-8c451c9c64b4": "\u001b[?9001h\u001b[?1004h\u001b[?25l\u001b[2J\u001b[m\u001b[H\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\u001b[H\u001b]0;C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe\u0007\u001b[?25hPS C:\\Users\\Administrator\\AppData\\Local\\Temp\\zc-panel-6aNFgm\\chats\\4f0cd385-55b4-448f-b84b-5651b12a6d12\\workspace> \u001b[?25l\u001b[91m\u001b[2;26H> \u001b[93mWrite-Output \u001b[36m\"WORKBENCH_4de8b084-40c1-4530-987d-5e47d        \u001b[m\u001b[2;26H> \u001b[93mWrite-Output \u001b[36m\"WORKBENCH_4de8b084-40c1-4530-987d-5e47df8b5123\"\u001b[4;1H\u001b[?25h\u001b[mWORKBENCH_4de8b084-40c1-4530-987d-5e47df8b5123\r\nPS C:\\Users\\Administrator\\AppData\\Local\\Temp\\zc-panel-6aNFgm\\chats\\4f0cd385-55b4-448f-b84b-5651b12a6d12\\workspace> ",
-    "4e3de629-80ec-4874-9897-72af52274a73": "\u001b[?9001h\u001b[?1004h\u001b[?25l\u001b[2J\u001b[m\u001b[H\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\u001b[H\u001b]0;C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe\u0007\u001b[?25hPS C:\\Users\\Administrator\\AppData\\Local\\Temp\\zc-panel-6aNFgm\\chats\\4f0cd385-55b4-448f-b84b-5651b12a6d12\\workspace> \u001b[?25l\u001b[93mW\u001b[97m\u001b[2m\u001b[3mrite-Output \"WORKBENCH_4de8b084-40c1-4530-987d-5e47df8b5123\"\u001b[2;29H\u001b[?25h\u001b[?25l\u001b[m\u001b[2;26H> \u001b[93mWrite-Output \u001b[36m\"WORKBENCH_ad8f1877-ba40-49c5-81fe-49d63c9fd983\"\u001b[4;1H\u001b[?25h"
+    "d26c6aba-c504-4b3d-a486-9f565fdf5f4d": "\u001b[?9001h\u001b[?1004h\u001b[?25l\u001b[2J\u001b[m\u001b[H\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\u001b[H\u001b]0;C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe\u0007\u001b[?25hPS C:\\Users\\Administrator\\AppData\\Local\\Temp\\zc-panel-Rpjo09\\chats\\77d5c15c-3e9a-412a-8dad-0b5916fab53e\\workspace> \u001b[?25l\u001b[93mW\u001b[97m\u001b[2m\u001b[3mrite-Output \"WORKBENCH_f3dc0641-80c7-48f2-a75c-e9a3095598a2\"\u001b[2;29H\u001b[?25h\u001b[?25l\u001b[m\u001b[2;26H> \u001b[93mWrite-Output \u001b[36m\"WORKBENCH_5d794d02-2df5-4355-9e98-f390b60d8d17\"\u001b[4;1H\u001b[?25h\u001b[mWORKBENCH_5d794d02-2df5-4355-9e98-f390b60d8d17\r\nPS C:\\Users\\Administrator\\AppData\\Local\\Temp\\zc-panel-Rpjo09\\chats\\77d5c15c-3e9a-412a-8dad-0b5916fab53e\\workspace> ",
+    "fb25106d-6e55-4901-bf33-57132d1e0749": "\u001b[?9001h\u001b[?1004h\u001b[?25l\u001b[2J\u001b[m\u001b[H\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\u001b[H\u001b]0;C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe\u0007\u001b[?25hPS C:\\Users\\Administrator\\AppData\\Local\\Temp\\zc-panel-Rpjo09\\chats\\77d5c15c-3e9a-412a-8dad-0b5916fab53e\\workspace> \u001b[?25l\u001b[93mW\u001b[97m\u001b[2m\u001b[3mrite-Output \"WORKBENCH_5d794d02-2df5-4355-9e98-f390b60d8d17\"\u001b[2;29H\u001b[?25h\u001b[?25l\u001b[m\u001b[2;26H> \u001b[93mWrite-Output \u001b[36m\"WORKBENCH_3314dfa0-89c2-4955-80a9-22eea8c5d8d8\"\u001b[4;1H\u001b[?25h"
   },
   "snapshotSelection": {
     "status": "selected",
     "selection": {
-      "snapshotId": "0e3f3798-3e65-475f-a30a-a67f88126aac",
+      "snapshotId": "1ed99daa-eb85-4573-a797-a903b610ad1f",
       "label": "已选附件",
-      "createdAt": "2026-10-14T14:22:22.777Z",
+      "createdAt": "2026-10-14T14:46:44.506Z",
       "files": [
         {
-          "path": "file-02b68b6a-62ad-4371-b6ed-20f137a57ebd/snapshot.ts",
+          "path": "file-a7d60827-9d82-4289-8a0e-8b9eff822e15/snapshot.ts",
           "bytes": 22,
           "lines": 2
         }
@@ -223,6 +228,6 @@
   "artifactAfter": {
     "out/main/index.js": "3854d2d5f7ac5b3e875dd9a20f925f86a082beb73c4f6dc65a10c5b9fd14136d",
     "out/preload/index.js": "2914838914a5208175b197f224e0034b01c82536ab7b552e68aaf94017b539e7",
-    "out/renderer/index.html": "094128a82f5ae27a0f78bd76647b9e23027fb46f427ea507cc800a14137797c9"
+    "out/renderer/index.html": "8d70836a92cb070442d4a331bd6fb736a67855baa188fca2f131705d99816d20"
   }
 }

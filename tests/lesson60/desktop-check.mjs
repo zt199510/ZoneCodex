@@ -1230,7 +1230,7 @@ try {
     await idle()
     await waitTask(stoppedStart, 'cancelled')
     await until(
-      () => evaluate('!!document.querySelector(".task-resume-bar button")'),
+      () => evaluate('!!document.querySelector(".task-resume-button")'),
       'actual resumable checkpoint control'
     )
     originalSnapshot = await save()
@@ -1301,7 +1301,7 @@ try {
     assert.equal(await api('getPendingAgentUserInput'), null)
     assert.ok((await api('listTasks')).every((task) => terminalStatuses.includes(task.status)))
     await until(
-      () => evaluate('!!document.querySelector(".task-resume-bar button")'),
+      () => evaluate('!!document.querySelector(".task-resume-button")'),
       'passive resume display'
     )
     await click('.conversation-item[title="第60课被动切换对照"]')
@@ -1309,7 +1309,7 @@ try {
     await click('.conversation-item[title="第60课隔离一致性"]')
     await idle()
     await until(
-      () => evaluate('!!document.querySelector(".task-resume-bar button")'),
+      () => evaluate('!!document.querySelector(".task-resume-button")'),
       'passive return resume display'
     )
     await openTerminal()
@@ -1335,7 +1335,7 @@ try {
     assert.deepEqual(current, { mode: 'auto-approve', revision: 1 })
     assert.equal((await audit()).requests.length, 0)
     await configure({ scenario: { name: 'resume' } })
-    await click('.task-resume-bar button')
+    await click('.task-resume-button')
     await until(
       async () => (await audit()).ipc.some((item) => item.channel === 'agent:resume'),
       'explicit real resume IPC'

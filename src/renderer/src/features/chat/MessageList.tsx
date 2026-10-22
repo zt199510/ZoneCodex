@@ -26,6 +26,7 @@ import {
 
 export function MessageList({
   messages,
+  requestError,
   commandProposals = {},
   commandSnapshotId = null,
   onOpenCommand,
@@ -51,6 +52,7 @@ export function MessageList({
   onPreviewImage
 }: {
   messages: readonly ChatMessage[]
+  requestError?: string | null
   commandProposals?: Readonly<Record<string, MessageCommandProposal>>
   commandSnapshotId?: string | null
   onOpenCommand?: (proposal: MessageCommandProposal, trigger: HTMLButtonElement) => void
@@ -281,11 +283,11 @@ export function MessageList({
                 )}
               </div>
             )}
-            {message.status === 'failed' && (
-              <span className="message-note message-warning">本轮失败 · 不计入后续上下文</span>
+            {message.role === 'assistant' && message.status === 'failed' && (
+              <span className="message-note message-warning" title={message.id === latestMessage?.id ? requestError ?? undefined : undefined}>回复失败</span>
             )}
-            {message.status === 'cancelled' && (
-              <span className="message-note">已停止 · 不计入后续上下文</span>
+            {message.role === 'assistant' && message.status === 'cancelled' && (
+              <span className="message-note">已停止</span>
             )}
             {proposal && (
               <MessageChangeProposalCard

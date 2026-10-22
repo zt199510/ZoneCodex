@@ -172,7 +172,7 @@ await check('主与摘要固定同配置、空工具表、摘要流隔离', asyn
     else process.env.MODEL_NAME = oldModel
   }
 })
-await check('缺配置明确拒绝', () => assert.throws(() => api.readModelConfiguration({})))
+await check('缺配置进入明确离线模式，缺项仍拒绝', () => { assert.deepEqual(api.readModelConfiguration({}), { provider: 'offline' }); assert.throws(() => api.readModelConfiguration({ MODEL_NAME: 'partial' })) })
 const result = {
   pass: checks.every((item) => item.pass),
   layer: 'synthetic transport and image captures; no live pixels or network',
